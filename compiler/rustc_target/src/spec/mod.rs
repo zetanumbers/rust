@@ -970,6 +970,9 @@ supported_targets! {
     ("armv7a-none-eabi", armv7a_none_eabi),
     ("armv7a-none-eabihf", armv7a_none_eabihf),
 
+    ("armv7-vitasdk-psvita-newlib", armv7_vitasdk_psvita_newlib),
+    ("mipsel-sony-psp", mipsel_sony_psp),
+
     ("msp430-none-elf", msp430_none_elf),
 
     ("aarch64-unknown-hermit", aarch64_unknown_hermit),
@@ -1010,7 +1013,6 @@ supported_targets! {
     ("armv7a-kmc-solid_asp3-eabi", armv7a_kmc_solid_asp3_eabi),
     ("armv7a-kmc-solid_asp3-eabihf", armv7a_kmc_solid_asp3_eabihf),
 
-    ("mipsel-sony-psp", mipsel_sony_psp),
     ("mipsel-unknown-none", mipsel_unknown_none),
     ("thumbv4t-none-eabi", thumbv4t_none_eabi),
 
