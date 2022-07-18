@@ -1022,7 +1022,6 @@ supported_targets! {
     ("armv7a-kmc-solid_asp3-eabi", armv7a_kmc_solid_asp3_eabi),
     ("armv7a-kmc-solid_asp3-eabihf", armv7a_kmc_solid_asp3_eabihf),
 
-    ("mipsel-sony-psp", mipsel_sony_psp),
     ("mipsel-unknown-none", mipsel_unknown_none),
     ("thumbv4t-none-eabi", thumbv4t_none_eabi),
 
@@ -1032,6 +1031,9 @@ supported_targets! {
 
     ("bpfeb-unknown-none", bpfeb_unknown_none),
     ("bpfel-unknown-none", bpfel_unknown_none),
+
+    ("mipsel-sony-psp", mipsel_sony_psp),
+    ("armv7a-sony-psvita", armv7a_sony_psvita),
 
     ("armv6k-nintendo-3ds", armv6k_nintendo_3ds),
 
