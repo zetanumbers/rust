@@ -1,7 +1,7 @@
-ENTRY(_start)
+ENTRY(module_start)
 SECTIONS
 {
-  /* SCE ELF format requires text to begin at 0x81000000 */
+  /* Sony ELF format requirement */
   .text 0x81000000 : { *(.text .text.*) }
 
   .ARM.exidx ALIGN(0x10000) : {
@@ -19,5 +19,10 @@ SECTIONS
     KEEP(*(.eh_frame))
     *(.eh_frame.*)
     __eh_frame_end = .;
+  }
+
+  .rodata : {
+    KEEP(*(.rodata.SceModuleInfo))
+    *(.rodata .rodata.*)
   }
 }

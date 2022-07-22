@@ -21,7 +21,7 @@ pub fn target() -> Target {
             max_atomic_width: Some(64),
             panic_strategy: PanicStrategy::Abort,
             executables: true,
-            linker: Some("rust-lld".into()),
+            linker: Some("lld".into()),
             relocation_model: RelocModel::DynamicNoPic,
 
             features: "+v7,+vfp3,-d32,+thumb2,+neon,+strict-align".into(),
