@@ -1,66 +1,93 @@
-use crate::cell::Cell;
+use crate::sys::{cvt_nz, cvt_uid, AtomicUID, UID};
+use crate::{ptr, sync::atomic};
 
 pub struct RwLock {
-    // This platform has no threads, so we can use a Cell here.
-    mode: Cell<isize>,
+    uid: AtomicUID,
 }
 
 pub type MovableRwLock = RwLock;
 
-unsafe impl Send for RwLock {}
-unsafe impl Sync for RwLock {} // no threads on this platform
-
 impl RwLock {
     #[inline]
     pub const fn new() -> RwLock {
-        RwLock { mode: Cell::new(0) }
+        RwLock { uid: AtomicUID::new(0) }
+    }
+
+    #[inline]
+    fn init_once(&self) -> UID {
+        self.try_get().unwrap_or_else(|| self.start_init())
+    }
+
+    #[inline]
+    fn try_get(&self) -> Option<UID> {
+        let rwlock = self.uid.load(atomic::Ordering::Acquire);
+        UID::new(rwlock)
+    }
+
+    #[cold]
+    fn start_init(&self) -> UID {
+        let rwlock = Self::create_inner();
+        match self.uid.compare_exchange(
+            0,
+            rwlock.get(),
+            atomic::Ordering::AcqRel,
+            atomic::Ordering::Acquire,
+        ) {
+            Ok(_) => rwlock,
+            Err(older) => {
+                cvt_nz(unsafe { libc::sceKernelDeleteRWLock(rwlock.get()) }).unwrap();
+                UID::new(older).unwrap()
+            }
+        }
+    }
+
+    #[inline]
+    fn create_inner() -> UID {
+        const NAME: &str = "rust/std\0";
+        cvt_uid(unsafe { libc::sceKernelCreateRWLock(NAME.as_ptr().cast(), 0, ptr::null()) })
+            .unwrap()
+            .unwrap()
     }
 
     #[inline]
     pub unsafe fn read(&self) {
-        let m = self.mode.get();
-        if m >= 0 {
-            self.mode.set(m + 1);
-        } else {
-            rtabort!("rwlock locked for writing");
-        }
+        let uid = self.init_once();
+        cvt_nz(unsafe { libc::sceKernelLockReadRWLock(uid.get(), ptr::null_mut()) }).unwrap();
     }
 
     #[inline]
     pub unsafe fn try_read(&self) -> bool {
-        let m = self.mode.get();
-        if m >= 0 {
-            self.mode.set(m + 1);
-            true
-        } else {
-            false
-        }
+        let uid = self.init_once();
+        0 == unsafe { libc::sceKernelTryLockReadRWLock(uid.get()) }
     }
 
     #[inline]
     pub unsafe fn write(&self) {
-        if self.mode.replace(-1) != 0 {
-            rtabort!("rwlock locked for reading")
-        }
+        let uid = self.init_once();
+        cvt_nz(unsafe { libc::sceKernelLockWriteRWLock(uid.get(), ptr::null_mut()) }).unwrap();
     }
 
     #[inline]
     pub unsafe fn try_write(&self) -> bool {
-        if self.mode.get() == 0 {
-            self.mode.set(-1);
-            true
-        } else {
-            false
-        }
+        let uid = self.init_once();
+        0 == unsafe { libc::sceKernelTryLockWriteRWLock(uid.get()) }
     }
 
     #[inline]
     pub unsafe fn read_unlock(&self) {
-        self.mode.set(self.mode.get() - 1);
+        if let Some(uid) = self.try_get() {
+            cvt_nz(unsafe { libc::sceKernelUnlockReadRWLock(uid.get()) }).unwrap();
+        } else {
+            panic!("Trying to read_unlock uninitialized RwLock");
+        }
     }
 
     #[inline]
     pub unsafe fn write_unlock(&self) {
-        assert_eq!(self.mode.replace(0), -1);
+        if let Some(uid) = self.try_get() {
+            cvt_nz(unsafe { libc::sceKernelUnlockWriteRWLock(uid.get()) }).unwrap();
+        } else {
+            panic!("Trying to write_unlock uninitialized RwLock");
+        }
     }
 }

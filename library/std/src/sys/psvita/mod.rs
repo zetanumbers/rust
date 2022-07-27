@@ -25,3 +25,14 @@ pub mod time;
 
 mod common;
 pub use common::*;
+
+pub type UID = crate::num::NonZeroI32;
+pub type AtomicUID = crate::sync::atomic::AtomicI32;
+
+pub fn cvt_uid(ret: libc::c_int) -> crate::io::Result<Option<UID>> {
+    if ret >= 0 { Ok(UID::new(ret)) } else { Err(crate::io::Error::from_raw_os_error(ret)) }
+}
+
+pub fn cvt_nz(ret: libc::c_int) -> crate::io::Result<()> {
+    if ret == 0 { Ok(()) } else { Err(crate::io::Error::from_raw_os_error(ret)) }
+}
