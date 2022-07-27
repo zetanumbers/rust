@@ -1,4 +1,4 @@
-use crate::ptr;
+use crate::ptr::{self, NonNull};
 use crate::sync::atomic::{self, AtomicPtr};
 
 pub type MovableMutex = Mutex;
@@ -20,42 +20,48 @@ impl Mutex {
 
     #[inline]
     pub unsafe fn init(&mut self) {
-        *self.inner.get_mut() = Self::create_inner();
+        *self.inner.get_mut() = Self::create_inner().as_ptr();
     }
 
     #[inline]
-    fn init_once(&self) -> libc::mtx_t {
+    fn try_get(&self) -> Option<NonNull<libc::mtx_impl_t>> {
         let mutex = self.inner.load(atomic::Ordering::Acquire);
-        if mutex.is_null() { self.start_init() } else { mutex }
+        NonNull::new(mutex)
+    }
+
+    #[inline]
+    fn init_once(&self) -> NonNull<libc::mtx_impl_t> {
+        self.try_get().unwrap_or_else(|| self.start_init())
     }
 
     #[cold]
-    fn start_init(&self) -> libc::mtx_t {
-        let mut mutex = Self::create_inner();
+    fn start_init(&self) -> NonNull<libc::mtx_impl_t> {
+        let mutex = Self::create_inner();
         match self.inner.compare_exchange(
             ptr::null_mut(),
-            mutex,
+            mutex.as_ptr(),
             atomic::Ordering::AcqRel,
             atomic::Ordering::Acquire,
         ) {
             Ok(_) => mutex,
             Err(older_mutex) => {
+                let mut mutex = mutex.as_ptr();
                 unsafe { libc::mtx_destroy(&mut mutex) }
-                older_mutex
+                NonNull::new(older_mutex).unwrap()
             }
         }
     }
 
     #[inline]
-    fn create_inner() -> libc::mtx_t {
+    fn create_inner() -> NonNull<libc::mtx_impl_t> {
         let mut mutex = ptr::null_mut();
         assert_eq!(libc::thrd_success, unsafe { libc::mtx_init(&mut mutex, libc::mtx_plain) });
-        mutex
+        NonNull::new(mutex).unwrap()
     }
 
     #[inline]
     pub unsafe fn lock(&self) {
-        let mut mutex = self.init_once();
+        let mut mutex = self.init_once().as_ptr();
         assert_eq!(
             libc::thrd_success,
             unsafe { libc::mtx_lock(&mut mutex) },
@@ -65,18 +71,18 @@ impl Mutex {
 
     #[inline]
     pub unsafe fn unlock(&self) {
-        let mut mutex = self.init_once();
-        assert_eq!(libc::thrd_success, unsafe { libc::mtx_unlock(&mut mutex) });
+        if let Some(mutex) = self.try_get() {
+            let mut mutex = mutex.as_ptr();
+            assert_eq!(libc::thrd_success, unsafe { libc::mtx_unlock(&mut mutex) });
+        } else {
+            panic!("Trying to unlock an uninitialized Mutex");
+        }
     }
 
     #[inline]
     pub unsafe fn try_lock(&self) -> bool {
-        let mut mutex = self.init_once();
-        match unsafe { libc::mtx_trylock(&mut mutex) } {
-            libc::thrd_success => true,
-            libc::thrd_busy => false,
-            other => panic!("error code: {}", other),
-        }
+        let mut mutex = self.init_once().as_ptr();
+        libc::thrd_success == unsafe { libc::mtx_trylock(&mut mutex) }
     }
 }
 
