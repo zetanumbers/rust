@@ -390,6 +390,8 @@ pub const BUILTIN_ATTRIBUTES: &[BuiltinAttribute] = &[
         target_feature, Normal, template!(List: r#"enable = "name""#),
         DuplicatesOk, @only_local: true,
     ),
+    ungated!(leak, Normal, template!(Word), WarnFollowing),
+    ungated!(trace_drop, Normal, template!(Word), WarnFollowing),
     ungated!(track_caller, Normal, template!(Word), WarnFollowing),
     ungated!(instruction_set, Normal, template!(List: "set"), ErrorPreceding),
     gated!(

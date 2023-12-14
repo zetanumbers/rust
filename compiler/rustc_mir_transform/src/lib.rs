@@ -76,6 +76,7 @@ mod deduce_param_attrs;
 mod deduplicate_blocks;
 mod deref_separator;
 mod dest_prop;
+mod drop_trace;
 pub mod dump_mir;
 mod early_otherwise_branch;
 mod elaborate_box_derefs;
@@ -310,6 +311,7 @@ fn mir_const(tcx: TyCtxt<'_>, def: LocalDefId) -> &Steal<Body<'_>> {
             // What we need to do constant evaluation.
             &simplify::SimplifyCfg::Initial,
             &rustc_peek::SanityCheck, // Just a lint
+            &drop_trace::AddDropTraces,
         ],
         None,
     );
