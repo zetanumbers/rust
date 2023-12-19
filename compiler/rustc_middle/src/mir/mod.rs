@@ -383,8 +383,6 @@ pub struct Body<'tcx> {
     /// If `-Cinstrument-coverage` is not active, or if an individual function
     /// is not eligible for coverage, then this should always be `None`.
     pub function_coverage_info: Option<Box<coverage::FunctionCoverageInfo>>,
-
-    pub trace_drop_destination: Option<Place<'tcx>>,
 }
 
 impl<'tcx> Body<'tcx> {
@@ -426,7 +424,6 @@ impl<'tcx> Body<'tcx> {
             injection_phase: None,
             tainted_by_errors,
             function_coverage_info: None,
-            trace_drop_destination: None,
         };
         body.is_polymorphic = body.has_non_region_param();
         body
@@ -456,7 +453,6 @@ impl<'tcx> Body<'tcx> {
             injection_phase: None,
             tainted_by_errors: None,
             function_coverage_info: None,
-            trace_drop_destination: None,
         };
         body.is_polymorphic = body.has_non_region_param();
         body

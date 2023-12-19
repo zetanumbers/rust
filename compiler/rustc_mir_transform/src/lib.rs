@@ -59,6 +59,7 @@ pub mod check_unsafety;
 mod remove_place_mention;
 // This pass is public to allow external drivers to perform MIR cleanup
 mod add_subtyping_projections;
+mod async_drop;
 pub mod cleanup_post_borrowck;
 mod const_debuginfo;
 mod const_goto;
@@ -76,7 +77,6 @@ mod deduce_param_attrs;
 mod deduplicate_blocks;
 mod deref_separator;
 mod dest_prop;
-mod drop_trace;
 pub mod dump_mir;
 mod early_otherwise_branch;
 mod elaborate_box_derefs;
@@ -304,6 +304,7 @@ fn mir_const(tcx: TyCtxt<'_>, def: LocalDefId) -> &Steal<Body<'_>> {
         tcx,
         &mut body,
         &[
+            &async_drop::AddAsyncDrop,
             // MIR-level lints.
             &Lint(check_packed_ref::CheckPackedRef),
             &Lint(check_const_item_mutation::CheckConstItemMutation),
@@ -311,7 +312,6 @@ fn mir_const(tcx: TyCtxt<'_>, def: LocalDefId) -> &Steal<Body<'_>> {
             // What we need to do constant evaluation.
             &simplify::SimplifyCfg::Initial,
             &rustc_peek::SanityCheck, // Just a lint
-            &drop_trace::AddDropTraces,
         ],
         None,
     );
