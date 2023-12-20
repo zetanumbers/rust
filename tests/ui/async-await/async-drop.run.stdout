@@ -1,0 +1,8 @@
+Foo::new() -> Foo { ident: 0, stage: Init }
+Foo::drop(Foo { ident: 0, stage: Init })
+after bar(1), before block_on(bar)
+Foo::new() -> Foo { ident: 1, stage: Init }
+Foo::poll_drop(Foo { ident: 1, stage: Init })
+Foo::poll_drop(Foo { ident: 1, stage: Yield0 })
+Foo::drop(Foo { ident: 1, stage: Done })
+done

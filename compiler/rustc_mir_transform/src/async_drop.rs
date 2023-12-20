@@ -86,6 +86,11 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
             const_: mir::Const::zero_sized(Ty::new_unit(tcx)),
         }));
 
+        let coroutine_drop_end_block = basic_blocks.push(BasicBlockData::new(Some(Terminator {
+            source_info: SourceInfo::outermost(body.span),
+            kind: TerminatorKind::CoroutineDrop,
+        })));
+
         // Prepend poll loops before drops
         for old_drop_block in blocks_to_add_async_drop.iter() {
             let old_drop_block_data = &mut basic_blocks[old_drop_block];
@@ -162,12 +167,10 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
             let switch_block = basic_blocks.push(BasicBlockData::new(None));
             let yield_block = basic_blocks.push(BasicBlockData::new(None));
             let drop_block = basic_blocks.push(BasicBlockData::new(Some(drop_terminator)));
-
             let coroutine_drop_begin_block = basic_blocks.push(BasicBlockData::new(None));
+
             {
                 // Generating coroutine drop branch for async drop
-                let coroutine_drop_end_block = basic_blocks.push(BasicBlockData::new(None));
-
                 basic_blocks[coroutine_drop_begin_block].statements.extend(
                     temporaries.iter().copied().map(|local| Statement {
                         source_info,
@@ -178,14 +181,12 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                     source_info,
                     kind: TerminatorKind::Drop {
                         place: drop_place,
+                        // FIXME: Other drops
                         target: coroutine_drop_end_block,
                         unwind: drop_unwind,
                         replace: drop_replace,
                     },
                 });
-                // FIXME: Other drops
-                basic_blocks[coroutine_drop_end_block].terminator =
-                    Some(Terminator { source_info, kind: TerminatorKind::CoroutineDrop });
             }
 
             let unwind_begin_block = basic_blocks.push(BasicBlockData {
