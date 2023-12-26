@@ -89,6 +89,7 @@ symbols! {
 
         // Edition-specific keywords that are used in unstable Rust or reserved for future use.
         Try:                "try", // >= 2018 Edition only
+        Defer:              "defer", // TODO: TBA
 
         // Special lifetime names
         UnderscoreLifetime: "'_",
@@ -651,6 +652,7 @@ symbols! {
         default_method_body_is_const,
         default_type_parameter_fallback,
         default_type_params,
+        defer_blocks,
         deny,
         deprecated,
         deprecated_safe,
@@ -2206,6 +2208,7 @@ impl Symbol {
 
     fn is_unused_keyword_conditional(self, edition: impl Copy + FnOnce() -> Edition) -> bool {
         self == kw::Try && edition().at_least_rust_2018()
+            || self == kw::Defer && edition().at_least_rust_2024()
             || self == kw::Gen && edition().at_least_rust_2024()
     }
 

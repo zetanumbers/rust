@@ -21,6 +21,7 @@ pub fn expr_requires_semi_to_be_stmt(e: &ast::Expr) -> bool {
             | ast::ExprKind::Loop(..)
             | ast::ExprKind::ForLoop { .. }
             | ast::ExprKind::TryBlock(..)
+            | ast::ExprKind::DeferBlock(..)
             | ast::ExprKind::ConstBlock(..)
     )
 }
@@ -56,6 +57,7 @@ pub fn expr_trailing_brace(mut expr: &ast::Expr) -> Option<&ast::Expr> {
             | Match(..)
             | Struct(..)
             | TryBlock(..)
+            | DeferBlock(..)
             | While(..)
             | ConstBlock(_) => break Some(expr),
 

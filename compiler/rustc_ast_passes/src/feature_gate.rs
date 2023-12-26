@@ -376,6 +376,9 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
             ast::ExprKind::TryBlock(_) => {
                 gate!(&self, try_blocks, e.span, "`try` expression is experimental");
             }
+            ast::ExprKind::DeferBlock(_) => {
+                gate!(&self, defer_blocks, e.span, "`defer` expression is experimental")
+            }
             _ => {}
         }
         visit::walk_expr(self, e)
@@ -616,6 +619,7 @@ pub fn check_crate(krate: &ast::Crate, sess: &Session, features: &Features) {
         "exclusive range pattern syntax is experimental"
     );
     gate_all_legacy_dont_use!(try_blocks, "`try` blocks are unstable");
+    gate_all_legacy_dont_use!(defer_blocks, "`defer` blocks are unstable");
     gate_all_legacy_dont_use!(auto_traits, "`auto` traits are unstable");
 
     visit::walk_crate(&mut visitor, krate);

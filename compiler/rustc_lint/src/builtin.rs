@@ -1865,6 +1865,8 @@ impl KeywordIdents {
                     // an identifier.
                     kw::Dyn if !under_macro => Edition::Edition2018,
 
+                    kw::Defer => Edition::Edition2024,
+
                     _ => return,
                 }
             }

@@ -1263,6 +1263,7 @@ impl Expr {
             ExprKind::Closure(..) => ExprPrecedence::Closure,
             ExprKind::Block(..) => ExprPrecedence::Block,
             ExprKind::TryBlock(..) => ExprPrecedence::TryBlock,
+            ExprKind::DeferBlock(..) => ExprPrecedence::DeferBlock,
             ExprKind::Gen(..) => ExprPrecedence::Gen,
             ExprKind::Await(..) => ExprPrecedence::Await,
             ExprKind::Assign(..) => ExprPrecedence::Assign,
@@ -1441,6 +1442,9 @@ pub enum ExprKind {
 
     /// A try block (`try { ... }`).
     TryBlock(P<Block>),
+
+    /// A defer block (`defer { ... }`).
+    DeferBlock(P<Block>),
 
     /// An assignment (`a = foo()`).
     /// The `Span` argument is the span of the `=` token.

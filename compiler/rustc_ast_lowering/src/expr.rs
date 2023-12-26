@@ -238,6 +238,21 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     let opt_label = self.lower_label(*opt_label);
                     hir::ExprKind::Block(self.lower_block(blk, opt_label.is_some()), opt_label)
                 }
+                // FIXME
+                ExprKind::DeferBlock(body) => hir::ExprKind::Block(
+                    self.lower_block(
+                        &Block {
+                            stmts: Default::default(),
+                            id: body.id,
+                            rules: BlockCheckMode::Default,
+                            span: Default::default(),
+                            tokens: Default::default(),
+                            could_be_bare_literal: Default::default(),
+                        },
+                        false,
+                    ),
+                    None,
+                ),
                 ExprKind::Assign(el, er, span) => self.lower_expr_assign(el, er, *span, e.span),
                 ExprKind::AssignOp(op, el, er) => hir::ExprKind::AssignOp(
                     self.lower_binop(*op),

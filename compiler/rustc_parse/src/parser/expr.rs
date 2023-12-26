@@ -1482,6 +1482,9 @@ impl<'a> Parser<'a> {
             } else if this.is_try_block() {
                 this.expect_keyword(kw::Try)?;
                 this.parse_try_block(lo)
+            } else if this.is_defer_block() {
+                this.expect_keyword(kw::Defer)?;
+                this.parse_defer_block(lo)
             } else if this.eat_keyword(kw::Return) {
                 this.parse_expr_return()
             } else if this.eat_keyword(kw::Continue) {
@@ -3301,6 +3304,14 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses a `defer {...}` expression (`defer` token already eaten).
+    fn parse_defer_block(&mut self, span_lo: Span) -> PResult<'a, P<Expr>> {
+        let (attrs, body) = self.parse_inner_attrs_and_block()?;
+        let span = span_lo.to(body.span);
+        self.sess.gated_spans.gate(sym::defer_blocks, span);
+        Ok(self.mk_expr_with_attrs(span, ExprKind::DeferBlock(body), attrs))
+    }
+
     fn is_do_catch_block(&self) -> bool {
         self.token.is_keyword(kw::Do)
             && self.is_keyword_ahead(1, &[kw::Catch])
@@ -3318,6 +3329,13 @@ impl<'a> Parser<'a> {
             && self
                 .look_ahead(1, |t| *t == token::OpenDelim(Delimiter::Brace) || t.is_whole_block())
             && self.token.uninterpolated_span().at_least_rust_2018()
+    }
+
+    fn is_defer_block(&self) -> bool {
+        self.token.is_keyword(kw::Defer)
+            && self
+                .look_ahead(1, |t| *t == token::OpenDelim(Delimiter::Brace) || t.is_whole_block())
+            && self.token.uninterpolated_span().at_least_rust_2024()
     }
 
     /// Parses an `async move? {...}` or `gen move? {...}` expression.
@@ -3904,6 +3922,7 @@ impl MutVisitor for CondChecker<'_> {
             | ExprKind::Block(_, _)
             | ExprKind::Gen(_, _, _)
             | ExprKind::TryBlock(_)
+            | ExprKind::DeferBlock(_)
             | ExprKind::Underscore
             | ExprKind::Path(_, _)
             | ExprKind::Break(_, _)
