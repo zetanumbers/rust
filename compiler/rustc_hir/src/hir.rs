@@ -1591,6 +1591,7 @@ impl Expr<'_> {
             ExprKind::Match(..) => ExprPrecedence::Match,
             ExprKind::Closure { .. } => ExprPrecedence::Closure,
             ExprKind::Block(..) => ExprPrecedence::Block,
+            ExprKind::DeferBlock(..) => ExprPrecedence::DeferBlock,
             ExprKind::Assign(..) => ExprPrecedence::Assign,
             ExprKind::AssignOp(..) => ExprPrecedence::AssignOp,
             ExprKind::Field(..) => ExprPrecedence::Field,
@@ -1653,6 +1654,7 @@ impl Expr<'_> {
             | ExprKind::Match(..)
             | ExprKind::Closure { .. }
             | ExprKind::Block(..)
+            | ExprKind::DeferBlock(..)
             | ExprKind::Repeat(..)
             | ExprKind::Array(..)
             | ExprKind::Break(..)
@@ -1743,6 +1745,7 @@ impl Expr<'_> {
             | ExprKind::Call(..)
             | ExprKind::Closure { .. }
             | ExprKind::Block(..)
+            | ExprKind::DeferBlock(_)
             | ExprKind::Repeat(..)
             | ExprKind::Break(..)
             | ExprKind::Continue(..)
@@ -1884,6 +1887,9 @@ pub enum ExprKind<'hir> {
     Closure(&'hir Closure<'hir>),
     /// A block (e.g., `'label: { ... }`).
     Block(&'hir Block<'hir>, Option<Label>),
+
+    /// A defer block (e.g., `defer { ... }`).
+    DeferBlock(&'hir Block<'hir>),
 
     /// An assignment (e.g., `a = foo()`).
     Assign(&'hir Expr<'hir>, &'hir Expr<'hir>, Span),

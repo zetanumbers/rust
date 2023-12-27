@@ -10,5 +10,8 @@ fn main() {
     defer {
         println!("hello");
     }
+    // let _h = defer {
+    //     println!("hello");
+    // };
     println!("world");
 }

@@ -320,7 +320,9 @@ impl<'p, 'tcx> MatchVisitor<'p, 'tcx> {
             Become { .. } | Break { .. } | Continue { .. } | Return { .. } => true,
 
             // These are statements that evaluate to `()`.
-            Assign { .. } | AssignOp { .. } | InlineAsm { .. } | Let { .. } => true,
+            Assign { .. } | AssignOp { .. } | InlineAsm { .. } | Let { .. } | DeferBlock { .. } => {
+                true
+            }
 
             // These evaluate to a value.
             AddressOf { .. }

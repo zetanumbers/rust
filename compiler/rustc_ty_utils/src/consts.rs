@@ -254,6 +254,9 @@ fn recurse_build<'tcx>(
         ExprKind::InlineAsm { .. } => {
             error(GenericConstantTooComplexSub::InlineAsmNotSupported(node.span))?
         }
+        ExprKind::DeferBlock { .. } => {
+            error(GenericConstantTooComplexSub::DeferBlockNotSupported(node.span))?
+        }
 
         // we dont permit let stmts so `VarRef` and `UpvarRef` cant happen
         ExprKind::VarRef { .. }
@@ -330,6 +333,7 @@ impl<'a, 'tcx> IsThirPolymorphic<'a, 'tcx> {
             | thir::ExprKind::Let { .. }
             | thir::ExprKind::Match { .. }
             | thir::ExprKind::Block { .. }
+            | thir::ExprKind::DeferBlock { .. }
             | thir::ExprKind::Assign { .. }
             | thir::ExprKind::AssignOp { .. }
             | thir::ExprKind::Field { .. }

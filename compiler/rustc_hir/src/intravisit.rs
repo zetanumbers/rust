@@ -762,6 +762,9 @@ pub fn walk_expr<'v, V: Visitor<'v>>(visitor: &mut V, expression: &'v Expr<'v>) 
             walk_list!(visitor, visit_label, opt_label);
             visitor.visit_block(block);
         }
+        ExprKind::DeferBlock(ref block) => {
+            visitor.visit_block(block);
+        }
         ExprKind::Assign(ref lhs, ref rhs, _) => {
             visitor.visit_expr(rhs);
             visitor.visit_expr(lhs)

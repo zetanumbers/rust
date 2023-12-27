@@ -506,6 +506,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 block.and(Rvalue::Use(Operand::Constant(Box::new(constant))))
             }
 
+            ExprKind::DeferBlock { .. } => {
+                block.and(Rvalue::Use(Operand::Constant(Box::new(ConstOperand {
+                    span: expr_span,
+                    user_ty: None,
+                    const_: Const::zero_sized(this.tcx.types.unit),
+                }))))
+            }
+
             ExprKind::Yield { .. }
             | ExprKind::Block { .. }
             | ExprKind::Match { .. }

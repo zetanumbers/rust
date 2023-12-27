@@ -193,6 +193,7 @@ impl<'tcx> CheckInlineAssembly<'tcx> {
             | ExprKind::Match(..)
             | ExprKind::If(..)
             | ExprKind::Closure { .. }
+            | ExprKind::DeferBlock(..)
             | ExprKind::Assign(..)
             | ExprKind::AssignOp(..)
             | ExprKind::Field(..)

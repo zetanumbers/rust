@@ -339,6 +339,7 @@ impl<'a, 'tcx> Visitor<'a, 'tcx> for UnsafetyVisitor<'a, 'tcx> {
             | ExprKind::Array { .. }
             | ExprKind::Binary { .. }
             | ExprKind::Block { .. }
+            | ExprKind::DeferBlock { .. }
             | ExprKind::Borrow { .. }
             | ExprKind::Literal { .. }
             | ExprKind::NamedConst { .. }

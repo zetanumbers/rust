@@ -64,6 +64,8 @@ pub enum GenericConstantTooComplexSub {
     ControlFlowNotSupported(#[primary_span] Span),
     #[label(ty_utils_inline_asm_not_supported)]
     InlineAsmNotSupported(#[primary_span] Span),
+    #[label(ty_utils_defer_block_not_supported)]
+    DeferBlockNotSupported(#[primary_span] Span),
     #[label(ty_utils_operation_not_supported)]
     OperationNotSupported(#[primary_span] Span),
 }

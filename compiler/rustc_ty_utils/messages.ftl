@@ -20,6 +20,8 @@ ty_utils_const_block_not_supported = const blocks are not supported in generic c
 
 ty_utils_control_flow_not_supported = control flow is not supported in generic constants
 
+ty_utils_defer_block_not_supported = defer blocks are not supported in generic constants
+
 ty_utils_field_not_supported = field access is not supported in generic constants
 
 ty_utils_generic_constant_too_complex = overly complex generic constant

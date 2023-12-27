@@ -321,7 +321,7 @@ impl<'v> hir_visit::Visitor<'v> for StatCollector<'v> {
                 ConstBlock, Array, Call, MethodCall, Tup, Binary, Unary, Lit, Cast, Type,
                 DropTemps, Let, If, Loop, Match, Closure, Block, Assign, AssignOp, Field, Index,
                 Path, AddrOf, Break, Continue, Ret, Become, InlineAsm, OffsetOf, Struct, Repeat,
-                Yield, Err
+                Yield, DeferBlock, Err
             ]
         );
         hir_visit::walk_expr(self, e)

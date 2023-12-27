@@ -323,6 +323,12 @@ impl<'a, 'tcx> ThirPrinter<'a, 'tcx> {
                 print_indented!(self, "}", depth_lvl);
             }
             Block { block } => self.print_block(*block, depth_lvl),
+            DeferBlock { body } => {
+                print_indented!(self, "DeferBlock (", depth_lvl);
+                print_indented!(self, "body:", depth_lvl + 1);
+                self.print_expr(*body, depth_lvl + 2);
+                print_indented!(self, ")", depth_lvl);
+            }
             Assign { lhs, rhs } => {
                 print_indented!(self, "Assign {", depth_lvl);
                 print_indented!(self, "lhs:", depth_lvl + 1);

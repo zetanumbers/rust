@@ -401,6 +401,21 @@ impl<'tcx> Cx<'tcx> {
 
             hir::ExprKind::Block(blk, _) => ExprKind::Block { block: self.mirror_block(blk) },
 
+            hir::ExprKind::DeferBlock(body) => {
+                let block_ty = self.typeck_results().node_type(body.hir_id);
+                let temp_lifetime = self
+                    .rvalue_scopes
+                    .temporary_scope(self.region_scope_tree, body.hir_id.local_id);
+                let block = self.mirror_block(body);
+                let body = self.thir.exprs.push(Expr {
+                    ty: block_ty,
+                    temp_lifetime,
+                    span: self.thir[block].span,
+                    kind: ExprKind::Block { block },
+                });
+                ExprKind::DeferBlock { body }
+            }
+
             hir::ExprKind::Assign(lhs, rhs, _) => {
                 ExprKind::Assign { lhs: self.mirror_expr(lhs), rhs: self.mirror_expr(rhs) }
             }

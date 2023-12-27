@@ -363,6 +363,10 @@ impl<'a, 'tcx> ExprUseVisitor<'a, 'tcx> {
             hir::ExprKind::Yield(value, _) => {
                 self.consume_expr(value);
             }
+
+            hir::ExprKind::DeferBlock(block) => {
+                self.walk_block(block);
+            }
         }
     }
 

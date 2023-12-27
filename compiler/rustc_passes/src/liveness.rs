@@ -444,6 +444,10 @@ impl<'tcx> Visitor<'tcx> for IrMaps<'tcx> {
             | hir::ExprKind::Err(_)
             | hir::ExprKind::Path(hir::QPath::TypeRelative(..))
             | hir::ExprKind::Path(hir::QPath::LangItem(..)) => {}
+
+            hir::ExprKind::DeferBlock(_) => {
+                // FIXME
+            }
         }
         intravisit::walk_expr(self, expr);
     }
@@ -1107,6 +1111,10 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
             // Note that labels have been resolved, so we don't need to look
             // at the label ident
             hir::ExprKind::Block(ref blk, _) => self.propagate_through_block(blk, succ),
+            hir::ExprKind::DeferBlock(_) => {
+                // FIXME
+                succ
+            }
         }
     }
 
@@ -1384,6 +1392,7 @@ fn check_expr<'tcx>(this: &mut Liveness<'_, 'tcx>, expr: &'tcx Expr<'tcx>) {
         | hir::ExprKind::Lit(_)
         | hir::ExprKind::ConstBlock(..)
         | hir::ExprKind::Block(..)
+        | hir::ExprKind::DeferBlock(..)
         | hir::ExprKind::AddrOf(..)
         | hir::ExprKind::OffsetOf(..)
         | hir::ExprKind::Struct(..)

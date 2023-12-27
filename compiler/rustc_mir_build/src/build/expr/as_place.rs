@@ -535,6 +535,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             | ExprKind::If { .. }
             | ExprKind::Loop { .. }
             | ExprKind::Block { .. }
+            | ExprKind::DeferBlock { .. }
             | ExprKind::Let { .. }
             | ExprKind::Assign { .. }
             | ExprKind::AssignOp { .. }

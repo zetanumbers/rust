@@ -1437,6 +1437,10 @@ impl<'a> State<'a> {
                 self.ibox(0);
                 self.print_block(blk);
             }
+            hir::ExprKind::DeferBlock(blk) => {
+                self.head("defer");
+                self.print_block(blk);
+            }
             hir::ExprKind::Assign(lhs, rhs, _) => {
                 let prec = AssocOp::Assign.precedence() as i8;
                 self.print_expr_maybe_paren(lhs, prec + 1);

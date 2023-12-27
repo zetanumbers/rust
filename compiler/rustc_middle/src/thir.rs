@@ -352,6 +352,10 @@ pub enum ExprKind<'tcx> {
     Block {
         block: BlockId,
     },
+    /// A `defer` block.
+    DeferBlock {
+        body: ExprId,
+    },
     /// An assignment: `lhs = rhs`.
     Assign {
         lhs: ExprId,
