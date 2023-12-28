@@ -917,8 +917,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             self.schedule_drop(
                 param.pat.as_ref().map_or(expr_span, |pat| pat.span),
                 argument_scope,
-                local,
-                DropKind::Value,
+                DropKind::Value { local },
             );
 
             let Some(ref pat) = param.pat else {

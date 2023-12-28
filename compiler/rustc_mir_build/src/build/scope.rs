@@ -142,17 +142,14 @@ struct DropData {
     /// declared)
     source_info: SourceInfo,
 
-    /// local to drop
-    local: Local,
-
     /// Whether this is a value Drop or a StorageDead.
     kind: DropKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum DropKind {
-    Value,
-    Storage,
+    Value { local: Local },
+    Storage { local: Local },
 }
 
 #[derive(Debug)]
@@ -207,7 +204,7 @@ struct DropTree {
     /// Map for finding the inverse of the `next_drop` relation:
     ///
     /// `previous_drops[(drops[i].1, drops[i].0.local, drops[i].0.kind)] == i`
-    previous_drops: FxHashMap<(DropIdx, Local, DropKind), DropIdx>,
+    previous_drops: FxHashMap<(DropIdx, DropKind), DropIdx>,
     /// Edges into the `DropTree` that need to be added once it's lowered.
     entry_points: Vec<(DropIdx, BasicBlock)>,
 }
@@ -226,8 +223,8 @@ impl Scope {
     /// use of optimizations in the MIR coroutine transform.
     fn needs_cleanup(&self) -> bool {
         self.drops.iter().any(|drop| match drop.kind {
-            DropKind::Value => true,
-            DropKind::Storage => false,
+            DropKind::Value { .. } => true,
+            DropKind::Storage { .. } => false,
         })
     }
 
@@ -255,8 +252,10 @@ impl DropTree {
         // represents the block in the tree that should be jumped to once all
         // of the required drops have been performed.
         let fake_source_info = SourceInfo::outermost(DUMMY_SP);
-        let fake_data =
-            DropData { source_info: fake_source_info, local: Local::MAX, kind: DropKind::Storage };
+        let fake_data = DropData {
+            source_info: fake_source_info,
+            kind: DropKind::Storage { local: Local::MAX },
+        };
         let drop_idx = DropIdx::MAX;
         let drops = IndexVec::from_elem_n((fake_data, drop_idx), 1);
         Self { drops, entry_points: Vec::new(), previous_drops: FxHashMap::default() }
@@ -264,10 +263,7 @@ impl DropTree {
 
     fn add_drop(&mut self, drop: DropData, next: DropIdx) -> DropIdx {
         let drops = &mut self.drops;
-        *self
-            .previous_drops
-            .entry((next, drop.local, drop.kind))
-            .or_insert_with(|| drops.push((drop, next)))
+        *self.previous_drops.entry((next, drop.kind)).or_insert_with(|| drops.push((drop, next)))
     }
 
     fn add_entry(&mut self, from: BasicBlock, to: DropIdx) {
@@ -343,7 +339,7 @@ impl DropTree {
                     blocks[drop_idx] = blocks[pred];
                 }
             }
-            if let DropKind::Value = drop_data.0.kind {
+            if let DropKind::Value { .. } = drop_data.0.kind {
                 needs_block[drop_data.1] = Block::Own;
             } else if drop_idx != ROOT_NODE {
                 match &mut needs_block[drop_data.1] {
@@ -366,22 +362,22 @@ impl DropTree {
         for (drop_idx, drop_data) in self.drops.iter_enumerated().rev() {
             let Some(block) = blocks[drop_idx] else { continue };
             match drop_data.0.kind {
-                DropKind::Value => {
+                DropKind::Value { local } => {
                     let terminator = TerminatorKind::Drop {
                         target: blocks[drop_data.1].unwrap(),
                         // The caller will handle this if needed.
                         unwind: UnwindAction::Terminate(UnwindTerminateReason::InCleanup),
-                        place: drop_data.0.local.into(),
+                        place: local.into(),
                         replace: false,
                     };
                     cfg.terminate(block, drop_data.0.source_info, terminator);
                 }
                 // Root nodes don't correspond to a drop.
-                DropKind::Storage if drop_idx == ROOT_NODE => {}
-                DropKind::Storage => {
+                DropKind::Storage { .. } if drop_idx == ROOT_NODE => {}
+                DropKind::Storage { local } => {
                     let stmt = Statement {
                         source_info: drop_data.0.source_info,
-                        kind: StatementKind::StorageDead(drop_data.0.local),
+                        kind: StatementKind::StorageDead(local),
                     };
                     cfg.push(block, stmt);
                     let target = blocks[drop_data.1].unwrap();
@@ -879,8 +875,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         region_scope: region::Scope,
         local: Local,
     ) {
-        self.schedule_drop(span, region_scope, local, DropKind::Storage);
-        self.schedule_drop(span, region_scope, local, DropKind::Value);
+        self.schedule_drop(span, region_scope, DropKind::Storage { local });
+        self.schedule_drop(span, region_scope, DropKind::Value { local });
     }
 
     /// Indicates that `place` should be dropped on exit from `region_scope`.
@@ -891,17 +887,16 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         &mut self,
         span: Span,
         region_scope: region::Scope,
-        local: Local,
         drop_kind: DropKind,
     ) {
         let needs_drop = match drop_kind {
-            DropKind::Value => {
+            DropKind::Value { local } => {
                 if !self.local_decls[local].ty.needs_drop(self.tcx, self.param_env) {
                     return;
                 }
                 true
             }
-            DropKind::Storage => {
+            DropKind::Storage { local } => {
                 if local.index() <= self.arg_count {
                     span_bug!(
                         span,
@@ -973,7 +968,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
                 scope.drops.push(DropData {
                     source_info: SourceInfo { span: scope_end, scope: scope.source_scope },
-                    local,
                     kind: drop_kind,
                 });
 
@@ -981,7 +975,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             }
         }
 
-        span_bug!(span, "region scope {:?} not in scope to drop {:?}", region_scope, local);
+        span_bug!(span, "region scope {:?} not in scope to drop {:?}", region_scope, drop_kind);
     }
 
     /// Indicates that the "local operand" stored in `local` is
@@ -1037,7 +1031,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             // -- add it to the list of moved operands. Note that this
             // local might not have been an operand created for this
             // call, it could come from other places too.
-            if scope.drops.iter().any(|drop| drop.local == local && drop.kind == DropKind::Value) {
+            if scope.drops.iter().any(|drop| drop.kind == DropKind::Value { local }) {
                 scope.moved_locals.push(local);
             }
         }
@@ -1076,7 +1070,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let is_coroutine = self.coroutine.is_some();
         for scope in &mut self.scopes.scopes[uncached_scope..=target] {
             for drop in &scope.drops {
-                if is_coroutine || drop.kind == DropKind::Value {
+                if is_coroutine || matches!(drop.kind, DropKind::Value { .. }) {
                     cached_drop = self.scopes.unwind_drops.add_drop(*drop, cached_drop);
                 }
             }
@@ -1253,14 +1247,12 @@ fn build_scope_drops<'tcx>(
 
     for drop_data in scope.drops.iter().rev() {
         let source_info = drop_data.source_info;
-        let local = drop_data.local;
 
         match drop_data.kind {
-            DropKind::Value => {
+            DropKind::Value { local } => {
                 // `unwind_to` should drop the value that we're about to
                 // schedule. If dropping this value panics, then we continue
                 // with the *next* value on the unwind path.
-                debug_assert_eq!(unwind_drops.drops[unwind_to].0.local, drop_data.local);
                 debug_assert_eq!(unwind_drops.drops[unwind_to].0.kind, drop_data.kind);
                 unwind_to = unwind_drops.drops[unwind_to].1;
 
@@ -1287,9 +1279,8 @@ fn build_scope_drops<'tcx>(
                 );
                 block = next;
             }
-            DropKind::Storage => {
+            DropKind::Storage { local } => {
                 if storage_dead_on_unwind {
-                    debug_assert_eq!(unwind_drops.drops[unwind_to].0.local, drop_data.local);
                     debug_assert_eq!(unwind_drops.drops[unwind_to].0.kind, drop_data.kind);
                     unwind_to = unwind_drops.drops[unwind_to].1;
                 }
@@ -1321,12 +1312,12 @@ impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
         let is_coroutine = self.coroutine.is_some();
 
         // Link the exit drop tree to unwind drop tree.
-        if drops.drops.iter().any(|(drop, _)| drop.kind == DropKind::Value) {
+        if drops.drops.iter().any(|(drop, _)| matches!(drop.kind, DropKind::Value { .. })) {
             let unwind_target = self.diverge_cleanup_target(else_scope, span);
             let mut unwind_indices = IndexVec::from_elem_n(unwind_target, 1);
             for (drop_idx, drop_data) in drops.drops.iter_enumerated().skip(1) {
                 match drop_data.0.kind {
-                    DropKind::Storage => {
+                    DropKind::Storage { .. } => {
                         if is_coroutine {
                             let unwind_drop = self
                                 .scopes
@@ -1337,7 +1328,7 @@ impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
                             unwind_indices.push(unwind_indices[drop_data.1]);
                         }
                     }
-                    DropKind::Value => {
+                    DropKind::Value { .. } => {
                         let unwind_drop = self
                             .scopes
                             .unwind_drops
@@ -1395,7 +1386,7 @@ impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
         // to be captured by the coroutine. I'm not sure how important this
         // optimization is, but it is here.
         for (drop_idx, drop_data) in drops.drops.iter_enumerated() {
-            if let DropKind::Value = drop_data.0.kind {
+            if let DropKind::Value { .. } = drop_data.0.kind {
                 debug_assert!(drop_data.1 < drops.drops.next_index());
                 drops.entry_points.push((drop_data.1, blocks[drop_idx].unwrap()));
             }

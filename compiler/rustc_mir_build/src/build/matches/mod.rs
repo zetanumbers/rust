@@ -801,7 +801,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         if let Some(region_scope) = self.region_scope_tree.var_scope(var.0.local_id)
             && schedule_drop
         {
-            self.schedule_drop(span, region_scope, local_id, DropKind::Storage);
+            self.schedule_drop(span, region_scope, DropKind::Storage { local: local_id });
         }
         Place::from(local_id)
     }
@@ -814,7 +814,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
     ) {
         let local_id = self.var_local_id(var, for_guard);
         if let Some(region_scope) = self.region_scope_tree.var_scope(var.0.local_id) {
-            self.schedule_drop(span, region_scope, local_id, DropKind::Value);
+            self.schedule_drop(span, region_scope, DropKind::Value { local: local_id });
         }
     }
 

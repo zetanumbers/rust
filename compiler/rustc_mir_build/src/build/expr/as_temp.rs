@@ -106,7 +106,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 // `bar(&foo())` or anything within a block will keep the
                 // regular drops just like runtime code.
                 if let Some(temp_lifetime) = temp_lifetime {
-                    this.schedule_drop(expr_span, temp_lifetime, temp, DropKind::Storage);
+                    this.schedule_drop(expr_span, temp_lifetime, DropKind::Storage { local: temp });
                 }
             }
         }
@@ -114,7 +114,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         unpack!(block = this.expr_into_dest(temp_place, block, expr_id));
 
         if let Some(temp_lifetime) = temp_lifetime {
-            this.schedule_drop(expr_span, temp_lifetime, temp, DropKind::Value);
+            this.schedule_drop(expr_span, temp_lifetime, DropKind::Value { local: temp });
         }
 
         block.and(temp)
