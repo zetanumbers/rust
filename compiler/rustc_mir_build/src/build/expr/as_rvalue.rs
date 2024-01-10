@@ -507,6 +507,15 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             }
 
             ExprKind::DeferBlock { .. } => {
+                let _ = unpack!(
+                    block = this.as_operand(
+                        block,
+                        scope,
+                        expr_id,
+                        LocalInfo::Boring,
+                        NeedsTemporary::No,
+                    )
+                );
                 block.and(Rvalue::Use(Operand::Constant(Box::new(ConstOperand {
                     span: expr_span,
                     user_ty: None,

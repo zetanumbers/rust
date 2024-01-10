@@ -150,6 +150,16 @@ struct DropData {
 pub(crate) enum DropKind {
     Value { local: Local },
     Storage { local: Local },
+    DeferCode { start: BasicBlock, end: BasicBlock },
+}
+
+impl DropKind {
+    fn needs_cleanup(self) -> bool {
+        match self {
+            DropKind::Value { .. } | DropKind::DeferCode { .. } => true,
+            DropKind::Storage { .. } => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -222,10 +232,7 @@ impl Scope {
     /// Note that for coroutines we do emit StorageDeads, for the
     /// use of optimizations in the MIR coroutine transform.
     fn needs_cleanup(&self) -> bool {
-        self.drops.iter().any(|drop| match drop.kind {
-            DropKind::Value { .. } => true,
-            DropKind::Storage { .. } => false,
-        })
+        self.drops.iter().any(|drop| drop.kind.needs_cleanup())
     }
 
     fn invalidate_cache(&mut self) {
@@ -391,6 +398,7 @@ impl DropTree {
                         cfg.terminate(block, source_info, terminator);
                     }
                 }
+                DropKind::DeferCode { .. } => todo!(),
             }
         }
     }
@@ -907,6 +915,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 }
                 false
             }
+            DropKind::DeferCode { .. } => true,
         };
 
         // When building drops, we try to cache chains of drops to reduce the
@@ -1288,6 +1297,7 @@ fn build_scope_drops<'tcx>(
                 assert!(local.index() > arg_count);
                 cfg.push(block, Statement { source_info, kind: StatementKind::StorageDead(local) });
             }
+            DropKind::DeferCode { .. } => todo!(),
         }
     }
     block.unit()
@@ -1338,6 +1348,7 @@ impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
                             .add_entry(blocks[drop_idx].unwrap(), unwind_indices[drop_data.1]);
                         unwind_indices.push(unwind_drop);
                     }
+                    DropKind::DeferCode { .. } => todo!(),
                 }
             }
         }

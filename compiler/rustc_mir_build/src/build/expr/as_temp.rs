@@ -2,6 +2,7 @@
 
 use crate::build::scope::DropKind;
 use crate::build::{BlockAnd, BlockAndExtension, Builder};
+use crate::thir::print::thir_tree;
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_middle::middle::region;
 use rustc_middle::mir::*;
@@ -89,6 +90,46 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 if let Block { expr: None, targeted_by_break: false, .. } = this.thir[block]
                     && expr_ty.is_never() => {}
             _ => {
+                if let ExprKind::DeferBlock { body } = expr.kind {
+                    // conduct the test, if necessary
+                    let body_block = this.cfg.start_new_block();
+                    let body_block_next = this.cfg.start_new_block();
+                    this.cfg.terminate(
+                        body_block,
+                        source_info,
+                        TerminatorKind::FalseUnwind {
+                            real_target: body_block_next,
+                            unwind: UnwindAction::Continue,
+                        },
+                    );
+                    this.diverge_from(body_block);
+
+                    // The “return” value of the defer block body must always be a unit. We therefore
+                    // introduce a unit temporary as the destination for the defer block body.
+                    let tmp = this.get_unit_temp();
+                    // Execute the body, branching back to the test.
+                    let body_block_end = unpack!(this.expr_into_dest(tmp, body_block_next, body));
+
+                    debug_span!("recursion").in_scope(|| {
+                        let kind = &this.thir.exprs[body].kind;
+                        debug!("{kind:?}");
+                        let ExprKind::Block { block } = kind else {
+                            return;
+                        };
+                        let block = &this.thir.blocks[*block];
+                        debug!("{block:?}");
+                    });
+
+                    if let Some(temp_lifetime) = temp_lifetime {
+                        this.schedule_drop(
+                            expr_span,
+                            temp_lifetime,
+                            DropKind::DeferCode { start: body_block, end: body_block_end },
+                        );
+                    }
+                    // TODO: else warn?
+                }
+
                 this.cfg
                     .push(block, Statement { source_info, kind: StatementKind::StorageLive(temp) });
 

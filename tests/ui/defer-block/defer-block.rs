@@ -8,7 +8,7 @@
 
 fn main() {
     defer {
-        println!("hello");
+        // println!("hello");
     }
     // let _h = defer {
     //     println!("hello");

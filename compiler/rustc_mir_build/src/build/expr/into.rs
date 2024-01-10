@@ -550,9 +550,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 resume.unit()
             }
 
-            // FIXME
-            ExprKind::DeferBlock { .. } => block.unit(),
-
             // these are the cases that are more naturally handled by some other mode
             ExprKind::Unary { .. }
             | ExprKind::Binary { .. }
@@ -571,7 +568,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             | ExprKind::ConstParam { .. }
             | ExprKind::ThreadLocalRef(_)
             | ExprKind::StaticRef { .. }
-            | ExprKind::OffsetOf { .. } => {
+            | ExprKind::OffsetOf { .. }
+            | ExprKind::DeferBlock { .. } => {
                 debug_assert!(match Category::of(&expr.kind).unwrap() {
                     // should be handled above
                     Category::Rvalue(RvalueFunc::Into) => false,
