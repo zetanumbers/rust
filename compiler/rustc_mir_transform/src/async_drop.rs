@@ -12,6 +12,7 @@ use rustc_middle::ty::util::Discr;
 use rustc_middle::ty::{
     Const, GenericArg, InstanceDef, List, ParamEnv, Region, RegionKind, Ty, TyCtxt,
 };
+use rustc_span::source_map::dummy_spanned;
 use rustc_span::DUMMY_SP;
 
 pub struct AddAsyncDrop;
@@ -42,7 +43,7 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
             get_context_fn,
             iter::repeat_with(|| Region::new_from_kind(tcx, RegionKind::ReErased)).take(2),
         );
-        let context_ref_ty = get_context_fn.fn_sig(tcx).output().no_bound_vars().unwrap();
+        let context_ref_ty = Ty::new_task_context(tcx);
         let context_ref_place = Place {
             local: body.local_decls.push(LocalDecl::new(context_ref_ty, DUMMY_SP)),
             projection: List::empty(),
@@ -133,14 +134,8 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                 const_: mir::Const::zero_sized(pin_new_unchecked_fn),
             }));
 
-            let poll_drop_fn = Ty::new_fn_def(
-                tcx,
-                poll_drop_fn,
-                iter::once(GenericArg::from(drop_ty)).chain(
-                    iter::repeat_with(|| Region::new_from_kind(tcx, RegionKind::ReErased).into())
-                        .take(3),
-                ),
-            );
+            let poll_drop_fn =
+                Ty::new_fn_def(tcx, poll_drop_fn, iter::once(GenericArg::from(drop_ty)));
             // TODO move to outer scope
             let poll_unit_ty = poll_drop_fn.fn_sig(tcx).output().no_bound_vars().unwrap();
             let poll_unit_place = Place {
@@ -166,6 +161,7 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
             let poll_drop_block = basic_blocks.push(BasicBlockData::new(None));
             let switch_block = basic_blocks.push(BasicBlockData::new(None));
             let yield_block = basic_blocks.push(BasicBlockData::new(None));
+            let resume_arg_move_back = basic_blocks.push(BasicBlockData::new(None));
             let drop_block = basic_blocks.push(BasicBlockData::new(Some(drop_terminator)));
             let coroutine_drop_begin_block = basic_blocks.push(BasicBlockData::new(None));
 
@@ -233,7 +229,7 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                 source_info,
                 kind: TerminatorKind::Call {
                     func: pin_new_unchecked_fn,
-                    args: vec![Operand::Move(drop_ref_place)],
+                    args: vec![dummy_spanned(Operand::Move(drop_ref_place))],
                     destination: pin_place,
                     target: Some(get_context_block),
                     unwind: UnwindAction::Cleanup(unwind_begin_block),
@@ -241,11 +237,24 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                     fn_span: DUMMY_SP,
                 },
             });
+            let resume_arg_temp_arg = Place {
+                local: body
+                    .local_decls
+                    .push(LocalDecl::new(resume_arg.ty(&body.local_decls, tcx).ty, DUMMY_SP)),
+                projection: List::empty(),
+            };
+            basic_blocks[get_context_block].statements.push(Statement {
+                source_info,
+                kind: StatementKind::Assign(Box::new((
+                    resume_arg_temp_arg,
+                    Rvalue::Use(Operand::Move(resume_arg)),
+                ))),
+            });
             basic_blocks[get_context_block].terminator = Some(Terminator {
                 source_info,
                 kind: TerminatorKind::Call {
                     func: get_context_fn.clone(),
-                    args: vec![Operand::Move(resume_arg)],
+                    args: vec![dummy_spanned(Operand::Move(resume_arg_temp_arg))],
                     destination: context_ref_place,
                     target: Some(poll_drop_block),
                     unwind: UnwindAction::Cleanup(unwind_begin_block),
@@ -257,7 +266,10 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                 source_info,
                 kind: TerminatorKind::Call {
                     func: poll_drop_fn.clone(),
-                    args: vec![Operand::Move(pin_place), Operand::Move(context_ref_place)],
+                    args: vec![
+                        dummy_spanned(Operand::Move(pin_place)),
+                        dummy_spanned(Operand::Move(context_ref_place)),
+                    ],
                     destination: poll_unit_place,
                     target: Some(switch_block),
                     unwind: UnwindAction::Cleanup(unwind_begin_block),
@@ -283,14 +295,31 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                     ),
                 },
             });
+            let resume_arg_temp_dest = Place {
+                local: body
+                    .local_decls
+                    .push(LocalDecl::new(resume_arg.ty(&body.local_decls, tcx).ty, DUMMY_SP)),
+                projection: List::empty(),
+            };
             basic_blocks[yield_block].terminator = Some(Terminator {
                 source_info,
                 kind: TerminatorKind::Yield {
                     value: unit_value.clone(),
-                    resume: pin_new_unchecked_block,
-                    resume_arg,
+                    resume: resume_arg_move_back,
+                    resume_arg: resume_arg_temp_dest,
                     drop: Some(coroutine_drop_begin_block),
                 },
+            });
+            basic_blocks[resume_arg_move_back].statements.push(Statement {
+                source_info,
+                kind: StatementKind::Assign(Box::new((
+                    resume_arg,
+                    Rvalue::Use(Operand::Move(resume_arg_temp_dest)),
+                ))),
+            });
+            basic_blocks[resume_arg_move_back].terminator = Some(Terminator {
+                source_info,
+                kind: TerminatorKind::Goto { target: pin_new_unchecked_block },
             });
             basic_blocks[drop_block].statements.extend(
                 temporaries.iter().copied().map(|local| Statement {
