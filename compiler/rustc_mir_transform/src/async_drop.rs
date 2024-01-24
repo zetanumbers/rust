@@ -9,9 +9,7 @@ use rustc_middle::mir::{
     UnwindAction, START_BLOCK,
 };
 use rustc_middle::ty::util::Discr;
-use rustc_middle::ty::{
-    Const, GenericArg, InstanceDef, List, ParamEnv, Region, RegionKind, Ty, TyCtxt,
-};
+use rustc_middle::ty::{Const, GenericArg, InstanceDef, List, ParamEnv, Ty, TyCtxt};
 use rustc_span::source_map::dummy_spanned;
 use rustc_span::DUMMY_SP;
 
@@ -38,11 +36,8 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
         let pin_new_unchecked_fn = tcx.require_lang_item(LangItem::PinNewUnchecked, item_span);
 
         let get_context_fn = tcx.require_lang_item(LangItem::GetContext, item_span);
-        let get_context_fn = Ty::new_fn_def(
-            tcx,
-            get_context_fn,
-            iter::repeat_with(|| Region::new_from_kind(tcx, RegionKind::ReErased)).take(2),
-        );
+        let get_context_fn =
+            Ty::new_fn_def(tcx, get_context_fn, iter::repeat(tcx.lifetimes.re_erased).take(2));
         let context_ref_ty = Ty::new_task_context(tcx);
         let context_ref_place = Place {
             local: body.local_decls.push(LocalDecl::new(context_ref_ty, DUMMY_SP)),
@@ -110,8 +105,7 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                 bug!();
             };
             let drop_ty = drop_place.ty(&body.local_decls, tcx).ty;
-            let drop_ref_ty =
-                Ty::new_mut_ref(tcx, Region::new_from_kind(tcx, RegionKind::ReErased), drop_ty);
+            let drop_ref_ty = Ty::new_mut_ref(tcx, tcx.lifetimes.re_erased, drop_ty);
             let drop_ref_place = Place {
                 local: body.local_decls.push(LocalDecl::with_source_info(drop_ref_ty, source_info)),
                 projection: List::empty(),
@@ -219,7 +213,7 @@ impl<'tcx> MirPass<'tcx> for AddAsyncDrop {
                 kind: StatementKind::Assign(Box::new((
                     drop_ref_place,
                     Rvalue::Ref(
-                        Region::new_from_kind(tcx, RegionKind::ReErased),
+                        tcx.lifetimes.re_erased,
                         mir::BorrowKind::Mut { kind: mir::MutBorrowKind::Default },
                         drop_place,
                     ),
