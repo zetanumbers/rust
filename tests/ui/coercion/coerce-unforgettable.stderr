@@ -1,0 +1,16 @@
+error[E0277]: `PhantomUnforgettable` cannot be forgotten
+  --> $DIR/coerce-unforgettable.rs:11:24
+   |
+LL |     let _: &dyn Send = &Unforgettable::default();
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^ `PhantomUnforgettable` cannot be forgotten
+   |
+   = help: within `Unforgettable`, the trait `Forget` is not implemented for `PhantomUnforgettable`, which is required by `Unforgettable: Forget`
+note: required because it appears within the type `Unforgettable`
+  --> $DIR/coerce-unforgettable.rs:6:8
+   |
+LL | struct Unforgettable {
+   |        ^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0277`.

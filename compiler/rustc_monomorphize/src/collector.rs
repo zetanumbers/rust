@@ -217,6 +217,7 @@ use rustc_middle::mir::mono::{InstantiationMode, MonoItem};
 use rustc_middle::mir::visit::Visitor as MirVisitor;
 use rustc_middle::mir::{self, Location, MentionedItem};
 use rustc_middle::query::TyCtxtAt;
+use rustc_middle::traits::ObligationCause;
 use rustc_middle::ty::adjustment::{CustomCoerceUnsized, PointerCoercion};
 use rustc_middle::ty::layout::ValidityRequirement;
 use rustc_middle::ty::print::with_no_trimmed_paths;
@@ -232,6 +233,10 @@ use rustc_span::source_map::{dummy_spanned, respan, Spanned};
 use rustc_span::symbol::{sym, Ident};
 use rustc_span::{Span, DUMMY_SP};
 use rustc_target::abi::Size;
+use rustc_trait_selection::infer::TyCtxtInferExt;
+use rustc_trait_selection::traits::error_reporting::TypeErrCtxtExt;
+use rustc_trait_selection::traits::{ObligationCtxt, PredicateObligation};
+use std::iter;
 use std::path::PathBuf;
 
 use crate::errors::{
@@ -1193,6 +1198,32 @@ fn find_vtable_types_for_unsizing<'tcx>(
 ) -> (Ty<'tcx>, Ty<'tcx>) {
     let ptr_vtable = |inner_source: Ty<'tcx>, inner_target: Ty<'tcx>| {
         let param_env = ty::ParamEnv::reveal_all();
+
+        if let Some(forget_trait) = tcx.lang_items().forget_trait() {
+            if !matches!(inner_source.kind(), ty::Dynamic(..)) {
+                let infcx = tcx.infer_ctxt().build();
+                let predicate = tcx.mk_predicate(ty::Binder::dummy(ty::PredicateKind::Clause(
+                    ty::ClauseKind::Trait(ty::TraitPredicate {
+                        trait_ref: ty::TraitRef::new(*tcx, forget_trait, iter::once(inner_source)),
+                        polarity: ty::PredicatePolarity::Positive,
+                    }),
+                )));
+                let obligation = PredicateObligation::new(
+                    *tcx,
+                    ObligationCause::dummy_with_span(tcx.span),
+                    param_env,
+                    predicate,
+                );
+
+                let ocx = ObligationCtxt::new(&infcx);
+                ocx.register_obligation(obligation);
+                let errors = ocx.select_all_or_error();
+                if !errors.is_empty() {
+                    infcx.err_ctxt().report_fulfillment_errors(errors);
+                }
+            }
+        }
+
         let type_has_metadata = |ty: Ty<'tcx>| -> bool {
             if ty.is_sized(tcx.tcx, param_env) {
                 return false;

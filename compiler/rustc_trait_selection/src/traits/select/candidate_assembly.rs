@@ -719,6 +719,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         if self.tcx().trait_is_auto(def_id) {
             match *self_ty.kind() {
+                ty::Dynamic(..) if self.tcx().lang_items().forget_trait() == Some(def_id) => {
+                    candidates.vec.push(BuiltinCandidate { has_nested: false })
+                }
                 ty::Dynamic(..) => {
                     // For object types, we don't know what the closed
                     // over types are. This means we conservatively
