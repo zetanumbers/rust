@@ -12,6 +12,13 @@ use crate::fmt::Debug;
 use crate::hash::Hash;
 use crate::hash::Hasher;
 
+#[cfg(not(bootstrap))]
+mod forget;
+
+#[cfg(not(bootstrap))]
+#[unstable(feature = "unforgettable_types", issue = "none")]
+pub use forget::*;
+
 /// Implements a given marker trait for multiple types at the same time.
 ///
 /// The basic syntax looks like this:
