@@ -1599,6 +1599,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 },
                 colon_span: None,
                 pure_wrt_drop: false,
+                forgettable: false,
                 source: hir::GenericParamSource::Generics,
             };
 

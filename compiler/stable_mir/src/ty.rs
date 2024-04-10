@@ -1274,6 +1274,7 @@ pub struct GenericParamDef {
     pub def_id: GenericDef,
     pub index: u32,
     pub pure_wrt_drop: bool,
+    pub forgettable: bool,
     pub kind: GenericParamDefKind,
 }
 

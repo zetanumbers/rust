@@ -436,6 +436,50 @@ fn collect_items_rec<'tcx>(
             // Sanity check whether this ended up being collected accidentally
             debug_assert!(should_codegen_locally(tcx, instance));
 
+            {
+                let param_env = ty::ParamEnv::reveal_all();
+                let mut infcx = None;
+
+                let mut parent = Some(instance.def_id());
+                iter::from_fn(|| {
+                    let item = parent?;
+                    let generics = tcx.generics_of(item);
+                    parent = generics.parent;
+                    Some(generics.params.as_slice())
+                })
+                .flat_map(|params| params.iter().rev())
+                .zip(instance.args.iter().rev())
+                .filter(|(g, _)| {
+                    // TODO: Error on bad may_forget, probably somewhere higher
+                    matches!(g.kind, GenericParamDefKind::Type { .. }) && g.forgettable
+                })
+                .for_each(|(g, a)| {
+                    debug_assert!(a.as_type().is_some());
+                    let param_span = tcx.def_span(g.def_id);
+                    let forget_trait = tcx.require_lang_item(LangItem::Forget, Some(param_span));
+                    let predicate = tcx.mk_predicate(ty::Binder::dummy(ty::PredicateKind::Clause(
+                        ty::ClauseKind::Trait(ty::TraitPredicate {
+                            trait_ref: ty::TraitRef::new(tcx, forget_trait, iter::once(a)),
+                            polarity: ty::PredicatePolarity::Positive,
+                        }),
+                    )));
+                    let obligation = PredicateObligation::new(
+                        tcx,
+                        ObligationCause::dummy_with_span(param_span),
+                        param_env,
+                        predicate,
+                    );
+                    let infcx = infcx.get_or_insert_with(|| tcx.infer_ctxt().build());
+
+                    let ocx = ObligationCtxt::new(infcx);
+                    ocx.register_obligation(obligation);
+                    let errors = ocx.select_all_or_error();
+                    if !errors.is_empty() {
+                        infcx.err_ctxt().report_fulfillment_errors(errors);
+                    }
+                });
+            }
+
             // Keep track of the monomorphization recursion depth
             recursion_depth_reset = Some(check_recursion_limit(
                 tcx,

@@ -251,6 +251,8 @@ declare_features! (
     (unstable, doc_notable_trait, "1.52.0", Some(45040)),
     /// Allows using the `may_dangle` attribute (RFC 1327).
     (unstable, dropck_eyepatch, "1.10.0", Some(34761)),
+    /// Allows using the `may_forget` attribute.
+    (unstable, unforgettable_types, "CURRENT_RUSTC_VERSION", None),
     /// Allows using the `#[fundamental]` attribute.
     (unstable, fundamental, "1.0.0", Some(29635)),
     /// Allows using `#[link_name="llvm.*"]`.

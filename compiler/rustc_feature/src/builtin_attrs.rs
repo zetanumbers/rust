@@ -596,6 +596,11 @@ pub const BUILTIN_ATTRIBUTES: &[BuiltinAttribute] = &[
         EncodeCrossCrate::No, dropck_eyepatch,
         "`may_dangle` has unstable semantics and may be removed in the future",
     ),
+    gated!(
+        may_forget, Normal, template!(Word), WarnFollowing,
+        EncodeCrossCrate::No, unforgettable_types,
+        "`may_forget` has unstable semantics and may be removed in the future",
+    ),
 
     rustc_attr!(
         rustc_never_type_options,

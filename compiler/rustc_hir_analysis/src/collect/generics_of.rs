@@ -232,6 +232,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                         name: kw::SelfUpper,
                         def_id: def_id.to_def_id(),
                         pure_wrt_drop: false,
+                        forgettable: false,
                         kind: ty::GenericParamDefKind::Type {
                             has_default: false,
                             synthetic: false,
@@ -286,6 +287,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         index: own_start + i as u32,
         def_id: param.def_id.to_def_id(),
         pure_wrt_drop: param.pure_wrt_drop,
+        forgettable: param.forgettable,
         kind: ty::GenericParamDefKind::Lifetime,
     }));
 
@@ -331,6 +333,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                 name: param.name.ident().name,
                 def_id: param.def_id.to_def_id(),
                 pure_wrt_drop: param.pure_wrt_drop,
+                forgettable: param.forgettable,
                 kind,
             })
         }
@@ -365,6 +368,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                 name: param.name.ident().name,
                 def_id: param.def_id.to_def_id(),
                 pure_wrt_drop: param.pure_wrt_drop,
+                forgettable: param.forgettable,
                 kind: ty::GenericParamDefKind::Const {
                     has_default: default.is_some(),
                     is_host_effect,
@@ -406,6 +410,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             name: Symbol::intern(arg),
             def_id: def_id.to_def_id(),
             pure_wrt_drop: false,
+            forgettable: false,
             kind: ty::GenericParamDefKind::Type { has_default: false, synthetic: false },
         }));
     }
@@ -417,6 +422,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             name: Symbol::intern("<const_ty>"),
             def_id: def_id.to_def_id(),
             pure_wrt_drop: false,
+            forgettable: false,
             kind: ty::GenericParamDefKind::Type { has_default: false, synthetic: false },
         });
     }

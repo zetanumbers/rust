@@ -551,6 +551,7 @@ impl<'tcx> Stable<'tcx> for rustc_middle::ty::GenericParamDef {
             def_id: tables.generic_def(self.def_id),
             index: self.index,
             pure_wrt_drop: self.pure_wrt_drop,
+            forgettable: self.forgettable,
             kind: self.kind.stable(tables),
         }
     }

@@ -2,7 +2,7 @@
 
 #![feature(unforgettable_types)]
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Unforgettable {
     _unforgettable: std::marker::PhantomUnforgettable,
 }

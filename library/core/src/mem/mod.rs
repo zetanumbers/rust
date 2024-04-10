@@ -155,7 +155,7 @@ pub const fn forget<T>(t: T) {
 /// stabilized.
 #[inline]
 #[unstable(feature = "forget_unsized", issue = "none")]
-pub fn forget_unsized<T: ?Sized>(t: T) {
+pub fn forget_unsized<#[cfg_attr(not(bootstrap), may_forget)] T: ?Sized>(t: T) {
     intrinsics::forget(t)
 }
 

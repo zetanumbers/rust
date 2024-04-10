@@ -450,6 +450,22 @@ impl<'tcx> Inliner<'tcx> {
             return Err("cold");
         }
 
+        {
+            let generics = self.tcx.generics_of(callsite.callee.def_id());
+            let parent_generic_params = generics
+                .parent
+                .filter(|parent| matches!(self.tcx.def_kind(parent), DefKind::Impl { .. }))
+                .map(|parent| self.tcx.generics_of(parent).params.as_slice())
+                .unwrap_or(&[]);
+
+            let may_forget =
+                parent_generic_params.iter().chain(&generics.params).any(|p| p.forgettable);
+
+            if may_forget {
+                return Err("#[may_forget]");
+            }
+        }
+
         if callee_attrs.no_sanitize != self.codegen_fn_attrs.no_sanitize {
             return Err("incompatible sanitizer set");
         }

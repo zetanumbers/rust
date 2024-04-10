@@ -1,0 +1,36 @@
+error[E0277]: `PhantomUnforgettable` cannot be forgotten
+  --> $SRC_DIR/core/src/mem/manually_drop.rs:LL:COL
+   |
+   = note: `PhantomUnforgettable` cannot be forgotten
+   |
+   = help: within `Unforgettable`, the trait `Forget` is not implemented for `PhantomUnforgettable`, which is required by `Unforgettable: Forget`
+note: required because it appears within the type `Unforgettable`
+  --> $DIR/forget-unforgettable.rs:6:8
+   |
+LL | struct Unforgettable {
+   |        ^^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn std::mem::ManuallyDrop::<Unforgettable>::new`
+  --> $SRC_DIR/core/src/mem/mod.rs:LL:COL
+
+error[E0277]: `PhantomUnforgettable` cannot be forgotten
+  --> $SRC_DIR/core/src/mem/mod.rs:LL:COL
+   |
+   = note: `PhantomUnforgettable` cannot be forgotten
+   |
+   = help: within `Unforgettable`, the trait `Forget` is not implemented for `PhantomUnforgettable`, which is required by `Unforgettable: Forget`
+note: required because it appears within the type `Unforgettable`
+  --> $DIR/forget-unforgettable.rs:6:8
+   |
+LL | struct Unforgettable {
+   |        ^^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn std::mem::forget_unsized::<Unforgettable>`
+  --> $DIR/forget-unforgettable.rs:12:5
+   |
+LL |     std::mem::forget_unsized(Unforgettable::default());
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0277`.

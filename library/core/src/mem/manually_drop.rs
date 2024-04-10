@@ -51,7 +51,7 @@ pub struct ManuallyDrop<T: ?Sized> {
     value: T,
 }
 
-impl<T> ManuallyDrop<T> {
+impl<#[cfg_attr(not(bootstrap), may_forget)] T> ManuallyDrop<T> {
     /// Wrap a value to be manually dropped.
     ///
     /// # Examples
@@ -70,7 +70,9 @@ impl<T> ManuallyDrop<T> {
     pub const fn new(value: T) -> ManuallyDrop<T> {
         ManuallyDrop { value }
     }
+}
 
+impl<T> ManuallyDrop<T> {
     /// Extracts the value from the `ManuallyDrop` container.
     ///
     /// This allows the value to be dropped again.

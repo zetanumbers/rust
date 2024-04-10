@@ -503,6 +503,7 @@ pub struct GenericParam<'hir> {
     pub name: ParamName,
     pub span: Span,
     pub pure_wrt_drop: bool,
+    pub forgettable: bool,
     pub kind: GenericParamKind<'hir>,
     pub colon_span: Option<Span>,
     pub source: GenericParamSource,

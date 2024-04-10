@@ -58,6 +58,11 @@ pub struct GenericParamDef {
     /// `'a`/`T` won't be accessed during the parent type's `Drop` impl.
     pub pure_wrt_drop: bool,
 
+    /// `forgettable`, set by the `#[may_forget]` attribute on generic
+    /// parameter `T`, forbids instantiation of `T` by an unforgettable
+    /// type
+    pub forgettable: bool,
+
     pub kind: GenericParamDefKind,
 }
 

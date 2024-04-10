@@ -1113,6 +1113,7 @@ symbols! {
         maxnumf32,
         maxnumf64,
         may_dangle,
+        may_forget,
         may_unwind,
         maybe_uninit,
         maybe_uninit_uninit,
