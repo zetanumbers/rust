@@ -1589,7 +1589,10 @@ pub const unsafe fn write<T>(dst: *mut T, src: T) {
 #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
 #[rustc_diagnostic_item = "ptr_write_unaligned"]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-pub const unsafe fn write_unaligned<T>(dst: *mut T, src: T) {
+pub const unsafe fn write_unaligned<#[cfg_attr(not(bootstrap), may_forget)] T>(
+    dst: *mut T,
+    src: T,
+) {
     // SAFETY: the caller must guarantee that `dst` is valid for writes.
     // `dst` cannot overlap `src` because the caller has mutable access
     // to `dst` while `src` is owned by this function.
@@ -1743,7 +1746,7 @@ pub unsafe fn read_volatile<T>(src: *const T) -> T {
 #[stable(feature = "volatile", since = "1.9.0")]
 #[rustc_diagnostic_item = "ptr_write_volatile"]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
+pub unsafe fn write_volatile<#[cfg_attr(not(bootstrap), may_forget)] T>(dst: *mut T, src: T) {
     // SAFETY: the caller must uphold the safety contract for `volatile_store`.
     unsafe {
         ub_checks::assert_unsafe_precondition!(

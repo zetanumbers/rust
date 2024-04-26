@@ -267,7 +267,7 @@ impl<T> fmt::Debug for MaybeUninit<T> {
     }
 }
 
-impl<T> MaybeUninit<T> {
+impl<#[cfg_attr(not(bootstrap), may_forget)] T> MaybeUninit<T> {
     /// Creates a new `MaybeUninit<T>` initialized with the given value.
     /// It is safe to call [`assume_init`] on the return value of this function.
     ///
@@ -290,7 +290,9 @@ impl<T> MaybeUninit<T> {
     pub const fn new(val: T) -> MaybeUninit<T> {
         MaybeUninit { value: ManuallyDrop::new(val) }
     }
+}
 
+impl<T> MaybeUninit<T> {
     /// Creates a new `MaybeUninit<T>` in an uninitialized state.
     ///
     /// Note that dropping a `MaybeUninit<T>` will never call `T`'s drop code.
@@ -351,7 +353,10 @@ impl<T> MaybeUninit<T> {
         // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
         unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() }
     }
+}
 
+/// Could `MaybeUninit::zeroed` forget?
+impl<#[cfg_attr(not(bootstrap), may_forget)] T> MaybeUninit<T> {
     /// Creates a new `MaybeUninit<T>` in an uninitialized state, with the memory being
     /// filled with `0` bytes. It depends on `T` whether that already makes for
     /// proper initialization. For example, `MaybeUninit<usize>::zeroed()` is initialized,
@@ -495,7 +500,9 @@ impl<T> MaybeUninit<T> {
         // SAFETY: We just initialized this value.
         unsafe { self.assume_init_mut() }
     }
+}
 
+impl<T> MaybeUninit<T> {
     /// Gets a pointer to the contained value. Reading from this pointer or turning it
     /// into a reference is undefined behavior unless the `MaybeUninit<T>` is initialized.
     /// Writing to memory that this pointer (non-transitively) points to is undefined behavior
@@ -1013,7 +1020,9 @@ impl<T> MaybeUninit<T> {
     pub const fn slice_as_mut_ptr(this: &mut [MaybeUninit<T>]) -> *mut T {
         this.as_mut_ptr() as *mut T
     }
+}
 
+impl<#[cfg_attr(not(bootstrap), may_forget)] T> MaybeUninit<T> {
     /// Copies the elements from `src` to `this`, returning a mutable reference to the now initialized contents of `this`.
     ///
     /// If `T` does not implement `Copy`, use [`clone_from_slice`]

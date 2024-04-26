@@ -376,7 +376,7 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     }
 }
 
-impl<T> Rc<T> {
+impl<#[cfg_attr(not(bootstrap), may_forget)] T> Rc<T> {
     /// Constructs a new `Rc<T>`.
     ///
     /// # Examples
@@ -671,6 +671,9 @@ impl<T, A: Allocator> Rc<T, A> {
     pub fn allocator(this: &Self) -> &A {
         &this.alloc
     }
+}
+
+impl<#[cfg_attr(not(bootstrap), may_forget)] T, A: Allocator> Rc<T, A> {
     /// Constructs a new `Rc` in the provided allocator.
     ///
     /// # Examples
@@ -966,7 +969,7 @@ impl<T, A: Allocator> Rc<T, A> {
     }
 }
 
-impl<T> Rc<[T]> {
+impl<#[cfg_attr(not(bootstrap), may_forget)] T> Rc<[T]> {
     /// Constructs a new reference-counted slice with uninitialized contents.
     ///
     /// # Examples
@@ -1033,7 +1036,7 @@ impl<T> Rc<[T]> {
     }
 }
 
-impl<T, A: Allocator> Rc<[T], A> {
+impl<#[cfg_attr(not(bootstrap), may_forget)] T, A: Allocator> Rc<[T], A> {
     /// Constructs a new reference-counted slice with uninitialized contents.
     ///
     /// # Examples
@@ -1262,7 +1265,9 @@ impl<T: ?Sized> Rc<T> {
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr, Global) }
     }
+}
 
+impl<#[cfg_attr(not(bootstrap), may_forget)] T: ?Sized> Rc<T> {
     /// Increments the strong reference count on the `Rc<T>` associated with the
     /// provided pointer by one.
     ///
@@ -1329,7 +1334,7 @@ impl<T: ?Sized> Rc<T> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> Rc<T, A> {
+impl<#[cfg_attr(not(bootstrap), may_forget)] T: ?Sized, A: Allocator> Rc<T, A> {
     /// Consumes the `Rc`, returning the wrapped pointer.
     ///
     /// To avoid a memory leak the pointer must be converted back to an `Rc` using
@@ -1352,7 +1357,9 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
         mem::forget(this);
         ptr
     }
+}
 
+impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// Provides a raw pointer to the data.
     ///
     /// The counts are not affected in any way and the `Rc` is not consumed. The pointer is valid
@@ -1976,7 +1983,9 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
             )
         }
     }
+}
 
+impl<#[cfg_attr(not(bootstrap), may_forget)] T: ?Sized, A: Allocator> Rc<T, A> {
     #[cfg(not(no_global_oom_handling))]
     fn from_box_in(src: Box<T, A>) -> Rc<T, A> {
         unsafe {

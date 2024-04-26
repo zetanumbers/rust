@@ -2875,7 +2875,11 @@ pub unsafe fn vtable_align(_ptr: *const ()) -> usize {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
-pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
+pub const unsafe fn copy_nonoverlapping<#[cfg_attr(not(bootstrap), may_forget)] T>(
+    src: *const T,
+    dst: *mut T,
+    count: usize,
+) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
         #[rustc_nounwind]
@@ -2977,7 +2981,11 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy"]
-pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
+pub const unsafe fn copy<#[cfg_attr(not(bootstrap), may_forget)] T>(
+    src: *const T,
+    dst: *mut T,
+    count: usize,
+) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
         #[rustc_nounwind]
@@ -3058,7 +3066,11 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
-pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
+pub const unsafe fn write_bytes<#[cfg_attr(not(bootstrap), may_forget)] T>(
+    dst: *mut T,
+    val: u8,
+    count: usize,
+) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
         #[rustc_nounwind]
