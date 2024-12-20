@@ -60,6 +60,16 @@ exclude = [
   "obj",
 ]
 
+[patch.crates-io]
+indexmap = { git = "https://github.com/zetanumbers/indexmap.git", branch = "rustc-fibers" }
+
+[patch.'https://github.com/zetanumbers/stacker']
+rustc-stacker = { path = "/home/zetanumbers/dev/stacker" }
+
+[patch.'https://github.com/zetanumbers/rayon']
+rustc-rayon-core = { path = "/home/zetanumbers/dev/rayon/rayon-core" }
+rustc-rayon = { path = "/home/zetanumbers/dev/rayon" }
+
 [profile.release.package.rustc-rayon-core]
 # The rustc fork of Rayon has deadlock detection code which intermittently
 # causes overflows in the CI (see https://github.com/rust-lang/rust/issues/90227)
