@@ -53,7 +53,8 @@ macro_rules! already_send {
 already_send!(
     [std::backtrace::Backtrace][std::io::Stdout][std::io::Stderr][std::io::Error][std::fs::File]
         [rustc_arena::DroplessArena][crate::memmap::Mmap][crate::profiling::SelfProfiler]
-        [crate::owned_slice::OwnedSlice]
+        [crate::owned_slice::OwnedSlice][rayon_core::Registry][rayon_core::lock_api::RawMutex]
+        [rayon::Condvar]
 );
 
 macro_rules! impl_dyn_send {
@@ -121,7 +122,8 @@ already_sync!(
     [std::sync::atomic::AtomicBool][std::sync::atomic::AtomicUsize][std::sync::atomic::AtomicU8]
         [std::sync::atomic::AtomicU32][std::backtrace::Backtrace][std::io::Error][std::fs::File]
         [jobserver_crate::Client][crate::memmap::Mmap][crate::profiling::SelfProfiler]
-        [crate::owned_slice::OwnedSlice]
+        [crate::owned_slice::OwnedSlice][rayon_core::Registry][rayon_core::lock_api::RawMutex]
+        [rayon::Condvar]
 );
 
 // Use portable AtomicU64 for targets without native 64-bit atomics

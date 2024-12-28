@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 # tidy-alphabetical-start
-parking_lot = "0.12"
 rustc-rayon-core = { git = "https://github.com/zetanumbers/rayon.git", branch = "rustc-fibers-v2" }
 rustc_abi = { path = "../rustc_abi" }
 rustc_ast = { path = "../rustc_ast" }
