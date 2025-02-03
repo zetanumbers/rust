@@ -236,7 +236,6 @@ impl<I> QueryLatch<I> {
             // If this detects a deadlock and the deadlock handler wants to resume this thread
             // we have to be in the `wait` call. This is ensured by the deadlock handler
             // getting the self.info lock.
-            rayon_core::mark_blocked();
             jobserver::release_thread();
             waiter.condvar.wait(&mut info);
             // Release the lock before we potentially block in `acquire_thread`
