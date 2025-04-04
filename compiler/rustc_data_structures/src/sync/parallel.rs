@@ -6,7 +6,7 @@
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-use parking_lot::Mutex;
+use rayon::Mutex;
 use rayon::iter::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::FatalErrorMarker;

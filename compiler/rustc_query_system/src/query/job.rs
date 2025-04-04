@@ -249,9 +249,7 @@ impl<I> QueryLatch<I> {
         let mut info = self.info.lock();
         debug_assert!(!info.complete);
         info.complete = true;
-        let registry = rayon_core::Registry::current();
         for waiter in info.waiters.drain(..) {
-            rayon_core::mark_unblocked(&registry);
             waiter.condvar.notify_one();
         }
     }
@@ -531,13 +529,6 @@ pub fn break_query_cycles<I: Clone + Debug>(
             current query map:\n{:#?}",
             query_map
         );
-    }
-
-    // Mark all the thread we're about to wake up as unblocked. This needs to be done before
-    // we wake the threads up as otherwise Rayon could detect a deadlock if a thread we
-    // resumed fell asleep and this thread had yet to mark the remaining threads as unblocked.
-    for _ in 0..wakelist.len() {
-        rayon_core::mark_unblocked(registry);
     }
 
     for waiter in wakelist.into_iter() {

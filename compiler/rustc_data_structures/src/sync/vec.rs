@@ -26,7 +26,7 @@ impl<I: Idx, T: Copy> AppendOnlyIndexVec<I, T> {
 
 #[derive(Default)]
 pub struct AppendOnlyVec<T: Copy> {
-    vec: parking_lot::RwLock<Vec<T>>,
+    vec: rayon_core::RwLock<Vec<T>>,
 }
 
 impl<T: Copy> AppendOnlyVec<T> {
