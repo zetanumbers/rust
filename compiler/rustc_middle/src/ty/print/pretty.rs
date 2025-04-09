@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::fmt::{self, Write as _};
 use std::iter;
 use std::ops::{Deref, DerefMut};
@@ -24,6 +23,7 @@ use smallvec::SmallVec;
 use super::*;
 use crate::mir::interpret::{AllocRange, GlobalAlloc, Pointer, Provenance, Scalar};
 use crate::query::{IntoQueryParam, Providers};
+use crate::ty::context::tls;
 use crate::ty::{
     ConstInt, Expr, GenericArgKind, ParamConst, ScalarInt, Term, TermKind, TraitPredicate,
     TypeFoldable, TypeSuperFoldable, TypeSuperVisitable, TypeVisitable, TypeVisitableExt,
@@ -56,14 +56,34 @@ macro_rules! define_scoped_cx {
     };
 }
 
-thread_local! {
-    static FORCE_IMPL_FILENAME_LINE: Cell<bool> = const { Cell::new(false) };
-    static SHOULD_PREFIX_WITH_CRATE: Cell<bool> = const { Cell::new(false) };
-    static NO_TRIMMED_PATH: Cell<bool> = const { Cell::new(false) };
-    static FORCE_TRIMMED_PATH: Cell<bool> = const { Cell::new(false) };
-    static REDUCED_QUERIES: Cell<bool> = const { Cell::new(false) };
-    static NO_VISIBLE_PATH: Cell<bool> = const { Cell::new(false) };
-    static RTN_MODE: Cell<RtnMode> = const { Cell::new(RtnMode::ForDiagnostic) };
+bitflags::bitflags! {
+    #[derive(Clone, Copy, PartialEq, Eq, Default)]
+    pub struct PrintFlags: u8 {
+        const FORCE_IMPL_FILENAME_LINE = 0b0000_0001;
+        const SHOULD_PREFIX_WITH_CRATE = 0b0000_0010;
+        const NO_TRIMMED_PATH = 0b0000_0100;
+        const FORCE_TRIMMED_PATH = 0b0000_1000;
+        const REDUCED_QUERIES = 0b0001_0000;
+        const NO_VISIBLE_PATH = 0b0010_0000;
+    }
+}
+
+impl PrintFlags {
+    pub const fn new() -> Self {
+        PrintFlags::empty()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PrintOptions {
+    pub flags: PrintFlags,
+    pub rtn_mode: RtnMode,
+}
+
+impl PrintOptions {
+    pub const fn new() -> Self {
+        PrintOptions { flags: PrintFlags::new(), rtn_mode: RtnMode::ForDiagnostic }
+    }
 }
 
 /// Rendering style for RTN types.
@@ -77,34 +97,32 @@ pub enum RtnMode {
     ForSuggestion,
 }
 
+impl RtnMode {
+    fn from_context() -> Self {
+        tls::with_context(|icx| icx.print_options.rtn_mode)
+    }
+}
+
 macro_rules! define_helper {
-    ($($(#[$a:meta])* fn $name:ident($helper:ident, $tl:ident);)+) => {
+    ($($(#[$a:meta])* fn $name:ident($flag:ident);)+) => {
         $(
-            #[must_use]
-            pub struct $helper(bool);
-
-            impl $helper {
-                pub fn new() -> $helper {
-                    $helper($tl.with(|c| c.replace(true)))
-                }
-            }
-
             $(#[$a])*
             pub macro $name($e:expr) {
-                {
-                    let _guard = $helper::new();
-                    $e
-                }
-            }
-
-            impl Drop for $helper {
-                fn drop(&mut self) {
-                    $tl.with(|c| c.set(self.0))
-                }
+                $crate::ty::context::tls::update_context!({
+                    print_options: $crate::ty::print::PrintOptions {
+                        flags: print_options.flags |
+                            $crate::ty::print::PrintFlags::$flag,
+                        ..*print_options
+                    },
+                }, $e)
             }
 
             pub fn $name() -> bool {
-                $tl.with(|c| c.get())
+                $crate::ty::context::tls::with_context(|icx| {
+                    icx.print_options.flags &
+                        $crate::ty::print::PrintFlags::$flag !=
+                        $crate::ty::print::PrintFlags::empty()
+                })
             }
         )+
     }
@@ -118,63 +136,61 @@ define_helper!(
     /// for opaque types), to ensure that any debug printing that
     /// occurs during the query computation does not end up recursively
     /// calling the same query.
-    fn with_reduced_queries(ReducedQueriesGuard, REDUCED_QUERIES);
+    fn with_reduced_queries(REDUCED_QUERIES);
     /// Force us to name impls with just the filename/line number. We
     /// normally try to use types. But at some points, notably while printing
     /// cycle errors, this can result in extra or suboptimal error output,
     /// so this variable disables that check.
-    fn with_forced_impl_filename_line(ForcedImplGuard, FORCE_IMPL_FILENAME_LINE);
+    fn with_forced_impl_filename_line(FORCE_IMPL_FILENAME_LINE);
     /// Adds the `crate::` prefix to paths where appropriate.
-    fn with_crate_prefix(CratePrefixGuard, SHOULD_PREFIX_WITH_CRATE);
+    fn with_crate_prefix(SHOULD_PREFIX_WITH_CRATE);
     /// Prevent path trimming if it is turned on. Path trimming affects `Display` impl
     /// of various rustc types, for example `std::vec::Vec` would be trimmed to `Vec`,
     /// if no other `Vec` is found.
-    fn with_no_trimmed_paths(NoTrimmedGuard, NO_TRIMMED_PATH);
-    fn with_forced_trimmed_paths(ForceTrimmedGuard, FORCE_TRIMMED_PATH);
+    fn with_no_trimmed_paths(NO_TRIMMED_PATH);
+    fn with_forced_trimmed_paths(FORCE_TRIMMED_PATH);
     /// Prevent selection of visible paths. `Display` impl of DefId will prefer
     /// visible (public) reexports of types as paths.
-    fn with_no_visible_paths(NoVisibleGuard, NO_VISIBLE_PATH);
+    fn with_no_visible_paths(NO_VISIBLE_PATH);
 );
-
-#[must_use]
-pub struct RtnModeHelper(RtnMode);
-
-impl RtnModeHelper {
-    pub fn with(mode: RtnMode) -> RtnModeHelper {
-        RtnModeHelper(RTN_MODE.with(|c| c.replace(mode)))
-    }
-}
-
-impl Drop for RtnModeHelper {
-    fn drop(&mut self) {
-        RTN_MODE.with(|c| c.set(self.0))
-    }
-}
 
 /// Print types for the purposes of a suggestion.
 ///
 /// Specifically, this will render RPITITs as `T::method(..)` which is suitable for
 /// things like where-clauses.
-pub macro with_types_for_suggestion($e:expr) {{
-    let _guard = $crate::ty::print::pretty::RtnModeHelper::with(RtnMode::ForSuggestion);
-    $e
-}}
+pub macro with_types_for_suggestion($e:expr) {
+    $crate::ty::context::tls::update_context!({
+        print_options: $crate::ty::print::PrintOptions {
+            rtn_mode: $crate::ty::print::RtnMode::ForSuggestion,
+            ..*print_options
+        },
+    }, $e)
+}
 
 /// Print types for the purposes of a signature suggestion.
 ///
 /// Specifically, this will render RPITITs as `impl Trait` rather than `T::method(..)`.
 pub macro with_types_for_signature($e:expr) {{
-    let _guard = $crate::ty::print::pretty::RtnModeHelper::with(RtnMode::ForSignature);
-    $e
+    $crate::ty::context::tls::update_context!({
+        print_options: $crate::ty::print::PrintOptions {
+            rtn_mode: $crate::ty::print::RtnMode::ForSignature,
+            ..*print_options
+        },
+    }, $e)
 }}
 
 /// Avoids running any queries during prints.
 pub macro with_no_queries($e:expr) {{
-    $crate::ty::print::with_reduced_queries!($crate::ty::print::with_forced_impl_filename_line!(
-        $crate::ty::print::with_no_trimmed_paths!($crate::ty::print::with_no_visible_paths!(
-            $crate::ty::print::with_forced_impl_filename_line!($e)
-        ))
-    ))
+    $crate::ty::context::tls::update_context!({
+        print_options: $crate::ty::print::PrintOptions {
+            flags: print_options.flags |
+                $crate::ty::print::PrintFlags::REDUCED_QUERIES |
+                $crate::ty::print::PrintFlags::FORCE_IMPL_FILENAME_LINE |
+                $crate::ty::print::PrintFlags::NO_TRIMMED_PATH |
+                $crate::ty::print::PrintFlags::NO_VISIBLE_PATH,
+            ..*print_options
+        },
+    }, $e)
 }}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -1355,7 +1371,7 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
             None
         };
 
-        match (fn_args, RTN_MODE.with(|c| c.get())) {
+        match (fn_args, RtnMode::from_context()) {
             (Some((fn_def_id, fn_args)), RtnMode::ForDiagnostic) => {
                 self.pretty_print_opaque_impl_type(def_id, args)?;
                 write!(self, " {{ ")?;
