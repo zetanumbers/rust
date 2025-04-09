@@ -155,6 +155,7 @@ impl<'tcx> QueryContext for QueryCtxt<'tcx> {
                 query: Some(token),
                 query_depth: current_icx.query_depth + depth_limit as usize,
                 task_deps: current_icx.task_deps,
+                print_options: ty::print::PrintOptions::new(),
             };
 
             // Use the `ImplicitCtxt` while we execute the query.

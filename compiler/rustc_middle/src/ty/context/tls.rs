@@ -5,6 +5,7 @@ use rustc_data_structures::sync;
 use super::{GlobalCtxt, TyCtxt};
 use crate::dep_graph::TaskDepsRef;
 use crate::query::plumbing::QueryJobId;
+use crate::ty::print::PrintOptions;
 
 /// This is the implicit state of rustc. It contains the current
 /// `TyCtxt` and query. It is updated when creating a local interner or
@@ -26,27 +27,67 @@ pub struct ImplicitCtxt<'a, 'tcx> {
     /// The current dep graph task. This is used to add dependencies to queries
     /// when executing them.
     pub task_deps: TaskDepsRef<'a>,
+
+    pub print_options: PrintOptions,
 }
 
 impl<'a, 'tcx> ImplicitCtxt<'a, 'tcx> {
     pub fn new(gcx: &'tcx GlobalCtxt<'tcx>) -> Self {
         let tcx = TyCtxt { gcx };
-        ImplicitCtxt { tcx, query: None, query_depth: 0, task_deps: TaskDepsRef::Ignore }
+        ImplicitCtxt {
+            tcx,
+            query: None,
+            query_depth: 0,
+            task_deps: TaskDepsRef::Ignore,
+            print_options: PrintOptions::new(),
+        }
     }
 }
 
 // Import the thread-local variable from Rayon, which is preserved for Rayon jobs.
-use colorless::tlv::TLV;
+use __macro_internals::{downcast, erase};
 
-#[inline]
-fn erase(context: &ImplicitCtxt<'_, '_>) -> *const () {
-    context as *const _ as *const ()
+#[doc(hidden)]
+pub mod __macro_internals {
+    pub use rayon_core::tlv::TLV;
+
+    use super::ImplicitCtxt;
+
+    #[inline]
+    pub fn erase(context: &ImplicitCtxt<'_, '_>) -> *const () {
+        context as *const _ as *const ()
+    }
+
+    #[inline]
+    pub unsafe fn downcast<'a, 'tcx>(context: *const ()) -> &'a ImplicitCtxt<'a, 'tcx> {
+        unsafe { &*(context as *const ImplicitCtxt<'a, 'tcx>) }
+    }
 }
 
-#[inline]
-unsafe fn downcast<'a, 'tcx>(context: *const ()) -> &'a ImplicitCtxt<'a, 'tcx> {
-    unsafe { &*(context as *const ImplicitCtxt<'a, 'tcx>) }
-}
+pub macro update_context({$($field:ident : $e:expr,)+}, $body:expr) {{
+    let context = $crate::ty::context::tls::__macro_internals::TLV.get();
+    if context.is_null() {
+        panic!("no ImplicitCtxt stored in tls")
+    } else {
+        // We could get an `ImplicitCtxt` pointer from another thread.
+        // Ensure that `ImplicitCtxt` is `DynSync`.
+        rustc_data_structures::sync::assert_dyn_sync::<ImplicitCtxt<'_, '_>>();
+
+        let context = unsafe { $crate::ty::context::tls::__macro_internals::downcast(context) };
+
+        let new_context = $crate::ty::context::tls::ImplicitCtxt {
+            $($field : {
+                let $field = &context.$field;
+                $e
+            },)+
+            ..context.clone()
+        };
+        let new_context = &new_context;
+        let old = $crate::ty::context::tls::__macro_internals::TLV.replace($crate::ty::context::tls::__macro_internals::erase(new_context));
+        let _reset = rustc_data_structures::defer(move || $crate::ty::context::tls::__macro_internals::TLV.set(old));
+        $body
+    }
+}}
 
 /// Sets `context` as the new current `ImplicitCtxt` for the duration of the function `f`.
 #[inline]
