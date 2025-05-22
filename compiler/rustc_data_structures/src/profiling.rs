@@ -91,9 +91,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fs, process};
 
+use colorless_lock::RwLock;
 pub use measureme::EventId;
 use measureme::{EventIdBuilder, Profiler, SerializableString, StringId};
-use parking_lot::RwLock;
 use smallvec::SmallVec;
 use tracing::warn;
 

@@ -5,7 +5,7 @@ use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 
-use parking_lot::{Condvar, Mutex};
+use colorless_lock::{Condvar, Mutex};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_errors::{Diag, DiagCtxtHandle};
 use rustc_hir::def::DefKind;
@@ -236,10 +236,10 @@ impl<I> QueryLatch<I> {
             // If this detects a deadlock and the deadlock handler wants to resume this thread
             // we have to be in the `wait` call. This is ensured by the deadlock handler
             // getting the self.info lock.
-            rayon_core::mark_blocked();
+            colorless_executor::mark_blocked();
             let proxy = qcx.jobserver_proxy();
             proxy.release_thread();
-            waiter.condvar.wait(&mut info);
+            info = waiter.condvar.wait(info);
             // Release the lock before we potentially block in `acquire_thread`
             drop(info);
             proxy.acquire_thread();
@@ -251,9 +251,8 @@ impl<I> QueryLatch<I> {
         let mut info = self.info.lock();
         debug_assert!(!info.complete);
         info.complete = true;
-        let registry = rayon_core::Registry::current();
         for waiter in info.waiters.drain(..) {
-            rayon_core::mark_unblocked(&registry);
+            colorless_executor::mark_unblocked();
             waiter.condvar.notify_one();
         }
     }
@@ -505,10 +504,7 @@ fn remove_cycle<I: Clone>(
 /// uses a query latch and then resuming that waiter.
 /// There may be multiple cycles involved in a deadlock, so this searches
 /// all active queries for cycles before finally resuming all the waiters at once.
-pub fn break_query_cycles<I: Clone + Debug>(
-    query_map: QueryMap<I>,
-    registry: &rayon_core::Registry,
-) {
+pub fn break_query_cycles<I: Clone + Debug>(query_map: QueryMap<I>) {
     let mut wakelist = Vec::new();
     let mut jobs: Vec<QueryJobId> = query_map.keys().cloned().collect();
 
@@ -539,7 +535,7 @@ pub fn break_query_cycles<I: Clone + Debug>(
     // we wake the threads up as otherwise Rayon could detect a deadlock if a thread we
     // resumed fell asleep and this thread had yet to mark the remaining threads as unblocked.
     for _ in 0..wakelist.len() {
-        rayon_core::mark_unblocked(registry);
+        colorless_executor::mark_unblocked();
     }
 
     for waiter in wakelist.into_iter() {

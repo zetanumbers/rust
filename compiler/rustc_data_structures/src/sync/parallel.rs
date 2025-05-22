@@ -4,9 +4,13 @@
 #![allow(dead_code)]
 
 use std::any::Any;
+use std::mem::MaybeUninit;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-use parking_lot::Mutex;
+use colorless::Stackify;
+use colorless_executor::futures_lite::StreamExt;
+use colorless_lock::Mutex;
+use scope_lock::{RefOnce, lock_scope};
 
 use crate::FatalErrorMarker;
 use crate::sync::{DynSend, DynSync, FromDyn, IntoDynSyncSend, mode};
@@ -62,28 +66,36 @@ where
 /// the current thread. Use that for the longest running block.
 #[macro_export]
 macro_rules! parallel {
-        (impl $fblock:block [$($c:expr,)*] [$block:expr $(, $rest:expr)*]) => {
-            parallel!(impl $fblock [$block, $($c,)*] [$($rest),*])
+        (impl $fblock:block [$($cnames:ident : $c:expr,)*] [$name:ident : $block:expr $(, $names:ident : $rest:expr)*]) => {
+            parallel!(impl $fblock [$name: $block, $($cnames: $c,)*] [$($names: $rest),*])
         };
-        (impl $fblock:block [$($blocks:expr,)*] []) => {
+        (impl $fblock:block [$($names:ident : $blocks:expr,)*] []) => {
             $crate::sync::parallel_guard(|guard| {
-                $crate::sync::scope(|s| {
+                $(
+                    let mut $names = ::std::mem::MaybeUninit::uninit();
+                )*
+                $crate::sync::scope(|extend| {
                     $(
                         let block = $crate::sync::FromDyn::from(|| $blocks);
-                        s.spawn(move |_| {
+                        let block = move |()| {
                             guard.run(move || block.into_inner()());
-                        });
+                        };
+                        let block = extend.fn_once($crate::sync::RefOnce::new(block, &mut $names));
+                        let $names = $crate::sync::spawn_task(move || block(()));
                     )*
                     guard.run(|| $fblock);
+                    $(
+                        $crate::sync::Stackify::await_($names).unwrap();
+                    )*
                 });
             });
         };
-        ($fblock:block, $($blocks:block),*) => {
+        ($fname:ident : $fblock:block, $($names:ident : $blocks:block),*) => {
             if $crate::sync::is_dyn_thread_safe() {
                 // Reverse the order of the later blocks since Rayon executes them in reverse order
                 // when using a single thread. This ensures the execution order matches that
                 // of a single threaded rustc.
-                parallel!(impl $fblock [] [$($blocks),*]);
+                parallel!(impl $fblock [] [$($names: $blocks),*]);
             } else {
                 $crate::sync::parallel_guard(|guard| {
                     guard.run(|| $fblock);
@@ -96,7 +108,7 @@ macro_rules! parallel {
 pub fn spawn(func: impl FnOnce() + DynSend + 'static) {
     if mode::is_dyn_thread_safe() {
         let func = FromDyn::from(func);
-        rayon_core::spawn(|| {
+        colorless_executor::spawn(|| {
             (func.into_inner())();
         });
     } else {
@@ -105,13 +117,13 @@ pub fn spawn(func: impl FnOnce() + DynSend + 'static) {
 }
 
 // This function only works when `mode::is_dyn_thread_safe()`.
-pub fn scope<'scope, OP, R>(op: OP) -> R
+pub fn scope<'env, OP, R>(op: OP) -> R
 where
-    OP: FnOnce(&rayon_core::Scope<'scope>) -> R + DynSend,
+    OP: for<'scope> FnOnce(&'scope scope_lock::Extender<'scope, 'env>) -> R + DynSend,
     R: DynSend,
 {
     let op = FromDyn::from(op);
-    rayon_core::scope(|s| FromDyn::from(op.into_inner()(s))).into_inner()
+    lock_scope(|s| FromDyn::from(op.into_inner()(s))).into_inner()
 }
 
 #[inline]
@@ -124,10 +136,20 @@ where
         let oper_a = FromDyn::from(oper_a);
         let oper_b = FromDyn::from(oper_b);
         let (a, b) = parallel_guard(|guard| {
-            rayon_core::join(
-                move || guard.run(move || FromDyn::from(oper_a.into_inner()())),
-                move || guard.run(move || FromDyn::from(oper_b.into_inner()())),
-            )
+            let mut slot = MaybeUninit::uninit();
+            let mut b = None;
+            let a = lock_scope(|extend| {
+                let oper_b = |()| b = Some(guard.run(move || FromDyn::from(oper_b.into_inner()())));
+                let oper_b = RefOnce::new(oper_b, &mut slot);
+                let oper_b = extend.fn_once(oper_b);
+                let task_b = colorless_executor::spawn(|| {
+                    oper_b(());
+                });
+                let a = guard.run(move || FromDyn::from(oper_a.into_inner()()));
+                task_b.await_().unwrap();
+                a
+            });
+            (a, b.unwrap())
         });
         (a.unwrap().into_inner(), b.unwrap().into_inner())
     } else {
@@ -158,7 +180,15 @@ fn par_slice<I: DynSend>(
             let (left, right) = items.split_at_mut(items.len() / 2);
             let mut left = state.for_each.derive(left);
             let mut right = state.for_each.derive(right);
-            rayon_core::join(move || par_rec(*left, state), move || par_rec(*right, state));
+
+            let mut slot = MaybeUninit::uninit();
+            lock_scope(|extend| {
+                let right = RefOnce::new(move |()| par_rec(*right, state), &mut slot);
+                let right = extend.fn_once(right);
+                let right = colorless_executor::spawn(|| right(()));
+                par_rec(*left, state);
+                right.await_().unwrap();
+            });
         }
     }
 
@@ -238,11 +268,31 @@ pub fn par_map<I: DynSend, T: IntoIterator<Item = I>, R: DynSend, C: FromIterato
     })
 }
 
-pub fn broadcast<R: DynSend>(op: impl Fn(usize) -> R + DynSync) -> Vec<R> {
+pub fn broadcast<R: DynSend>(op: impl Fn(usize) -> R + DynSync + DynSend) -> Vec<R> {
     if mode::is_dyn_thread_safe() {
         let op = FromDyn::from(op);
-        let results = rayon_core::broadcast(|context| op.derive(op(context.index())));
-        results.into_iter().map(|r| r.into_inner()).collect()
+        let op = &op;
+        let num_threads = colorless_executor::num_threads();
+        let mut slots: Vec<_> = (0..num_threads).map(|_| MaybeUninit::uninit()).collect();
+        let mut results: Vec<_> = (0..num_threads).map(|_| None).collect();
+
+        lock_scope(|extend| {
+            let mut iter = slots.iter_mut().zip(&mut results).enumerate();
+            let tasks = colorless_executor::broadcast(|| {
+                let (index, (slot, result)) = iter.next().unwrap();
+                let f = extend.fn_once(RefOnce::new(
+                    move |()| {
+                        let old = result.replace(op.derive(op(index)));
+                        assert!(old.is_none());
+                    },
+                    slot,
+                ));
+                move || f(())
+            });
+            tasks.for_each(|_| ()).await_().unwrap();
+        });
+
+        results.into_iter().map(|r| r.unwrap().into_inner()).collect()
     } else {
         vec![op(0)]
     }

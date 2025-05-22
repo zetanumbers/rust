@@ -10,9 +10,10 @@
 //! information, source code snippets, etc.
 
 use std::io::{self, BorrowedBuf, Read};
+use std::ops::Deref;
 use std::{fs, path};
 
-use rustc_data_structures::sync::{IntoDynSyncSend, MappedReadGuard, ReadGuard, RwLock};
+use rustc_data_structures::sync::{IntoDynSyncSend, ReadGuard, RwLock};
 use rustc_data_structures::unhash::UnhashMap;
 use rustc_macros::{Decodable, Encodable};
 use tracing::{debug, instrument, trace};
@@ -176,6 +177,18 @@ struct SourceMapFiles {
     stable_id_to_source_file: UnhashMap<StableSourceFileId, Arc<SourceFile>>,
 }
 
+pub struct SourceMapFilesBorrow<'a> {
+    guard: ReadGuard<'a, SourceMapFiles>,
+}
+
+impl<'a> Deref for SourceMapFilesBorrow<'a> {
+    type Target = monotonic::MonotonicVec<Arc<SourceFile>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.guard.source_files
+    }
+}
+
 /// Used to construct a `SourceMap` with `SourceMap::with_inputs`.
 pub struct SourceMapInputs {
     pub file_loader: Box<dyn FileLoader + Send + Sync>,
@@ -265,8 +278,8 @@ impl SourceMap {
 
     // By returning a `MonotonicVec`, we ensure that consumers cannot invalidate
     // any existing indices pointing into `files`.
-    pub fn files(&self) -> MappedReadGuard<'_, monotonic::MonotonicVec<Arc<SourceFile>>> {
-        ReadGuard::map(self.files.borrow(), |files| &files.source_files)
+    pub fn files(&self) -> SourceMapFilesBorrow<'_> {
+        SourceMapFilesBorrow { guard: self.files.borrow() }
     }
 
     pub fn source_file_by_stable_id(

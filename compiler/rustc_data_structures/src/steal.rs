@@ -1,5 +1,7 @@
+use std::ops::Deref;
+
 use crate::stable_hasher::{HashStable, StableHasher};
-use crate::sync::{MappedReadGuard, ReadGuard, RwLock};
+use crate::sync::{ReadGuard, RwLock};
 
 /// The `Steal` struct is intended to used as the value for a query.
 /// Specifically, we sometimes have queries (*cough* MIR *cough*)
@@ -32,12 +34,12 @@ impl<T> Steal<T> {
     }
 
     #[track_caller]
-    pub fn borrow(&self) -> MappedReadGuard<'_, T> {
+    pub fn borrow(&self) -> StealBorrow<'_, T> {
         let borrow = self.value.borrow();
         if borrow.is_none() {
             panic!("attempted to read from stolen value: {}", std::any::type_name::<T>());
         }
-        ReadGuard::map(borrow, |opt| opt.as_ref().unwrap())
+        StealBorrow { borrow }
     }
 
     #[track_caller]
@@ -66,5 +68,17 @@ impl<T> Steal<T> {
 impl<CTX, T: HashStable<CTX>> HashStable<CTX> for Steal<T> {
     fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
         self.borrow().hash_stable(hcx, hasher);
+    }
+}
+
+pub struct StealBorrow<'a, T> {
+    borrow: ReadGuard<'a, Option<T>>,
+}
+
+impl<'a, T> Deref for StealBorrow<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.borrow.as_ref().unwrap()
     }
 }

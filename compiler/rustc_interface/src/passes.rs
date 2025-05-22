@@ -944,7 +944,7 @@ fn run_required_analyses(tcx: TyCtxt<'_>) {
     let sess = tcx.sess;
     sess.time("misc_checking_1", || {
         parallel!(
-            {
+            s0: {
                 sess.time("looking_for_entry_point", || tcx.ensure_ok().entry_fn(()));
 
                 sess.time("looking_for_derive_registrar", || {
@@ -953,7 +953,7 @@ fn run_required_analyses(tcx: TyCtxt<'_>) {
 
                 CStore::from_tcx(tcx).report_unused_deps(tcx);
             },
-            {
+            s1: {
                 tcx.ensure_ok().exportable_items(LOCAL_CRATE);
                 tcx.ensure_ok().stable_order_of_exportable_impls(LOCAL_CRATE);
                 tcx.par_hir_for_each_module(|module| {
@@ -963,12 +963,12 @@ fn run_required_analyses(tcx: TyCtxt<'_>) {
                     tcx.ensure_ok().check_mod_unstable_api_usage(module);
                 });
             },
-            {
+            s2: {
                 sess.time("unused_lib_feature_checking", || {
                     rustc_passes::stability::check_unused_or_stable_features(tcx)
                 });
             },
-            {
+            s3: {
                 // We force these queries to run,
                 // since they might not otherwise get called.
                 // This marks the corresponding crate-level attributes
@@ -1073,29 +1073,29 @@ fn analysis(tcx: TyCtxt<'_>, (): ()) {
 
     sess.time("misc_checking_3", || {
         parallel!(
-            {
+            s0: {
                 tcx.ensure_ok().effective_visibilities(());
 
                 parallel!(
-                    {
+                    s00: {
                         tcx.ensure_ok().check_private_in_public(());
                     },
-                    {
+                    s01: {
                         tcx.par_hir_for_each_module(|module| {
                             tcx.ensure_ok().check_mod_deathness(module)
                         });
                     },
-                    {
+                    s02: {
                         sess.time("lint_checking", || {
                             rustc_lint::check_crate(tcx);
                         });
                     },
-                    {
+                    s03: {
                         tcx.ensure_ok().clashing_extern_declarations(());
                     }
                 );
             },
-            {
+            s1: {
                 sess.time("privacy_checking_modules", || {
                     tcx.par_hir_for_each_module(|module| {
                         tcx.ensure_ok().check_mod_privacy(module);

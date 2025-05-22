@@ -1,8 +1,8 @@
 use std::sync::{Arc, LazyLock, OnceLock};
 
+use colorless_lock::{Condvar, Mutex};
 pub use jobserver_crate::{Acquired, Client, HelperThread};
 use jobserver_crate::{FromEnv, FromEnvErrorKind};
-use parking_lot::{Condvar, Mutex};
 
 // We can only call `from_env_ext` once per process
 
@@ -140,7 +140,7 @@ impl Proxy {
             // does not get a corresponding `release_raw` call.
             self.helper.get().unwrap().request_token();
             data.pending += 1;
-            self.wake_pending.wait(&mut data);
+            self.wake_pending.wait(data);
         }
     }
 

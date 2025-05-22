@@ -17,8 +17,7 @@ use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 
-use parking_lot::RawMutex;
-use parking_lot::lock_api::RawMutex as _;
+use colorless_lock::Mutex;
 
 use crate::sync::{DynSend, DynSync, mode};
 
@@ -26,11 +25,13 @@ use crate::sync::{DynSend, DynSync, mode};
 #[must_use = "if unused the Lock will immediately unlock"]
 pub struct LockGuard<'a, T> {
     lock: &'a Lock<T>,
+    mode: LockGuardMode<'a>,
     marker: PhantomData<&'a mut T>,
+}
 
-    /// The synchronization mode of the lock. This is explicitly passed to let LLVM relate it
-    /// to the original lock operation.
-    mode: Mode,
+enum LockGuardMode<'a> {
+    NoSync,
+    Sync { guard: colorless_lock::MutexGuard<'a, ()> },
 }
 
 impl<'a, T: 'a> Deref for LockGuard<'a, T> {
@@ -56,14 +57,10 @@ impl<'a, T: 'a> Drop for LockGuard<'a, T> {
     fn drop(&mut self) {
         // SAFETY (union access): We get `self.mode` from the lock operation so it is consistent
         // with the `lock.mode` state. This means we access the right union fields.
-        match self.mode {
-            Mode::NoSync => {
-                let cell = unsafe { &self.lock.mode_union.no_sync };
-                debug_assert!(cell.get());
-                cell.set(false);
-            }
-            // SAFETY (unlock): We know that the lock is locked as this type is a proof of that.
-            Mode::Sync => unsafe { self.lock.mode_union.sync.unlock() },
+        if let LockGuardMode::NoSync = &self.mode {
+            let cell = unsafe { &self.lock.mode_union.no_sync };
+            debug_assert!(cell.get());
+            cell.set(false);
         }
     }
 }
@@ -73,7 +70,7 @@ union ModeUnion {
     no_sync: ManuallyDrop<Cell<bool>>,
 
     /// A lock implementation that's only used if `Lock.mode` is `Sync`.
-    sync: ManuallyDrop<RawMutex>,
+    sync: ManuallyDrop<Mutex<()>>,
 }
 
 /// The value representing a locked state for the `Cell`.
@@ -96,7 +93,7 @@ impl<T> Lock<T> {
     pub fn new(inner: T) -> Self {
         let (mode, mode_union) = if unlikely(mode::might_be_dyn_thread_safe()) {
             // Create the lock with synchronization enabled using the `RawMutex` type.
-            (Mode::Sync, ModeUnion { sync: ManuallyDrop::new(RawMutex::INIT) })
+            (Mode::Sync, ModeUnion { sync: ManuallyDrop::new(Mutex::new(())) })
         } else {
             // Create the lock with synchronization disabled.
             (Mode::NoSync, ModeUnion { no_sync: ManuallyDrop::new(Cell::new(!LOCKED)) })
@@ -125,11 +122,20 @@ impl<T> Lock<T> {
                 if was_unlocked {
                     cell.set(LOCKED);
                 }
-                was_unlocked
+                was_unlocked.then(|| LockGuard {
+                    lock: self,
+                    marker: PhantomData,
+                    mode: LockGuardMode::NoSync,
+                })
             }
-            Mode::Sync => unsafe { self.mode_union.sync.try_lock() },
+            Mode::Sync => unsafe {
+                self.mode_union.sync.try_lock().map(|guard| LockGuard {
+                    lock: self,
+                    marker: PhantomData,
+                    mode: LockGuardMode::Sync { guard },
+                })
+            },
         }
-        .then(|| LockGuard { lock: self, marker: PhantomData, mode })
     }
 
     /// This acquires the lock assuming synchronization is in a specific mode.
@@ -149,16 +155,17 @@ impl<T> Lock<T> {
 
         // SAFETY: This is safe since the union fields are used in accordance with `mode`
         // which also must match `self.mode` due to the safety precondition.
-        unsafe {
+        let mode = unsafe {
             match mode {
                 Mode::NoSync => {
                     if unlikely(self.mode_union.no_sync.replace(LOCKED) == LOCKED) {
-                        lock_held()
+                        lock_held();
                     }
+                    LockGuardMode::NoSync
                 }
-                Mode::Sync => self.mode_union.sync.lock(),
+                Mode::Sync => LockGuardMode::Sync { guard: self.mode_union.sync.lock() },
             }
-        }
+        };
         LockGuard { lock: self, marker: PhantomData, mode }
     }
 

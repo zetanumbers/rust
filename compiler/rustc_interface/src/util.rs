@@ -1,4 +1,6 @@
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
+use std::mem::MaybeUninit;
+use std::num::NonZero;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -21,6 +23,7 @@ use rustc_span::edition::Edition;
 use rustc_span::source_map::SourceMapInputs;
 use rustc_span::{SessionGlobals, Symbol, sym};
 use rustc_target::spec::Target;
+use scope_lock::lock_scope;
 use tracing::info;
 
 use crate::errors;
@@ -209,21 +212,20 @@ pub(crate) fn run_in_thread_pool_with_globals<
 
     let proxy_ = Arc::clone(&proxy);
     let proxy__ = Arc::clone(&proxy);
-    let builder = rayon_core::ThreadPoolBuilder::new()
-        .thread_name(|_| "rustc".to_string())
-        .acquire_thread_handler(move || proxy_.acquire_thread())
-        .release_thread_handler(move || proxy__.release_thread())
-        .num_threads(threads)
-        .deadlock_handler(move || {
-            // On deadlock, creates a new thread and forwards information in thread
-            // locals to it. The new thread runs the deadlock handler.
+    let mut config = colorless_executor::ExecutorConfig::default();
+    config.thread_name = Some(Box::new(|_| "rustc".to_string()));
+    config.acquire_thread_handler = Some(Box::new(move || proxy_.acquire_thread()));
+    config.release_thread_handler = Some(Box::new(move || proxy__.release_thread()));
+    config.num_threads = NonZero::new(threads);
+    config.deadlock_handler = Some(Box::new(move || {
+        // On deadlock, creates a new thread and forwards information in thread
+        // locals to it. The new thread runs the deadlock handler.
 
-            let current_gcx2 = current_gcx2.clone();
-            let registry = rayon_core::Registry::current();
-            let session_globals = rustc_span::with_session_globals(|session_globals| {
-                session_globals as *const SessionGlobals as usize
-            });
-            thread::Builder::new()
+        let current_gcx2 = current_gcx2.clone();
+        let session_globals = rustc_span::with_session_globals(|session_globals| {
+            session_globals as *const SessionGlobals as usize
+        });
+        thread::Builder::new()
                 .name("rustc query cycle handler".to_string())
                 .spawn(move || {
                     let on_panic = defer(|| {
@@ -245,7 +247,7 @@ pub(crate) fn run_in_thread_pool_with_globals<
                                     // We need the complete map to ensure we find a cycle to break.
                                     QueryCtxt::new(tcx).collect_active_jobs().ok().expect("failed to collect active queries in deadlock handler")
                                 });
-                                break_query_cycles(query_map, &registry);
+                                break_query_cycles(query_map);
                             })
                         })
                     });
@@ -253,8 +255,8 @@ pub(crate) fn run_in_thread_pool_with_globals<
                     on_panic.disable();
                 })
                 .unwrap();
-        })
-        .stack_size(thread_stack_size);
+    }));
+    config.stack_size = NonZero::new(thread_stack_size);
 
     // We create the session globals on the main thread, then create the thread
     // pool. Upon creation, each worker thread created gets a copy of the
@@ -263,23 +265,33 @@ pub(crate) fn run_in_thread_pool_with_globals<
     rustc_span::create_session_globals_then(edition, extra_symbols, Some(sm_inputs), || {
         rustc_span::with_session_globals(|session_globals| {
             let session_globals = FromDyn::from(session_globals);
-            builder
-                .build_scoped(
+            colorless_executor::Executor::build_scoped(
+                config,
+                move |thread: colorless_executor::ThreadBuilder<'_>| {
                     // Initialize each new worker thread when created.
-                    move |thread: rayon_core::ThreadBuilder| {
-                        // Register the thread for use with the `WorkerLocal` type.
-                        registry.register();
+                    // Register the thread for use with the `WorkerLocal` type.
+                    registry.register();
 
-                        rustc_span::set_session_globals_then(session_globals.into_inner(), || {
-                            thread.run()
-                        })
-                    },
-                    // Run `f` on the first thread in the thread pool.
-                    move |pool: &rayon_core::ThreadPool| {
-                        pool.install(|| f(current_gcx.into_inner(), proxy))
-                    },
-                )
-                .unwrap()
+                    rustc_span::set_session_globals_then(session_globals.into_inner(), || {
+                        thread.run()
+                    })
+                },
+                // Run `f` on the first thread in the thread pool.
+                move |pool: &colorless_executor::Executor| {
+                    let mut output = None;
+                    let mut slot = MaybeUninit::uninit();
+                    let f = scope_lock::RefOnce::new(
+                        |()| output = Some(f(current_gcx.into_inner(), proxy)),
+                        &mut slot,
+                    );
+                    lock_scope(|ext| {
+                        let f = ext.fn_once(f);
+                        colorless_executor::block_on(pool.spawn(|| f(())))
+                    });
+                    output.unwrap()
+                },
+            )
+            .unwrap()
         })
     })
 }

@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::ops::{Div, Mul};
+use std::ops::{Deref, Div, Mul};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use rustc_data_structures::base_n::{CASE_INSENSITIVE, ToBaseN};
 use rustc_data_structures::flock;
 use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
 use rustc_data_structures::profiling::{SelfProfiler, SelfProfilerRef};
-use rustc_data_structures::sync::{DynSend, DynSync, Lock, MappedReadGuard, ReadGuard, RwLock};
+use rustc_data_structures::sync::{DynSend, DynSync, Lock, ReadGuard, RwLock};
 use rustc_errors::annotate_snippet_emitter_writer::AnnotateSnippetEmitter;
 use rustc_errors::codes::*;
 use rustc_errors::emitter::{
@@ -239,6 +239,28 @@ impl CodegenUnits {
         match self {
             CodegenUnits::User(n) => n,
             CodegenUnits::Default(n) => n,
+        }
+    }
+}
+
+pub struct IncrCompSessionDirBorrow<'a> {
+    incr_comp_session: ReadGuard<'a, IncrCompSession>,
+}
+
+impl<'a> Deref for IncrCompSessionDirBorrow<'a> {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &Self::Target {
+        match *self.incr_comp_session {
+            IncrCompSession::NotInitialized => panic!(
+                "trying to get session directory from `IncrCompSession`: {:?}",
+                *self.incr_comp_session,
+            ),
+            IncrCompSession::Active { ref session_directory, .. }
+            | IncrCompSession::Finalized { ref session_directory }
+            | IncrCompSession::InvalidBecauseOfErrors { ref session_directory } => {
+                session_directory
+            }
         }
     }
 }
@@ -513,22 +535,12 @@ impl Session {
         *incr_comp_session = IncrCompSession::InvalidBecauseOfErrors { session_directory };
     }
 
-    pub fn incr_comp_session_dir(&self) -> MappedReadGuard<'_, PathBuf> {
+    pub fn incr_comp_session_dir(&self) -> IncrCompSessionDirBorrow<'_> {
         let incr_comp_session = self.incr_comp_session.borrow();
-        ReadGuard::map(incr_comp_session, |incr_comp_session| match *incr_comp_session {
-            IncrCompSession::NotInitialized => panic!(
-                "trying to get session directory from `IncrCompSession`: {:?}",
-                *incr_comp_session,
-            ),
-            IncrCompSession::Active { ref session_directory, .. }
-            | IncrCompSession::Finalized { ref session_directory }
-            | IncrCompSession::InvalidBecauseOfErrors { ref session_directory } => {
-                session_directory
-            }
-        })
+        IncrCompSessionDirBorrow { incr_comp_session }
     }
 
-    pub fn incr_comp_session_dir_opt(&self) -> Option<MappedReadGuard<'_, PathBuf>> {
+    pub fn incr_comp_session_dir_opt(&self) -> Option<IncrCompSessionDirBorrow<'_>> {
         self.opts.incremental.as_ref().map(|_| self.incr_comp_session_dir())
     }
 

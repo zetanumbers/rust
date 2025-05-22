@@ -19,8 +19,8 @@
 //! | Type                    | Serial version      | Parallel version                |
 //! | ----------------------- | ------------------- | ------------------------------- |
 //! | `Lock<T>`               | `RefCell<T>`        | `RefCell<T>` or                 |
-//! |                         |                     | `parking_lot::Mutex<T>`         |
-//! | `RwLock<T>`             | `RefCell<T>`        | `parking_lot::RwLock<T>`        |
+//! |                         |                     | `colorless_lock::Mutex<T>`      |
+//! | `RwLock<T>`             | `RefCell<T>`        | `colorless_lock::RwLock<T>`     |
 //! | `MTLock<T>`        [^1] | `T`                 | `Lock<T>`                       |
 //! |                         |                     |                                 |
 //! | `ParallelIterator`      | `Iterator`          | `rayon::iter::ParallelIterator` |
@@ -32,10 +32,10 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 
-pub use parking_lot::{
-    MappedRwLockReadGuard as MappedReadGuard, MappedRwLockWriteGuard as MappedWriteGuard,
-    RwLockReadGuard as ReadGuard, RwLockWriteGuard as WriteGuard,
-};
+pub use colorless::Stackify;
+pub use colorless_executor::{Task, spawn as spawn_task};
+pub use colorless_lock::{RwLockReadGuard as ReadGuard, RwLockWriteGuard as WriteGuard};
+pub use scope_lock::RefOnce;
 
 pub use self::atomic::AtomicU64;
 pub use self::freeze::{FreezeLock, FreezeReadGuard, FreezeWriteGuard};
@@ -160,12 +160,12 @@ impl<K: Eq + Hash, V: Eq, S: BuildHasher> HashMapExt<K, V> for HashMap<K, V, S> 
 }
 
 #[derive(Debug, Default)]
-pub struct RwLock<T>(parking_lot::RwLock<T>);
+pub struct RwLock<T>(colorless_lock::RwLock<T>);
 
 impl<T> RwLock<T> {
     #[inline(always)]
     pub fn new(inner: T) -> Self {
-        RwLock(parking_lot::RwLock::new(inner))
+        RwLock(colorless_lock::RwLock::new(inner))
     }
 
     #[inline(always)]

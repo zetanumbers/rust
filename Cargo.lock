@@ -220,6 +220,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-channel"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89b47800b0be77592da0afd425cc03468052844aff33b84e33cc696f64e77b6a"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-lock"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff6e472cdea888a4bd64f342f09b3f50e1886d32afe8df3d663c01140b811b18"
+dependencies = [
+ "event-listener",
+ "event-listener-strategy",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-task"
+version = "4.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
+
+[[package]]
+name = "atomic-waker"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -707,6 +742,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "colorless"
+version = "0.1.0"
+source = "git+https://github.com/zetanumbers/colorless.git#8ee712c8adc35d517cd5c7c07d90542f3af15fc6"
+dependencies = [
+ "corosensei",
+]
+
+[[package]]
+name = "colorless-executor"
+version = "0.1.0"
+source = "git+https://github.com/zetanumbers/colorless.git#8ee712c8adc35d517cd5c7c07d90542f3af15fc6"
+dependencies = [
+ "async-channel",
+ "colorless",
+ "crossbeam-utils",
+ "futures-lite 2.6.0",
+ "pin-project-lite",
+ "unsend",
+]
+
+[[package]]
+name = "colorless-lock"
+version = "0.1.0"
+source = "git+https://github.com/zetanumbers/colorless.git#8ee712c8adc35d517cd5c7c07d90542f3af15fc6"
+dependencies = [
+ "async-lock",
+ "colorless",
+ "event-listener",
+]
+
+[[package]]
 name = "comma"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -742,6 +808,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "concurrent-queue"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "console"
 version = "0.15.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -765,6 +840,19 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "corosensei"
+version = "0.2.1"
+source = "git+https://github.com/zetanumbers/corosensei.git?branch=stacker#9a97f9f7b7210452c4bffb72b2cbbda31304d387"
+dependencies = [
+ "autocfg",
+ "cfg-if",
+ "libc",
+ "rustc-stacker",
+ "scopeguard",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "coverage-dump"
@@ -1153,6 +1241,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "event-listener"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3492acde4c3fc54c845eaab3eed8bd00c7a7d881f78bfc801e43a93dec1331ae"
+dependencies = [
+ "concurrent-queue",
+ "parking",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
+dependencies = [
+ "event-listener",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "expect-test"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1344,6 +1453,29 @@ name = "futures-io"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5c1b78ca4aae1ac06c48a526a655760685149f0d465d21f37abfe57ce075c6"
+
+[[package]]
+name = "futures-lite"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49a9d51ce47660b1e808d3c990b4709f2f415d928835a17dfd16991515c46bce"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "futures-lite"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5edaec856126859abb19ed65f39e90fea3a9574b9707f13539acf4abf7eb532"
+dependencies = [
+ "fastrand",
+ "futures-core",
+ "futures-io",
+ "parking",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "futures-macro"
@@ -2057,7 +2189,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -2590,6 +2722,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "parking"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
+
+[[package]]
 name = "parking_lot"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2812,8 +2950,7 @@ dependencies = [
 [[package]]
 name = "psm"
 version = "0.1.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e944464ec8536cd1beb0bbfd96987eb5e3b72f2ecdafdc5c769a37f1fa2ae1f"
+source = "git+https://github.com/zetanumbers/stacker.git?branch=rustc-fibers#c7135f9c032947457554e85e6605d2af50557d20"
 dependencies = [
  "cc",
 ]
@@ -3121,16 +3258,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustc-rayon-core"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f42932dcd3bcbe484b38a3ccf79b7906fac41c02d408b5b1bac26da3416efdb"
-dependencies = [
- "crossbeam-deque",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "rustc-semver"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3141,6 +3268,18 @@ name = "rustc-stable-hash"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "781442f29170c5c93b7185ad559492601acdc71d5bb0706f5868094f45cfcd08"
+
+[[package]]
+name = "rustc-stacker"
+version = "0.1.21"
+source = "git+https://github.com/zetanumbers/stacker.git?branch=rustc-fibers#c7135f9c032947457554e85e6605d2af50557d20"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "psm",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "rustc-std-workspace-alloc"
@@ -3483,6 +3622,9 @@ version = "0.0.0"
 dependencies = [
  "arrayvec",
  "bitflags",
+ "colorless",
+ "colorless-executor",
+ "colorless-lock",
  "either",
  "elsa",
  "ena",
@@ -3492,19 +3634,18 @@ dependencies = [
  "libc",
  "measureme",
  "memmap2",
- "parking_lot",
  "portable-atomic",
  "rustc-hash 2.1.1",
- "rustc-rayon-core",
  "rustc-stable-hash",
+ "rustc-stacker",
  "rustc_arena",
  "rustc_graphviz",
  "rustc_hashes",
  "rustc_index",
  "rustc_macros",
  "rustc_serialize",
+ "scope-lock",
  "smallvec",
- "stacker",
  "tempfile",
  "thin-vec",
  "tracing",
@@ -3844,7 +3985,7 @@ dependencies = [
 name = "rustc_interface"
 version = "0.0.0"
 dependencies = [
- "rustc-rayon-core",
+ "colorless-executor",
  "rustc_abi",
  "rustc_ast",
  "rustc_ast_lowering",
@@ -3886,6 +4027,7 @@ dependencies = [
  "rustc_trait_selection",
  "rustc_traits",
  "rustc_ty_utils",
+ "scope-lock",
  "tracing",
 ]
 
@@ -4004,10 +4146,10 @@ name = "rustc_middle"
 version = "0.0.0"
 dependencies = [
  "bitflags",
+ "colorless",
  "either",
  "gsgdt",
  "polonius-engine",
- "rustc-rayon-core",
  "rustc_abi",
  "rustc_apfloat",
  "rustc_arena",
@@ -4268,9 +4410,9 @@ dependencies = [
 name = "rustc_query_system"
 version = "0.0.0"
 dependencies = [
+ "colorless-executor",
+ "colorless-lock",
  "hashbrown",
- "parking_lot",
- "rustc-rayon-core",
  "rustc_abi",
  "rustc_ast",
  "rustc_attr_data_structures",
@@ -4731,6 +4873,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "scope-lock"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb17df936e884a06f2642d533be00f4bd197c945951153bcb4584e9969f6bb57"
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4937,19 +5085,6 @@ name = "stable_mir"
 version = "0.1.0-preview"
 dependencies = [
  "rustc_smir",
-]
-
-[[package]]
-name = "stacker"
-version = "0.1.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cddb07e32ddb770749da91081d8d0ac3a16f1a569a18b20348cd371f5dead06b"
-dependencies = [
- "cc",
- "cfg-if",
- "libc",
- "psm",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5612,6 +5747,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "496a3d395ed0c30f411ceace4a91f7d93b148fb5a9b383d5d4cff7850f048d5f"
 dependencies = [
  "diff",
+]
+
+[[package]]
+name = "unsend"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a53ed0f41cab22aa8d4aee9d2357a1b21cb365537d7349066c76fcd67bc3121d"
+dependencies = [
+ "async-task",
+ "atomic-waker",
+ "concurrent-queue",
+ "futures-lite 1.13.0",
+ "pin-project-lite",
+ "slab",
 ]
 
 [[package]]

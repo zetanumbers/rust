@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # tidy-alphabetical-start
-rustc-rayon-core = { version = "0.5.0" }
+colorless-executor = { git = "https://github.com/zetanumbers/colorless.git" }
 rustc_ast = { path = "../rustc_ast" }
 rustc_ast_lowering = { path = "../rustc_ast_lowering" }
 rustc_ast_passes = { path = "../rustc_ast_passes" }
@@ -46,6 +46,7 @@ rustc_target = { path = "../rustc_target" }
 rustc_trait_selection = { path = "../rustc_trait_selection" }
 rustc_traits = { path = "../rustc_traits" }
 rustc_ty_utils = { path = "../rustc_ty_utils" }
+scope-lock = "0.3.1"
 tracing = "0.1"
 # tidy-alphabetical-end
 
