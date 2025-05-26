@@ -236,7 +236,6 @@ impl<I> QueryLatch<I> {
             // If this detects a deadlock and the deadlock handler wants to resume this thread
             // we have to be in the `wait` call. This is ensured by the deadlock handler
             // getting the self.info lock.
-            colorless_executor::mark_blocked();
             let proxy = qcx.jobserver_proxy();
             proxy.release_thread();
             info = waiter.condvar.wait(info);
@@ -252,7 +251,6 @@ impl<I> QueryLatch<I> {
         debug_assert!(!info.complete);
         info.complete = true;
         for waiter in info.waiters.drain(..) {
-            colorless_executor::mark_unblocked();
             waiter.condvar.notify_one();
         }
     }
@@ -529,13 +527,6 @@ pub fn break_query_cycles<I: Clone + Debug>(query_map: QueryMap<I>) {
             current query map:\n{:#?}",
             query_map
         );
-    }
-
-    // Mark all the thread we're about to wake up as unblocked. This needs to be done before
-    // we wake the threads up as otherwise Rayon could detect a deadlock if a thread we
-    // resumed fell asleep and this thread had yet to mark the remaining threads as unblocked.
-    for _ in 0..wakelist.len() {
-        colorless_executor::mark_unblocked();
     }
 
     for waiter in wakelist.into_iter() {
