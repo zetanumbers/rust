@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::hash_map;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::str;
@@ -148,10 +149,12 @@ impl<'a> HashStable<StableHashingContext<'a>> for AdtDefData {
             static CACHE: RefCell<FxHashMap<(usize, HashingControls), Fingerprint>> = Default::default();
         }
 
-        let hash: Fingerprint = CACHE.with(|cache| {
-            let addr = self as *const AdtDefData as usize;
-            let hashing_controls = hcx.hashing_controls();
-            *cache.borrow_mut().entry((addr, hashing_controls)).or_insert_with(|| {
+        let addr = self as *const AdtDefData as usize;
+        let hashing_controls = hcx.hashing_controls();
+        let key = (addr, hashing_controls);
+        let hash = match CACHE.with(|cache| cache.borrow().get(&key).copied()) {
+            Some(h) => h,
+            None => {
                 let ty::AdtDefData { did, ref variants, ref flags, ref repr } = *self;
 
                 let mut hasher = StableHasher::new();
@@ -160,9 +163,21 @@ impl<'a> HashStable<StableHashingContext<'a>> for AdtDefData {
                 flags.hash_stable(hcx, &mut hasher);
                 repr.hash_stable(hcx, &mut hasher);
 
-                hasher.finish()
-            })
-        });
+                let hash = hasher.finish();
+
+                CACHE.with(|cache| match cache.borrow_mut().entry(key) {
+                    hash_map::Entry::Occupied(occupied_entry) => {
+                        if *occupied_entry.get() != hash {
+                            bug!();
+                        }
+                    }
+                    hash_map::Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(hash);
+                    }
+                });
+                hash
+            }
+        };
 
         hash.hash_stable(hcx, hasher);
     }
