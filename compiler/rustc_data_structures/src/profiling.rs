@@ -93,7 +93,7 @@ use std::{fs, process};
 
 pub use measureme::EventId;
 use measureme::{EventIdBuilder, Profiler, SerializableString, StringId};
-use parking_lot::RwLock;
+use rayon_core::RwLock;
 use smallvec::SmallVec;
 use tracing::warn;
 

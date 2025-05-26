@@ -19,8 +19,8 @@
 //! | Type                    | Serial version      | Parallel version                |
 //! | ----------------------- | ------------------- | ------------------------------- |
 //! | `Lock<T>`               | `RefCell<T>`        | `RefCell<T>` or                 |
-//! |                         |                     | `parking_lot::Mutex<T>`         |
-//! | `RwLock<T>`             | `RefCell<T>`        | `parking_lot::RwLock<T>`        |
+//! |                         |                     | `rayon_core::sync::Mutex<T>`    |
+//! | `RwLock<T>`             | `RefCell<T>`        | `rayon_core::sync::RwLock<T>`   |
 //! | `MTLock<T>`        [^1] | `T`                 | `Lock<T>`                       |
 //! |                         |                     |                                 |
 //! | `ParallelIterator`      | `Iterator`          | `rayon::iter::ParallelIterator` |
@@ -32,7 +32,7 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 
-pub use parking_lot::{
+pub use rayon_core::sync::{
     MappedRwLockReadGuard as MappedReadGuard, MappedRwLockWriteGuard as MappedWriteGuard,
     RwLockReadGuard as ReadGuard, RwLockWriteGuard as WriteGuard,
 };
@@ -160,12 +160,12 @@ impl<K: Eq + Hash, V: Eq, S: BuildHasher> HashMapExt<K, V> for HashMap<K, V, S> 
 }
 
 #[derive(Debug, Default)]
-pub struct RwLock<T>(parking_lot::RwLock<T>);
+pub struct RwLock<T>(rayon_core::RwLock<T>);
 
 impl<T> RwLock<T> {
     #[inline(always)]
     pub fn new(inner: T) -> Self {
-        RwLock(parking_lot::RwLock::new(inner))
+        RwLock(rayon_core::RwLock::new(inner))
     }
 
     #[inline(always)]

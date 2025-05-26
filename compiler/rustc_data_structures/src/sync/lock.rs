@@ -17,8 +17,8 @@ use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 
-use parking_lot::RawMutex;
-use parking_lot::lock_api::RawMutex as _;
+use rayon_core::sync::RawMutex;
+use rayon_core::sync::lock_api::RawMutex as _;
 
 use crate::sync::{DynSend, DynSync, mode};
 

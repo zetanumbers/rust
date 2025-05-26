@@ -53,8 +53,8 @@ macro_rules! already_send {
 already_send!(
     [std::backtrace::Backtrace][std::io::Stdout][std::io::Stderr][std::io::Error][std::fs::File]
         [rustc_arena::DroplessArena][crate::memmap::Mmap][crate::profiling::SelfProfiler]
-        [crate::owned_slice::OwnedSlice][rayon_core::Registry][rayon_core::lock_api::RawMutex]
-        [rayon::Condvar]
+        [crate::owned_slice::OwnedSlice][rayon_core::Registry][rayon_core::sync::RawMutex]
+        [rayon_core::sync::RawRwLock][rayon::Condvar]
 );
 
 macro_rules! impl_dyn_send {
@@ -122,8 +122,8 @@ already_sync!(
     [std::sync::atomic::AtomicBool][std::sync::atomic::AtomicUsize][std::sync::atomic::AtomicU8]
         [std::sync::atomic::AtomicU32][std::backtrace::Backtrace][std::io::Error][std::fs::File]
         [jobserver_crate::Client][crate::memmap::Mmap][crate::profiling::SelfProfiler]
-        [crate::owned_slice::OwnedSlice][rayon_core::Registry][rayon_core::lock_api::RawMutex]
-        [rayon::Condvar]
+        [crate::owned_slice::OwnedSlice][rayon_core::Registry][rayon_core::sync::RawMutex]
+        [rayon_core::sync::RawRwLock][rayon::Condvar]
 );
 
 // Use portable AtomicU64 for targets without native 64-bit atomics
@@ -154,8 +154,8 @@ impl_dyn_sync!(
     [crate::sync::WorkerLocal<T> where T: DynSend]
     [crate::intern::Interned<'a, T> where 'a, T: DynSync]
     [crate::tagged_ptr::TaggedRef<'a, P, T> where 'a, P: Sync, T: Sync + crate::tagged_ptr::Tag]
-    [parking_lot::lock_api::Mutex<R, T> where R: DynSync, T: ?Sized + DynSend]
-    [parking_lot::lock_api::RwLock<R, T> where R: DynSync, T: ?Sized + DynSend + DynSync]
+    [rayon_core::sync::lock_api::Mutex<R, T> where R: DynSync, T: ?Sized + DynSend]
+    [rayon_core::sync::lock_api::RwLock<R, T> where R: DynSync, T: ?Sized + DynSend + DynSync]
     [hashbrown::HashTable<T> where T: DynSync]
     [indexmap::IndexSet<V, S> where V: DynSync, S: DynSync]
     [indexmap::IndexMap<K, V, S> where K: DynSync, V: DynSync, S: DynSync]

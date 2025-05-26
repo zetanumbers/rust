@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::ptr;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use rayon_core::Mutex;
 
 use crate::outline;
 use crate::sync::CacheAligned;
