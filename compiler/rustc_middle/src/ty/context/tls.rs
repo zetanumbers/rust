@@ -49,7 +49,7 @@ use __macro_internals::{downcast, erase};
 
 #[doc(hidden)]
 pub mod __macro_internals {
-    pub use rayon_core::tlv::TLV;
+    pub use colorless::tlv::TLV;
 
     use super::ImplicitCtxt;
 
@@ -63,6 +63,8 @@ pub mod __macro_internals {
         unsafe { &*(context as *const ImplicitCtxt<'a, 'tcx>) }
     }
 }
+
+use __macro_internals::TLV;
 
 pub macro update_context({$($field:ident : $e:expr,)+}, $body:expr) {{
     let context = $crate::ty::context::tls::__macro_internals::TLV.get();
