@@ -39,7 +39,6 @@
 //! own these indices helps avoid races when they are conditionally used when marking nodes green.
 //! It also reduces congestion on the shared index count.
 
-use std::cell::RefCell;
 use std::cmp::max;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -50,6 +49,7 @@ use rustc_data_structures::fingerprint::{Fingerprint, PackedFingerprint};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::outline;
 use rustc_data_structures::profiling::SelfProfilerRef;
+use rustc_data_structures::reserve_cell::ReserveCell;
 use rustc_data_structures::sync::{AtomicU64, Lock, WorkerLocal, broadcast};
 use rustc_data_structures::unhash::UnhashMap;
 use rustc_index::IndexVec;
@@ -523,7 +523,7 @@ struct Stat {
     edge_counter: u64,
 }
 
-struct LocalEncoderState {
+struct LocalEncoderState<D> {
     next_node_index: u32,
     remaining_node_index: u32,
     encoder: MemEncoder,
@@ -532,6 +532,22 @@ struct LocalEncoderState {
 
     /// Stores the number of times we've encoded each dep kind.
     kind_stats: Vec<u32>,
+
+    _marker: PhantomData<fn() -> D>,
+}
+
+impl<D: Deps> Default for LocalEncoderState<D> {
+    fn default() -> Self {
+        LocalEncoderState {
+            next_node_index: 0,
+            remaining_node_index: 0,
+            edge_count: 0,
+            node_count: 0,
+            encoder: MemEncoder::new(),
+            kind_stats: iter::repeat(0).take(D::DEP_KIND_MAX as usize + 1).collect(),
+            _marker: PhantomData,
+        }
+    }
 }
 
 struct LocalEncoderResult {
@@ -547,7 +563,7 @@ struct EncoderState<D: Deps> {
     next_node_index: AtomicU64,
     previous: Arc<SerializedDepGraph>,
     file: Lock<Option<FileEncoder>>,
-    local: WorkerLocal<RefCell<LocalEncoderState>>,
+    local: WorkerLocal<ReserveCell<LocalEncoderState<D>>>,
     stats: Option<Lock<FxHashMap<DepKind, Stat>>>,
     marker: PhantomData<D>,
 }
@@ -559,22 +575,13 @@ impl<D: Deps> EncoderState<D> {
             next_node_index: AtomicU64::new(0),
             stats: record_stats.then(|| Lock::new(FxHashMap::default())),
             file: Lock::new(Some(encoder)),
-            local: WorkerLocal::new(|_| {
-                RefCell::new(LocalEncoderState {
-                    next_node_index: 0,
-                    remaining_node_index: 0,
-                    edge_count: 0,
-                    node_count: 0,
-                    encoder: MemEncoder::new(),
-                    kind_stats: iter::repeat(0).take(D::DEP_KIND_MAX as usize + 1).collect(),
-                })
-            }),
+            local: WorkerLocal::new(|_| ReserveCell::new()),
             marker: PhantomData,
         }
     }
 
     #[inline]
-    fn next_index(&self, local: &mut LocalEncoderState) -> DepNodeIndex {
+    fn next_index(&self, local: &mut LocalEncoderState<D>) -> DepNodeIndex {
         if local.remaining_node_index == 0 {
             const COUNT: u32 = 256;
 
@@ -595,7 +602,7 @@ impl<D: Deps> EncoderState<D> {
 
     /// Marks the index previously returned by `next_index` as used.
     #[inline]
-    fn bump_index(&self, local: &mut LocalEncoderState) {
+    fn bump_index(&self, local: &mut LocalEncoderState<D>) {
         local.remaining_node_index -= 1;
         local.next_node_index += 1;
         local.node_count += 1;
@@ -609,7 +616,7 @@ impl<D: Deps> EncoderState<D> {
         edge_count: usize,
         edges: impl FnOnce(&Self) -> Vec<DepNodeIndex>,
         record_graph: &Option<Lock<DepGraphQuery>>,
-        local: &mut LocalEncoderState,
+        local: &mut LocalEncoderState<D>,
     ) {
         local.kind_stats[node.kind.as_usize()] += 1;
         local.edge_count += edge_count;
@@ -642,7 +649,7 @@ impl<D: Deps> EncoderState<D> {
     }
 
     #[inline]
-    fn flush_mem_encoder(&self, local: &mut LocalEncoderState) {
+    fn flush_mem_encoder(&self, local: &mut LocalEncoderState<D>) {
         let data = &mut local.encoder.data;
         if data.len() > 64 * 1024 {
             self.file.lock().as_mut().unwrap().emit_raw_bytes(&data[..]);
@@ -656,7 +663,7 @@ impl<D: Deps> EncoderState<D> {
         index: DepNodeIndex,
         node: &NodeInfo,
         record_graph: &Option<Lock<DepGraphQuery>>,
-        local: &mut LocalEncoderState,
+        local: &mut LocalEncoderState<D>,
     ) {
         node.encode::<D>(&mut local.encoder, index);
         self.flush_mem_encoder(&mut *local);
@@ -683,7 +690,7 @@ impl<D: Deps> EncoderState<D> {
         prev_index: SerializedDepNodeIndex,
         record_graph: &Option<Lock<DepGraphQuery>>,
         colors: &DepNodeColorMap,
-        local: &mut LocalEncoderState,
+        local: &mut LocalEncoderState<D>,
     ) {
         let node = self.previous.index_to_node(prev_index);
         let fingerprint = self.previous.fingerprint_by_index(prev_index);
@@ -717,20 +724,22 @@ impl<D: Deps> EncoderState<D> {
         self.next_node_index.store(u32::MAX as u64 + 1, Ordering::SeqCst);
 
         let results = broadcast(|_| {
-            let mut local = self.local.borrow_mut();
+            iter::from_fn(|| self.local.pop_first())
+                .map(|mut local| {
+                    // Prevent more indices from being allocated on this thread.
+                    local.remaining_node_index = 0;
 
-            // Prevent more indices from being allocated on this thread.
-            local.remaining_node_index = 0;
+                    let data = mem::replace(&mut local.encoder.data, Vec::new());
+                    self.file.lock().as_mut().unwrap().emit_raw_bytes(&data);
 
-            let data = mem::replace(&mut local.encoder.data, Vec::new());
-            self.file.lock().as_mut().unwrap().emit_raw_bytes(&data);
-
-            LocalEncoderResult {
-                kind_stats: local.kind_stats.clone(),
-                node_max: local.next_node_index,
-                node_count: local.node_count,
-                edge_count: local.edge_count,
-            }
+                    LocalEncoderResult {
+                        kind_stats: local.kind_stats.clone(),
+                        node_max: local.next_node_index,
+                        node_count: local.node_count,
+                        edge_count: local.edge_count,
+                    }
+                })
+                .collect::<Vec<_>>()
         });
 
         let mut encoder = self.file.lock().take().unwrap();
@@ -741,7 +750,7 @@ impl<D: Deps> EncoderState<D> {
         let mut node_count = 0;
         let mut edge_count = 0;
 
-        for result in results {
+        for result in results.into_iter().flatten() {
             node_max = max(node_max, result.node_max);
             node_count += result.node_count;
             edge_count += result.edge_count;
@@ -870,7 +879,7 @@ impl<D: Deps> GraphEncoder<D> {
     ) -> DepNodeIndex {
         let _prof_timer = self.profiler.generic_activity("incr_comp_encode_dep_graph");
         let node = NodeInfo { node, fingerprint, edges };
-        let mut local = self.status.local.borrow_mut();
+        let mut local = self.status.local.reserve();
         let index = self.status.next_index(&mut *local);
         self.status.bump_index(&mut *local);
         self.status.encode_node(index, &node, &self.record_graph, &mut *local);
@@ -892,7 +901,7 @@ impl<D: Deps> GraphEncoder<D> {
         let _prof_timer = self.profiler.generic_activity("incr_comp_encode_dep_graph");
         let node = NodeInfo { node, fingerprint, edges };
 
-        let mut local = self.status.local.borrow_mut();
+        let mut local = self.status.local.reserve();
 
         let index = self.status.next_index(&mut *local);
 
@@ -924,7 +933,7 @@ impl<D: Deps> GraphEncoder<D> {
     ) -> DepNodeIndex {
         let _prof_timer = self.profiler.generic_activity("incr_comp_encode_dep_graph");
 
-        let mut local = self.status.local.borrow_mut();
+        let mut local = self.status.local.reserve();
         let index = self.status.next_index(&mut *local);
 
         // Use `try_mark_green` to avoid racing when `send_promoted` or `send_and_color`

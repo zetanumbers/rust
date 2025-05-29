@@ -80,6 +80,7 @@ impl_dyn_send!(
     [std::collections::BTreeMap<K, V, A> where K: DynSend, V: DynSend, A: std::alloc::Allocator + Clone + DynSend]
     [Vec<T, A> where T: DynSend, A: std::alloc::Allocator + DynSend]
     [Box<T, A> where T: ?Sized + DynSend, A: std::alloc::Allocator + DynSend]
+    [crate::reserve_cell::ReserveCell<T> where T: DynSend]
     [crate::sync::RwLock<T> where T: DynSend]
     [crate::tagged_ptr::TaggedRef<'a, P, T> where 'a, P: Sync, T: Send + crate::tagged_ptr::Tag]
     [rustc_arena::TypedArena<T> where T: DynSend]

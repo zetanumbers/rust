@@ -61,6 +61,7 @@ pub mod obligation_forest;
 pub mod owned_slice;
 pub mod packed;
 pub mod profiling;
+pub mod reserve_cell;
 pub mod sharded;
 pub mod small_c_str;
 pub mod snapshot_map;
