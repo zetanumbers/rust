@@ -168,6 +168,7 @@ impl_dyn_sync!(
     [crate::tagged_ptr::TaggedRef<'a, P, T> where 'a, P: Sync, T: Sync + crate::tagged_ptr::Tag]
     [colorless_lock::Mutex<T> where T: ?Sized + DynSend]
     [colorless_lock::RwLock<T> where T: ?Sized + DynSend + DynSync]
+    [parking_lot::lock_api::Mutex<R, T> where R: DynSend, T: ?Sized + DynSend]
     [hashbrown::HashTable<T> where T: DynSync]
     [indexmap::IndexSet<V, S> where V: DynSync, S: DynSync]
     [indexmap::IndexMap<K, V, S> where K: DynSync, V: DynSync, S: DynSync]

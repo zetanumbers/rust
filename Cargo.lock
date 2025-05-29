@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "colorless"
 version = "0.1.0"
-source = "git+https://github.com/zetanumbers/colorless.git#8ee712c8adc35d517cd5c7c07d90542f3af15fc6"
+source = "git+https://github.com/zetanumbers/colorless.git#f9f7e32f2641f0799c5563c9ef2076f58db6b365"
 dependencies = [
  "corosensei",
 ]
@@ -752,7 +752,7 @@ dependencies = [
 [[package]]
 name = "colorless-executor"
 version = "0.1.0"
-source = "git+https://github.com/zetanumbers/colorless.git#8ee712c8adc35d517cd5c7c07d90542f3af15fc6"
+source = "git+https://github.com/zetanumbers/colorless.git#f9f7e32f2641f0799c5563c9ef2076f58db6b365"
 dependencies = [
  "async-channel",
  "colorless",
@@ -765,7 +765,7 @@ dependencies = [
 [[package]]
 name = "colorless-lock"
 version = "0.1.0"
-source = "git+https://github.com/zetanumbers/colorless.git#8ee712c8adc35d517cd5c7c07d90542f3af15fc6"
+source = "git+https://github.com/zetanumbers/colorless.git#f9f7e32f2641f0799c5563c9ef2076f58db6b365"
 dependencies = [
  "async-lock",
  "colorless",
@@ -3634,6 +3634,7 @@ dependencies = [
  "libc",
  "measureme",
  "memmap2",
+ "parking_lot",
  "portable-atomic",
  "rustc-hash 2.1.1",
  "rustc-stable-hash",
@@ -4410,7 +4411,7 @@ dependencies = [
 name = "rustc_query_system"
 version = "0.0.0"
 dependencies = [
- "colorless-executor",
+ "colorless",
  "colorless-lock",
  "hashbrown",
  "rustc_abi",

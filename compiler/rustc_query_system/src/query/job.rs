@@ -233,15 +233,19 @@ impl<I> QueryLatch<I> {
             // this thread.
             info.waiters.push(Arc::clone(waiter));
 
-            // If this detects a deadlock and the deadlock handler wants to resume this thread
-            // we have to be in the `wait` call. This is ensured by the deadlock handler
-            // getting the self.info lock.
-            let proxy = qcx.jobserver_proxy();
-            proxy.release_thread();
+            let proxy = (!colorless::inside_context()).then(|| qcx.jobserver_proxy());
+            if let Some(proxy) = &proxy {
+                // If this detects a deadlock and the deadlock handler wants to resume this thread
+                // we have to be in the `wait` call. This is ensured by the deadlock handler
+                // getting the self.info lock.
+                proxy.release_thread();
+            }
             info = waiter.condvar.wait(info);
             // Release the lock before we potentially block in `acquire_thread`
             drop(info);
-            proxy.acquire_thread();
+            if let Some(proxy) = &proxy {
+                proxy.acquire_thread();
+            }
         }
     }
 

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # tidy-alphabetical-start
-colorless-executor = { git = "https://github.com/zetanumbers/colorless.git" }
+colorless = { git = "https://github.com/zetanumbers/colorless.git" }
 colorless-lock = { git = "https://github.com/zetanumbers/colorless.git" }
 rustc_abi = { path = "../rustc_abi" }
 rustc_ast = { path = "../rustc_ast" }

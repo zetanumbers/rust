@@ -278,15 +278,18 @@ pub(crate) fn run_in_thread_pool_with_globals<
                 },
                 // Run `f` on the first thread in the thread pool.
                 move |pool: &colorless_executor::Executor| {
+                    let proxy_ = Arc::clone(&proxy);
                     let mut output = None;
                     let mut slot = MaybeUninit::uninit();
                     let f = scope_lock::RefOnce::new(
-                        |()| output = Some(f(current_gcx.into_inner(), proxy)),
+                        |()| output = Some(f(current_gcx.into_inner(), proxy_)),
                         &mut slot,
                     );
                     lock_scope(|ext| {
                         let f = ext.fn_once(f);
-                        colorless_executor::block_on(pool.spawn(|| f(())))
+                        proxy.release_thread();
+                        colorless_executor::block_on(pool.spawn(|| f(())));
+                        proxy.acquire_thread();
                     });
                     output.unwrap()
                 },
