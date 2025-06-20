@@ -1,8 +1,7 @@
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
 
 pub use jobserver_crate::{Acquired, Client, HelperThread};
 use jobserver_crate::{FromEnv, FromEnvErrorKind};
-use parking_lot::{Condvar, Mutex};
 
 // We can only call `from_env_ext` once per process
 
@@ -106,7 +105,7 @@ impl Proxy {
             .clone()
             .into_helper_thread(move |token| {
                 if let Ok(token) = token {
-                    let mut data = proxy_.data.lock();
+                    let mut data = proxy_.data.lock().unwrap_or_else(|e| e.into_inner());
                     if data.pending > 0 {
                         // Give the token to a waiting thread
                         token.drop_without_releasing();
@@ -127,7 +126,7 @@ impl Proxy {
     }
 
     pub fn acquire_thread(&self) {
-        let mut data = self.data.lock();
+        let mut data = self.data.lock().unwrap_or_else(|e| e.into_inner());
 
         if data.used == 0 {
             // There was a free token around. This can
@@ -140,12 +139,12 @@ impl Proxy {
             // does not get a corresponding `release_raw` call.
             self.helper.get().unwrap().request_token();
             data.pending += 1;
-            self.wake_pending.wait(&mut data);
+            drop(self.wake_pending.wait(data));
         }
     }
 
     pub fn release_thread(&self) {
-        let mut data = self.data.lock();
+        let mut data = self.data.lock().unwrap_or_else(|e| e.into_inner());
 
         if data.pending > 0 {
             // Give the token to a waiting thread

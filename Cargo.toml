@@ -60,6 +60,11 @@ exclude = [
   "obj",
 ]
 
+[patch.crates-io]
+lock_api = { path = "../parking_lot/lock_api" }
+parking_lot_core = { path = "../parking_lot/core" }
+parking_lot = { path = "../parking_lot" }
+
 [profile.release.package.rustc-rayon-core]
 # The rustc fork of Rayon has deadlock detection code which intermittently
 # causes overflows in the CI (see https://github.com/rust-lang/rust/issues/90227)

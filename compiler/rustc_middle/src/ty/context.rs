@@ -13,6 +13,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Bound, Deref};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use std::{fmt, iter, mem};
 
 use rustc_abi::{ExternAbi, FieldIdx, Layout, LayoutData, TargetDataLayout, VariantIdx};
@@ -2333,6 +2334,24 @@ impl<'tcx> TyCtxt<'tcx> {
         // We assume that no queries are run past here. If there are new queries
         // after this point, they'll show up as "<unknown>" in self-profiling data.
         self.alloc_self_profile_query_strings();
+
+        if self.sess.threads() > 1 {
+            let mut park_times = sync::broadcast(|i| {
+                (i, parking_lot_core::thread_lock_time(), parking_lot_core::thread_wait_time())
+            });
+            park_times.sort_by_key(|(i, _, _)| *i);
+            let lock_times = park_times.iter().map(|(_, l, _)| *l).collect::<Vec<Duration>>();
+            let wait_times = park_times.iter().map(|(_, _, w)| *w).collect::<Vec<Duration>>();
+            eprintln!("=====================================");
+            eprintln!("Lock time per thread: {lock_times:?}");
+            eprintln!("Maximum thread lock time: {:?}", lock_times.iter().max().unwrap());
+            eprintln!("Total thread lock time: {:?}", lock_times.iter().sum::<Duration>());
+            eprintln!("+++++++++++++++++++++++++++++++++++++");
+            eprintln!("Wait time per thread: {wait_times:?}");
+            eprintln!("Maximum thread wait time: {:?}", wait_times.iter().max().unwrap());
+            eprintln!("Total thread wait time: {:?}", wait_times.iter().sum::<Duration>());
+            eprintln!("=====================================");
+        }
 
         self.save_dep_graph();
         self.query_key_hash_verify_all();

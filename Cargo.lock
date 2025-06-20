@@ -2171,10 +2171,7 @@ dependencies = [
 [[package]]
 name = "lock_api"
 version = "0.4.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
- "autocfg",
  "scopeguard",
 ]
 
@@ -2644,8 +2641,6 @@ dependencies = [
 [[package]]
 name = "parking_lot"
 version = "0.12.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70d58bf43669b5795d1576d0641cfb6fbb2057bf629506267a92807158584a13"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -2654,8 +2649,6 @@ dependencies = [
 [[package]]
 name = "parking_lot_core"
 version = "0.9.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc838d2a56b5b1a6c25f55575dfc605fabb63bb2365f6c2353ef9159aa69e4a5"
 dependencies = [
  "cfg-if",
  "libc",
@@ -4080,6 +4073,7 @@ dependencies = [
  "bitflags",
  "either",
  "gsgdt",
+ "parking_lot_core",
  "polonius-engine",
  "rustc-rayon-core",
  "rustc_abi",
