@@ -5,7 +5,7 @@ use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 
-use parking_lot::{Condvar, Mutex};
+use measured_parking_lot::{Condvar, Mutex};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_errors::{Diag, DiagCtxtHandle};
 use rustc_hir::def::DefKind;

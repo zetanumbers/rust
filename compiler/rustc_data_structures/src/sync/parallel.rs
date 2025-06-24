@@ -6,7 +6,7 @@
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-use parking_lot::Mutex;
+use measured_parking_lot::Mutex;
 
 use crate::FatalErrorMarker;
 use crate::sync::{DynSend, DynSync, FromDyn, IntoDynSyncSend, mode};

@@ -32,7 +32,7 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 
-pub use parking_lot::{
+pub use measured_parking_lot::{
     MappedRwLockReadGuard as MappedReadGuard, MappedRwLockWriteGuard as MappedWriteGuard,
     RwLockReadGuard as ReadGuard, RwLockWriteGuard as WriteGuard,
 };
@@ -160,12 +160,12 @@ impl<K: Eq + Hash, V: Eq, S: BuildHasher> HashMapExt<K, V> for HashMap<K, V, S> 
 }
 
 #[derive(Debug, Default)]
-pub struct RwLock<T>(parking_lot::RwLock<T>);
+pub struct RwLock<T>(measured_parking_lot::RwLock<T>);
 
 impl<T> RwLock<T> {
     #[inline(always)]
     pub fn new(inner: T) -> Self {
-        RwLock(parking_lot::RwLock::new(inner))
+        RwLock(measured_parking_lot::RwLock::new(inner))
     }
 
     #[inline(always)]

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # tidy-alphabetical-start
-parking_lot = "0.12"
+measured_parking_lot = { package = "parking_lot", git = "https://github.com/zetanumbers/parking_lot.git", branch = "measure_park" }
 rustc-rayon-core = { version = "0.5.0" }
 rustc_abi = { path = "../rustc_abi" }
 rustc_ast = { path = "../rustc_ast" }

@@ -2335,29 +2335,68 @@ impl<'tcx> TyCtxt<'tcx> {
         // after this point, they'll show up as "<unknown>" in self-profiling data.
         self.alloc_self_profile_query_strings();
 
-        if self.sess.threads() > 1 {
-            let mut park_times = sync::broadcast(|i| {
-                (i, parking_lot_core::thread_lock_time(), parking_lot_core::thread_wait_time())
-            });
-            park_times.sort_by_key(|(i, _, _)| *i);
-            let lock_times = park_times.iter().map(|(_, l, _)| *l).collect::<Vec<Duration>>();
-            let wait_times = park_times.iter().map(|(_, _, w)| *w).collect::<Vec<Duration>>();
-            eprintln!("=====================================");
-            eprintln!("Lock time per thread: {lock_times:?}");
-            eprintln!("Maximum thread lock time: {:?}", lock_times.iter().max().unwrap());
-            eprintln!("Total thread lock time: {:?}", lock_times.iter().sum::<Duration>());
-            eprintln!("+++++++++++++++++++++++++++++++++++++");
-            eprintln!("Wait time per thread: {wait_times:?}");
-            eprintln!("Maximum thread wait time: {:?}", wait_times.iter().max().unwrap());
-            eprintln!("Total thread wait time: {:?}", wait_times.iter().sum::<Duration>());
-            eprintln!("=====================================");
-        }
+        self.print_and_reset_park_times();
 
         self.save_dep_graph();
         self.query_key_hash_verify_all();
 
         if let Err((path, error)) = self.dep_graph.finish_encoding() {
             self.sess.dcx().emit_fatal(crate::error::FailedWritingFile { path: &path, error });
+        }
+    }
+
+    pub fn print_and_reset_park_times(self) {
+        struct JsonThreadParkTimes {
+            thrd_num: usize,
+            lock: Duration,
+            wait: Duration,
+        }
+
+        struct JsonParkTimes {
+            crate_name: Symbol,
+            stable_crate_id: u64,
+            threads: Vec<JsonThreadParkTimes>,
+        }
+
+        impl fmt::Display for JsonParkTimes {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    f,
+                    r#"{{"crate_name": {:?}, "stable_crate_id": "{}", "threads": ["#,
+                    self.crate_name, self.stable_crate_id
+                )?;
+                let mut first = true;
+                for thread in &self.threads {
+                    if !first {
+                        f.write_str(", ")?;
+                        first = false;
+                    }
+                    write!(
+                        f,
+                        r#"{{"lock": "{}", "wait": "{}"}}"#,
+                        thread.lock.as_nanos(),
+                        thread.wait.as_nanos()
+                    )?;
+                }
+                write!(f, r#"]}}"#)
+            }
+        }
+
+        if self.sess.threads() > 1 {
+            let mut threads = sync::broadcast(|thrd_num| {
+                measured_parking_lot_core::thread_park_times(|t| JsonThreadParkTimes {
+                    thrd_num,
+                    lock: t.lock_time.take(),
+                    wait: t.wait_time.take(),
+                })
+            });
+            threads.sort_by_key(|times| times.thrd_num);
+            let park_times = JsonParkTimes {
+                crate_name: self.crate_name(LOCAL_CRATE),
+                stable_crate_id: self.stable_crate_id(LOCAL_CRATE).as_u64(),
+                threads,
+            };
+            eprintln!("park_time: {park_times}");
         }
     }
 }
