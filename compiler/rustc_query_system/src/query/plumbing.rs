@@ -18,7 +18,7 @@ use tracing::instrument;
 
 use super::{QueryConfig, QueryStackFrameExtra};
 use crate::HandleCycleError;
-use crate::dep_graph::{DepContext, DepGraphData, DepNode, DepNodeIndex, DepNodeParams};
+use crate::dep_graph::{DepCache, DepContext, DepGraphData, DepNode, DepNodeIndex, DepNodeParams};
 use crate::ich::StableHashingContext;
 use crate::query::caches::QueryCache;
 use crate::query::job::{QueryInfo, QueryJob, QueryJobId, QueryJobInfo, QueryLatch, report_cycle};
@@ -250,7 +250,7 @@ where
     match cache.lookup(key) {
         Some((value, index)) => {
             tcx.profiler().query_cache_hit(index.into());
-            tcx.dep_graph().read_index(index);
+            tcx.dep_graph().read_index(index, DepCache::Cached);
             Some(value)
         }
         None => None,
@@ -259,12 +259,7 @@ where
 
 #[cold]
 #[inline(never)]
-fn cycle_error<Q, Qcx>(
-    query: Q,
-    qcx: Qcx,
-    try_execute: QueryJobId,
-    span: Span,
-) -> (Q::Value, Option<DepNodeIndex>)
+fn cycle_error<Q, Qcx>(query: Q, qcx: Qcx, try_execute: QueryJobId, span: Span) -> Q::Value
 where
     Q: QueryConfig<Qcx>,
     Qcx: QueryContext,
@@ -274,7 +269,7 @@ where
     let query_map = qcx.collect_active_jobs().ok().expect("failed to collect active queries");
 
     let error = try_execute.find_cycle_in_stack(query_map, &qcx.current_query_job(), span);
-    (mk_cycle(query, qcx, error.lift(qcx)), None)
+    mk_cycle(query, qcx, error.lift(qcx))
 }
 
 #[inline(always)]
@@ -285,7 +280,7 @@ fn wait_for_query<Q, Qcx>(
     key: Q::Key,
     latch: QueryLatch<Qcx::QueryInfo>,
     current: Option<QueryJobId>,
-) -> (Q::Value, Option<DepNodeIndex>)
+) -> Q::Value
 where
     Q: QueryConfig<Qcx>,
     Qcx: QueryContext,
@@ -319,11 +314,12 @@ where
             };
 
             qcx.dep_context().profiler().query_cache_hit(index.into());
+            qcx.dep_context().dep_graph().read_index(index, DepCache::Cached);
             query_blocked_prof_timer.finish_with_query_invocation_id(index.into());
 
-            (v, Some(index))
+            v
         }
-        Err(cycle) => (mk_cycle(query, qcx, cycle.lift(qcx)), None),
+        Err(cycle) => mk_cycle(query, qcx, cycle.lift(qcx)),
     }
 }
 
@@ -334,7 +330,7 @@ fn try_execute_query<Q, Qcx, const INCR: bool>(
     span: Span,
     key: Q::Key,
     dep_node: Option<DepNode>,
-) -> (Q::Value, Option<DepNodeIndex>)
+) -> Q::Value
 where
     Q: QueryConfig<Qcx>,
     Qcx: QueryContext,
@@ -352,7 +348,8 @@ where
     if qcx.dep_context().sess().threads() > 1 {
         if let Some((value, index)) = query.query_cache(qcx).lookup(&key) {
             qcx.dep_context().profiler().query_cache_hit(index.into());
-            return (value, Some(index));
+            qcx.dep_context().dep_graph().read_index(index, DepCache::Cached);
+            return value;
         }
     }
 
@@ -406,7 +403,7 @@ fn execute_job<Q, Qcx, const INCR: bool>(
     key_hash: u64,
     id: QueryJobId,
     dep_node: Option<DepNode>,
-) -> (Q::Value, Option<DepNodeIndex>)
+) -> Q::Value
 where
     Q: QueryConfig<Qcx>,
     Qcx: QueryContext,
@@ -416,7 +413,7 @@ where
 
     debug_assert_eq!(qcx.dep_context().dep_graph().is_fully_enabled(), INCR);
 
-    let (result, dep_node_index) = if INCR {
+    let (result, dep_node_index, dep_cache) = if INCR {
         execute_job_incr(
             query,
             qcx,
@@ -426,7 +423,8 @@ where
             id,
         )
     } else {
-        execute_job_non_incr(query, qcx, key, id)
+        let (res, index) = execute_job_non_incr(query, qcx, key, id);
+        (res, index, DepCache::Computed)
     };
 
     let cache = query.query_cache(qcx);
@@ -465,8 +463,9 @@ where
         }
     }
     job_owner.complete(cache, key_hash, result, dep_node_index);
+    qcx.dep_context().dep_graph().read_index(dep_node_index, dep_cache);
 
-    (result, Some(dep_node_index))
+    result
 }
 
 // Fast path for when incr. comp. is off.
@@ -515,7 +514,7 @@ fn execute_job_incr<Q, Qcx>(
     key: Q::Key,
     mut dep_node_opt: Option<DepNode>,
     job_id: QueryJobId,
-) -> (Q::Value, DepNodeIndex)
+) -> (Q::Value, DepNodeIndex, DepCache)
 where
     Q: QueryConfig<Qcx>,
     Qcx: QueryContext,
@@ -527,16 +526,16 @@ where
 
         // The diagnostics for this query will be promoted to the current session during
         // `try_mark_green()`, so we can ignore them here.
-        if let Some(ret) = qcx.start_query(job_id, false, || {
+        if let Some((ret, index)) = qcx.start_query(job_id, false, || {
             try_load_from_disk_and_cache_in_memory(query, dep_graph_data, qcx, &key, dep_node)
         }) {
-            return ret;
+            return (ret, index, DepCache::Cached);
         }
     }
 
     let prof_timer = qcx.dep_context().profiler().query_provider();
 
-    let (result, dep_node_index) = qcx.start_query(job_id, query.depth_limit(), || {
+    let (result, dep_node_index, dep_cache) = qcx.start_query(job_id, query.depth_limit(), || {
         if query.anon() {
             return dep_graph_data.with_anon_task_inner(
                 *qcx.dep_context(),
@@ -549,18 +548,19 @@ where
         let dep_node =
             dep_node_opt.unwrap_or_else(|| query.construct_dep_node(*qcx.dep_context(), &key));
 
-        dep_graph_data.with_task(
+        let (res, index) = dep_graph_data.with_task(
             dep_node,
             (qcx, query),
             key,
             |(qcx, query), key| query.compute(qcx, key),
             query.hash_result(),
-        )
+        );
+        (res, index, DepCache::Computed)
     });
 
     prof_timer.finish_with_query_invocation_id(dep_node_index.into());
 
-    (result, dep_node_index)
+    (result, dep_node_index, dep_cache)
 }
 
 #[inline(always)]
@@ -782,7 +782,7 @@ where
             return (true, Some(dep_node));
         }
         Some((serialized_dep_node_index, dep_node_index)) => {
-            dep_graph.read_index(dep_node_index);
+            dep_graph.read_index(dep_node_index, DepCache::Cached);
             qcx.dep_context().profiler().query_cache_hit(dep_node_index.into());
             serialized_dep_node_index
         }
@@ -811,7 +811,7 @@ where
 {
     debug_assert!(!qcx.dep_context().dep_graph().is_fully_enabled());
 
-    ensure_sufficient_stack(|| try_execute_query::<Q, Qcx, false>(query, qcx, span, key, None).0)
+    ensure_sufficient_stack(|| try_execute_query::<Q, Qcx, false>(query, qcx, span, key, None))
 }
 
 #[inline(always)]
@@ -838,13 +838,9 @@ where
         None
     };
 
-    let (result, dep_node_index) = ensure_sufficient_stack(|| {
+    Some(ensure_sufficient_stack(|| {
         try_execute_query::<_, _, true>(query, qcx, span, key, dep_node)
-    });
-    if let Some(dep_node_index) = dep_node_index {
-        qcx.dep_context().dep_graph().read_index(dep_node_index)
-    }
-    Some(result)
+    }))
 }
 
 pub fn force_query<Q, Qcx>(query: Q, qcx: Qcx, key: Q::Key, dep_node: DepNode)

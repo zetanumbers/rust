@@ -5,7 +5,7 @@ use std::hash::Hash;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::Lock;
 
-use crate::dep_graph::{DepContext, DepNodeIndex};
+use crate::dep_graph::{DepCache, DepContext, DepNodeIndex};
 
 pub struct Cache<Key, Value> {
     hashmap: Lock<FxHashMap<Key, WithDepNode<Value>>>,
@@ -52,7 +52,7 @@ impl<T: Clone> WithDepNode<T> {
     }
 
     pub fn get<Tcx: DepContext>(&self, tcx: Tcx) -> T {
-        tcx.dep_graph().read_index(self.dep_node);
+        tcx.dep_graph().read_index(self.dep_node, DepCache::Cached);
         self.cached_value.clone()
     }
 }

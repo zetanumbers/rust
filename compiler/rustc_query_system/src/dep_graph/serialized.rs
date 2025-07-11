@@ -44,6 +44,7 @@ use std::cmp::max;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use std::{iter, mem, u64};
 
 use rustc_data_structures::fingerprint::{Fingerprint, PackedFingerprint};
@@ -62,6 +63,7 @@ use tracing::{debug, instrument};
 use super::graph::{CurrentDepGraph, DepNodeColor, DepNodeColorMap};
 use super::query::DepGraphQuery;
 use super::{DepKind, DepNode, DepNodeIndex, Deps};
+use crate::dep_graph::DepCache;
 use crate::dep_graph::edges::EdgesVec;
 
 // The maximum value of `SerializedDepNodeIndex` leaves the upper two bits
@@ -447,12 +449,13 @@ impl<D: Deps> SerializedNodeHeader<D> {
 struct NodeInfo {
     node: DepNode,
     fingerprint: Fingerprint,
+    timeframe: Duration,
     edges: EdgesVec,
 }
 
 impl NodeInfo {
     fn encode<D: Deps>(&self, e: &mut MemEncoder, index: DepNodeIndex) {
-        let NodeInfo { node, fingerprint, ref edges } = *self;
+        let NodeInfo { node, fingerprint, timeframe: _, ref edges } = *self;
         let header = SerializedNodeHeader::<D>::new(
             node,
             index,
@@ -606,8 +609,9 @@ impl<D: Deps> EncoderState<D> {
         &self,
         node: DepNode,
         index: DepNodeIndex,
+        timeframe: Duration,
         edge_count: usize,
-        edges: impl FnOnce(&Self) -> Vec<DepNodeIndex>,
+        edges: impl FnOnce(&Self) -> Vec<(DepNodeIndex, DepCache)>,
         record_graph: &Option<Lock<DepGraphQuery>>,
         local: &mut LocalEncoderState,
     ) {
@@ -622,7 +626,7 @@ impl<D: Deps> EncoderState<D> {
             outline(move || {
                 // Do not ICE when a query is called from within `with_query`.
                 if let Some(record_graph) = &mut record_graph.try_lock() {
-                    record_graph.push(index, node, &edges);
+                    record_graph.push(index, node, timeframe, &edges);
                 }
             });
         }
@@ -663,8 +667,15 @@ impl<D: Deps> EncoderState<D> {
         self.record(
             node.node,
             index,
+            node.timeframe,
             node.edges.len(),
-            |_| node.edges[..].to_vec(),
+            |_| {
+                node.edges
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &edge)| (edge, node.edges.cache(i)))
+                    .collect()
+            },
             record_graph,
             &mut *local,
         );
@@ -700,11 +711,14 @@ impl<D: Deps> EncoderState<D> {
         self.record(
             node,
             index,
+            // Cached on disk queries timeframes are assigned zero timeframe
+            // Consider serializing node timeframes too
+            Duration::ZERO,
             edge_count,
             |this| {
                 this.previous
                     .edge_targets_from(prev_index)
-                    .map(|i| colors.current(i).unwrap())
+                    .map(|i| (colors.current(i).unwrap(), DepCache::Cached))
                     .collect()
             },
             record_graph,
@@ -869,9 +883,10 @@ impl<D: Deps> GraphEncoder<D> {
         node: DepNode,
         fingerprint: Fingerprint,
         edges: EdgesVec,
+        timeframe: Duration,
     ) -> DepNodeIndex {
         let _prof_timer = self.profiler.generic_activity("incr_comp_encode_dep_graph");
-        let node = NodeInfo { node, fingerprint, edges };
+        let node = NodeInfo { node, fingerprint, timeframe, edges };
         let mut local = self.status.local.borrow_mut();
         let index = self.status.next_index(&mut *local);
         self.status.bump_index(&mut *local);
@@ -890,9 +905,10 @@ impl<D: Deps> GraphEncoder<D> {
         fingerprint: Fingerprint,
         edges: EdgesVec,
         is_green: bool,
+        timeframe: Duration,
     ) -> DepNodeIndex {
         let _prof_timer = self.profiler.generic_activity("incr_comp_encode_dep_graph");
-        let node = NodeInfo { node, fingerprint, edges };
+        let node = NodeInfo { node, fingerprint, timeframe, edges };
 
         let mut local = self.status.local.borrow_mut();
 

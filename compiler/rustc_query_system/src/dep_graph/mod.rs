@@ -9,8 +9,10 @@ use std::panic;
 
 pub use dep_node::{DepKind, DepKindStruct, DepNode, DepNodeParams, WorkProductId};
 pub(crate) use graph::DepGraphData;
-pub use graph::{DepGraph, DepNodeIndex, TaskDepsRef, WorkProduct, WorkProductMap, hash_result};
-pub use query::DepGraphQuery;
+pub use graph::{
+    DepCache, DepGraph, DepNodeIndex, TaskDepsRef, WorkProduct, WorkProductMap, hash_result,
+};
+pub use query::{DepGraphQuery, TimedDepNode};
 use rustc_data_structures::profiling::SelfProfilerRef;
 use rustc_data_structures::sync::DynSync;
 use rustc_session::Session;

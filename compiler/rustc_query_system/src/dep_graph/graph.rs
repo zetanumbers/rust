@@ -4,6 +4,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use rustc_data_structures::fingerprint::{Fingerprint, PackedFingerprint};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -25,6 +26,7 @@ use {super::debug::EdgeFilter, std::env};
 use super::query::DepGraphQuery;
 use super::serialized::{GraphEncoder, SerializedDepGraph, SerializedDepNodeIndex};
 use super::{DepContext, DepKind, DepNode, Deps, HasDepContext, WorkProductId};
+pub use crate::dep_graph::edges::EdgeCache as DepCache;
 use crate::dep_graph::edges::EdgesVec;
 use crate::ich::StableHashingContext;
 use crate::query::{QueryContext, QuerySideEffect};
@@ -137,6 +139,7 @@ impl<D: Deps> DepGraph<D> {
             DepNode { kind: D::DEP_KIND_ANON_ZERO_DEPS, hash: current.anon_id_seed.into() },
             EdgesVec::new(),
             Fingerprint::ZERO,
+            Duration::ZERO,
         );
         assert_eq!(_green_node_index, DepNodeIndex::SINGLETON_ZERO_DEPS_ANON_NODE);
 
@@ -145,6 +148,7 @@ impl<D: Deps> DepGraph<D> {
             DepNode { kind: D::DEP_KIND_RED, hash: Fingerprint::ZERO.into() },
             EdgesVec::new(),
             Fingerprint::ZERO,
+            Duration::ZERO,
         );
         assert_eq!(red_node_index, DepNodeIndex::FOREVER_RED_NODE);
         if prev_graph_node_count > 0 {
@@ -286,8 +290,8 @@ impl<D: Deps> DepGraph<D> {
     {
         match self.data() {
             Some(data) => {
-                let (result, index) = data.with_anon_task_inner(cx, dep_kind, op);
-                self.read_index(index);
+                let (result, index, cache) = data.with_anon_task_inner(cx, dep_kind, op);
+                self.read_index(index, cache);
                 (result, index)
             }
             None => (op(), self.next_virtual_depnode_index()),
@@ -345,8 +349,13 @@ impl<D: Deps> DepGraphData<D> {
             )
         });
 
-        let with_deps = |task_deps| D::with_deps(task_deps, || task(cx, arg));
-        let (result, edges) = if cx.dep_context().is_eval_always(key.kind) {
+        let with_deps = |task_deps| {
+            D::with_deps(task_deps, || {
+                let start = Instant::now();
+                (task(cx, arg), start.elapsed())
+            })
+        };
+        let ((result, timeframe), edges) = if cx.dep_context().is_eval_always(key.kind) {
             (with_deps(TaskDepsRef::EvalAlways), EdgesVec::new())
         } else {
             let task_deps = Lock::new(TaskDeps {
@@ -360,7 +369,8 @@ impl<D: Deps> DepGraphData<D> {
         };
 
         let dcx = cx.dep_context();
-        let dep_node_index = self.hash_result_and_alloc_node(dcx, key, edges, &result, hash_result);
+        let dep_node_index =
+            self.hash_result_and_alloc_node(dcx, key, edges, &result, timeframe, hash_result);
 
         (result, dep_node_index)
     }
@@ -381,29 +391,32 @@ impl<D: Deps> DepGraphData<D> {
         cx: Tcx,
         dep_kind: DepKind,
         op: OP,
-    ) -> (R, DepNodeIndex)
+    ) -> (R, DepNodeIndex, DepCache)
     where
         OP: FnOnce() -> R,
     {
         debug_assert!(!cx.is_eval_always(dep_kind));
 
         let task_deps = Lock::new(TaskDeps::default());
-        let result = D::with_deps(TaskDepsRef::Allow(&task_deps), op);
+        let (result, timeframe) = D::with_deps(TaskDepsRef::Allow(&task_deps), || {
+            let start = Instant::now();
+            (op(), start.elapsed())
+        });
         let task_deps = task_deps.into_inner();
         let task_deps = task_deps.reads;
 
-        let dep_node_index = match task_deps.len() {
+        let (dep_node_index, cache) = match task_deps.len() {
             0 => {
                 // Because the dep-node id of anon nodes is computed from the sets of its
                 // dependencies we already know what the ID of this dependency-less node is
                 // going to be (i.e. equal to the precomputed
                 // `SINGLETON_DEPENDENCYLESS_ANON_NODE`). As a consequence we can skip creating
                 // a `StableHasher` and sending the node through interning.
-                DepNodeIndex::SINGLETON_ZERO_DEPS_ANON_NODE
+                (DepNodeIndex::SINGLETON_ZERO_DEPS_ANON_NODE, DepCache::Cached)
             }
             1 => {
                 // When there is only one dependency, don't bother creating a node.
-                task_deps[0]
+                (task_deps[0], task_deps.cache(0))
             }
             _ => {
                 // The dep node indices are hashed here instead of hashing the dep nodes of the
@@ -429,13 +442,21 @@ impl<D: Deps> DepGraphData<D> {
                 // As anonymous nodes are a small quantity compared to the full dep-graph, the
                 // memory impact of this `anon_node_to_index` map remains tolerable, and helps
                 // us avoid useless growth of the graph with almost-equivalent nodes.
-                self.current.anon_node_to_index.get_or_insert_with(target_dep_node, || {
-                    self.current.alloc_new_node(target_dep_node, task_deps, Fingerprint::ZERO)
-                })
+                (
+                    self.current.anon_node_to_index.get_or_insert_with(target_dep_node, || {
+                        self.current.alloc_new_node(
+                            target_dep_node,
+                            task_deps,
+                            Fingerprint::ZERO,
+                            timeframe,
+                        )
+                    }),
+                    DepCache::Computed,
+                )
             }
         };
 
-        (result, dep_node_index)
+        (result, dep_node_index, cache)
     }
 
     /// Intern the new `DepNode` with the dependencies up-to-now.
@@ -445,13 +466,14 @@ impl<D: Deps> DepGraphData<D> {
         node: DepNode,
         edges: EdgesVec,
         result: &R,
+        timeframe: Duration,
         hash_result: Option<fn(&mut StableHashingContext<'_>, &R) -> Fingerprint>,
     ) -> DepNodeIndex {
         let hashing_timer = cx.profiler().incr_result_hashing();
         let current_fingerprint = hash_result.map(|hash_result| {
             cx.with_stable_hashing_context(|mut hcx| hash_result(&mut hcx, result))
         });
-        let dep_node_index = self.alloc_and_color_node(node, edges, current_fingerprint);
+        let dep_node_index = self.alloc_and_color_node(node, edges, current_fingerprint, timeframe);
         hashing_timer.finish_with_query_invocation_id(dep_node_index.into());
         dep_node_index
     }
@@ -459,7 +481,7 @@ impl<D: Deps> DepGraphData<D> {
 
 impl<D: Deps> DepGraph<D> {
     #[inline]
-    pub fn read_index(&self, dep_node_index: DepNodeIndex) {
+    pub fn read_index(&self, dep_node_index: DepNodeIndex, cache: DepCache) {
         if let Some(ref data) = self.data {
             D::read_deps(|task_deps| {
                 let mut task_deps = match task_deps {
@@ -489,7 +511,7 @@ impl<D: Deps> DepGraph<D> {
                     task_deps.read_set.insert(dep_node_index)
                 };
                 if new_read {
-                    task_deps.reads.push(dep_node_index);
+                    task_deps.reads.push(dep_node_index, cache);
                     if task_deps.reads.len() == EdgesVec::INLINE_CAPACITY {
                         // Fill `read_set` with what we have so far so we can use the hashset
                         // next time
@@ -522,7 +544,7 @@ impl<D: Deps> DepGraph<D> {
             D::read_deps(|task_deps| match task_deps {
                 TaskDepsRef::EvalAlways | TaskDepsRef::Ignore => return,
                 TaskDepsRef::Forbid | TaskDepsRef::Allow(..) => {
-                    self.read_index(data.encode_diagnostic(qcx, diagnostic));
+                    self.read_index(data.encode_diagnostic(qcx, diagnostic), DepCache::Cached);
                 }
             })
         }
@@ -596,9 +618,9 @@ impl<D: Deps> DepGraph<D> {
 
             let mut edges = EdgesVec::new();
             D::read_deps(|task_deps| match task_deps {
-                TaskDepsRef::Allow(deps) => edges.extend(deps.lock().reads.iter().copied()),
+                TaskDepsRef::Allow(deps) => edges.extend_from_other(&deps.lock().reads),
                 TaskDepsRef::EvalAlways => {
-                    edges.push(DepNodeIndex::FOREVER_RED_NODE);
+                    edges.push(DepNodeIndex::FOREVER_RED_NODE, DepCache::Cached);
                 }
                 TaskDepsRef::Ignore => {}
                 TaskDepsRef::Forbid => {
@@ -606,7 +628,7 @@ impl<D: Deps> DepGraph<D> {
                 }
             });
 
-            data.hash_result_and_alloc_node(&cx, node, edges, result, hash_result)
+            data.hash_result_and_alloc_node(&cx, node, edges, result, Duration::ZERO, hash_result)
         } else {
             // Incremental compilation is turned off. We just execute the task
             // without tracking. We still provide a dep-node index that uniquely
@@ -681,7 +703,8 @@ impl<D: Deps> DepGraphData<D> {
             Fingerprint::ZERO,
             // We want the side effect node to always be red so it will be forced and emit the
             // diagnostic.
-            std::iter::once(DepNodeIndex::FOREVER_RED_NODE).collect(),
+            std::iter::once((DepNodeIndex::FOREVER_RED_NODE, DepCache::Cached)).collect(),
+            Duration::ZERO,
         );
         let side_effect = QuerySideEffect::Diagnostic(diagnostic.clone());
         qcx.store_side_effect(dep_node_index, side_effect);
@@ -716,8 +739,9 @@ impl<D: Deps> DepGraphData<D> {
                     hash: PackedFingerprint::from(Fingerprint::ZERO),
                 },
                 Fingerprint::ZERO,
-                std::iter::once(DepNodeIndex::FOREVER_RED_NODE).collect(),
+                std::iter::once((DepNodeIndex::FOREVER_RED_NODE, DepCache::Cached)).collect(),
                 true,
+                Duration::ZERO,
             );
             // This will just overwrite the same value for concurrent calls.
             qcx.store_side_effect(dep_node_index, side_effect);
@@ -729,6 +753,7 @@ impl<D: Deps> DepGraphData<D> {
         key: DepNode,
         edges: EdgesVec,
         fingerprint: Option<Fingerprint>,
+        timeframe: Duration,
     ) -> DepNodeIndex {
         if let Some(prev_index) = self.previous.node_to_index_opt(&key) {
             // Determine the color and index of the new `DepNode`.
@@ -759,13 +784,19 @@ impl<D: Deps> DepGraphData<D> {
                 fingerprint,
                 edges,
                 is_green,
+                timeframe,
             );
 
             self.current.record_node(dep_node_index, key, fingerprint);
 
             dep_node_index
         } else {
-            self.current.alloc_new_node(key, edges, fingerprint.unwrap_or(Fingerprint::ZERO))
+            self.current.alloc_new_node(
+                key,
+                edges,
+                fingerprint.unwrap_or(Fingerprint::ZERO),
+                timeframe,
+            )
         }
     }
 
@@ -1249,8 +1280,9 @@ impl<D: Deps> CurrentDepGraph<D> {
         key: DepNode,
         edges: EdgesVec,
         current_fingerprint: Fingerprint,
+        timeframe: Duration,
     ) -> DepNodeIndex {
-        let dep_node_index = self.encoder.send_new(key, current_fingerprint, edges);
+        let dep_node_index = self.encoder.send_new(key, current_fingerprint, edges, timeframe);
 
         self.record_node(dep_node_index, key, current_fingerprint);
 

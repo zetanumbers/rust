@@ -33,16 +33,22 @@
 //! fn baz() { foo(); }
 //! ```
 
-use std::env;
+use std::cell::Cell;
 use std::fs::{self, File};
 use std::io::Write;
+use std::num::NonZeroU32;
+use std::time::Duration;
+use std::{env, iter};
 
-use rustc_data_structures::fx::FxIndexSet;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexMap, FxIndexSet};
 use rustc_data_structures::graph::linked_graph::{Direction, INCOMING, NodeIndex, OUTGOING};
+use rustc_data_structures::stack::ensure_sufficient_stack;
+use rustc_data_structures::unhash::{UnhashMap, UnhashSet};
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_middle::dep_graph::{
-    DepGraphQuery, DepKind, DepNode, DepNodeExt, DepNodeFilter, EdgeFilter, dep_kinds,
+    DepCache, DepGraphQuery, DepKind, DepNode, DepNodeExt, DepNodeFilter, EdgeFilter, TimedDepNode,
+    dep_kinds,
 };
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::TyCtxt;
@@ -225,37 +231,90 @@ fn check_paths<'tcx>(tcx: TyCtxt<'tcx>, if_this_changed: &Sources, then_this_wou
     });
 }
 
+#[allow(rustc::potential_query_instability)]
 fn dump_graph(query: &DepGraphQuery) {
     let path: String = env::var("RUST_DEP_GRAPH").unwrap_or_else(|_| "dep_graph".to_string());
 
-    let nodes = match env::var("RUST_DEP_GRAPH_FILTER") {
-        Ok(string) => {
-            // Expect one of: "-> target", "source -> target", or "source ->".
-            let edge_filter =
-                EdgeFilter::new(&string).unwrap_or_else(|e| bug!("invalid filter: {}", e));
-            let sources = node_set(query, &edge_filter.source);
-            let targets = node_set(query, &edge_filter.target);
-            filter_nodes(query, &sources, &targets)
-        }
-        Err(_) => query.nodes().into_iter().map(|n| n.kind).collect(),
-    };
-    let edges = filter_edges(query, &nodes);
+    struct Timeframe {
+        dep_kind: DepKind,
+        compute_ns: Cell<u64>,
+        own_ns: u64,
+        children: UnhashSet<u32>,
+    }
+
+    let (nodes_to_indices, mut hierarchy): (FxHashMap<_, _>, Vec<_>) = query
+        .graph
+        .all_nodes()
+        .iter()
+        .enumerate()
+        .map(|(idx, node)| {
+            let realtime = u64::try_from(node.data.timeframe.as_nanos()).unwrap();
+            (
+                (node.data.inner, idx),
+                Timeframe {
+                    dep_kind: node.data.inner.kind,
+                    compute_ns: Cell::new(realtime),
+                    own_ns: realtime,
+                    children: UnhashSet::default(),
+                },
+            )
+        })
+        .collect();
+    assert_eq!(nodes_to_indices.len(), hierarchy.len());
+
+    // for edge in query.graph.all_edges() {
+    //     edge.source()
+    //     let child_compute = *hierarchy
+    //         .entry(child.inner)
+    //         .or_insert_with(|| {
+    //             let realtime = u64::try_from(child.timeframe.as_nanos()).unwrap();
+    //             Timeframe {
+    //                 compute_ns: Cell::new(realtime),
+    //                 own_ns: realtime,
+    //                 children: FxHashSet::default(),
+    //             }
+    //         })
+    //         .compute_ns
+    //         .get_mut();
+
+    //     let parent = hierarchy.entry(parent.inner).or_insert_with(|| {
+    //         let realtime = u64::try_from(parent.timeframe.as_nanos()).unwrap();
+    //         Timeframe {
+    //             compute_ns: Cell::new(realtime),
+    //             own_ns: realtime,
+    //             children: FxHashSet::default(),
+    //         }
+    //     });
+
+    //     parent.children.insert(child.inner);
+    //     if cache == DepCache::Computed {
+    //         parent.own_ns = parent.own_ns.saturating_sub(child_compute);
+    //     }
+    // }
+
+    // let mut total_compute_map = DenseBitSet::new();
+    // for timeframe in hierarchy.values() {
+    //     fn eval_total_compute(
+    //         hierarchy: &FxHashMap<DepNode, Timeframe>,
+    //         node: DepNode,
+    //         timeframe: &Timeframe,
+    //         total_compute_map: &mut FxHashMap<DepNode, u64>,
+    //     ) {
+    //         total_compute_map.entry(node).or_insert(timeframe.own_ns);
+    //     }
+
+    //     hierarchy.stage.set(Stage::Total);
+    //     total_compute_map.clear();
+    // }
 
     {
         // dump a .txt file with just the edges:
         let txt_path = format!("{path}.txt");
         let mut file = File::create_buffered(&txt_path).unwrap();
-        for (source, target) in &edges {
-            write!(file, "{source:?} -> {target:?}\n").unwrap();
-        }
-    }
-
-    {
-        // dump a .dot file in graphviz format:
-        let dot_path = format!("{path}.dot");
-        let mut v = Vec::new();
-        dot::render(&GraphvizDepGraph(nodes, edges), &mut v).unwrap();
-        fs::write(dot_path, v).unwrap();
+        write!(file, "{}", hierarchy.len()).unwrap();
+        // for (source, target, cache) in &edges {
+        //     write!(file, "{source:?} -> {target:?}\n").unwrap();
+        // }
     }
 }
 
@@ -347,7 +406,7 @@ fn walk_nodes<'q>(
                 for (_, edge) in query.graph.adjacent_edges(index, direction) {
                     let neighbor_index = edge.source_or_target(direction);
                     let neighbor = query.graph.node_data(neighbor_index);
-                    if set.insert(neighbor.kind) {
+                    if set.insert(neighbor.inner.kind) {
                         stack.push(neighbor_index);
                     }
                 }
@@ -426,14 +485,4 @@ fn walk_between<'q>(
             true
         }
     }
-}
-
-fn filter_edges(query: &DepGraphQuery, nodes: &FxIndexSet<DepKind>) -> Vec<(DepKind, DepKind)> {
-    let uniq: FxIndexSet<_> = query
-        .edges()
-        .into_iter()
-        .map(|(s, t)| (s.kind, t.kind))
-        .filter(|(source, target)| nodes.contains(source) && nodes.contains(target))
-        .collect();
-    uniq.into_iter().collect()
 }
