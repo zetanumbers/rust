@@ -34,25 +34,22 @@
 //! ```
 
 use std::cell::Cell;
-use std::fs::{self, File};
+use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::Write;
-use std::num::NonZeroU32;
-use std::time::Duration;
-use std::{env, iter};
+use std::{cmp, env, mem};
 
-use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexMap, FxIndexSet};
+use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
 use rustc_data_structures::graph::linked_graph::{Direction, INCOMING, NodeIndex, OUTGOING};
 use rustc_data_structures::stack::ensure_sufficient_stack;
-use rustc_data_structures::unhash::{UnhashMap, UnhashSet};
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_middle::dep_graph::{
-    DepCache, DepGraphQuery, DepKind, DepNode, DepNodeExt, DepNodeFilter, EdgeFilter, TimedDepNode,
-    dep_kinds,
+    DepCache, DepGraphQuery, DepKind, DepNode, DepNodeExt, DepNodeFilter, dep_kinds,
 };
 use rustc_middle::hir::nested_filter;
+use rustc_middle::span_bug;
 use rustc_middle::ty::TyCtxt;
-use rustc_middle::{bug, span_bug};
 use rustc_span::{Span, Symbol, sym};
 use tracing::debug;
 use {rustc_graphviz as dot, rustc_hir as hir};
@@ -237,84 +234,241 @@ fn dump_graph(query: &DepGraphQuery) {
 
     struct Timeframe {
         dep_kind: DepKind,
-        compute_ns: Cell<u64>,
+        realtime_ns: u64,
         own_ns: u64,
-        children: UnhashSet<u32>,
+        children: FxHashSet<usize>,
+        compute_tree_idx: Cell<usize>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct ComputeNode {
+        left: usize,
+        right: usize,
+        shared_high_bits: usize,
+        shared_high_bitmask: usize,
+        compute_ns: u64,
+    }
+
+    impl ComputeNode {
+        // Has to be top element
+        const NULL_IDX: usize = usize::MAX;
+
+        fn alloc_leaf_node(
+            own_ns: u64,
+            timeframe_idx: usize,
+            compute_arena: &mut Vec<ComputeNode>,
+        ) -> usize {
+            let new_idx = compute_arena.len();
+            compute_arena.push(ComputeNode {
+                left: ComputeNode::NULL_IDX,
+                right: ComputeNode::NULL_IDX,
+                compute_ns: own_ns,
+                shared_high_bitmask: !0,
+                shared_high_bits: timeframe_idx,
+            });
+            new_idx
+        }
+
+        fn union(mut lhs: usize, mut rhs: usize, compute_arena: &mut Vec<ComputeNode>) -> usize {
+            if lhs | rhs == ComputeNode::NULL_IDX {
+                return lhs & rhs;
+            }
+            if lhs == rhs {
+                return lhs;
+            }
+            let mut lhs_node = compute_arena[lhs];
+            let mut rhs_node = compute_arena[rhs];
+            let xor_high_bits = lhs_node.shared_high_bits ^ rhs_node.shared_high_bits;
+            let shared_high_bitmask = !((!0_usize).wrapping_shr(xor_high_bits.leading_zeros()));
+            let [left, right] = if lhs_node.shared_high_bits <= rhs_node.shared_high_bits {
+                [lhs, rhs]
+            } else {
+                [rhs, lhs]
+            };
+
+            match lhs_node.shared_high_bitmask.cmp(&rhs_node.shared_high_bitmask) {
+                cmp::Ordering::Equal => {
+                    if xor_high_bits == 0 {
+                        let left = ComputeNode::union(lhs_node.left, rhs_node.left, compute_arena);
+                        let right =
+                            ComputeNode::union(lhs_node.right, rhs_node.right, compute_arena);
+                        if [left, right] == [lhs_node.left, lhs_node.right] {
+                            return lhs;
+                        }
+
+                        let idx = compute_arena.len();
+                        compute_arena.push(ComputeNode {
+                            left,
+                            right,
+                            shared_high_bits: lhs_node.shared_high_bits,
+                            shared_high_bitmask: lhs_node.shared_high_bitmask,
+                            compute_ns: compute_arena[left].compute_ns
+                                + compute_arena[right].compute_ns,
+                        });
+                        return idx;
+                    } else {
+                        let idx = compute_arena.len();
+                        compute_arena.push(ComputeNode {
+                            left,
+                            right,
+                            shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
+                            shared_high_bitmask,
+                            compute_ns: lhs_node.compute_ns + rhs_node.compute_ns,
+                        });
+                        return idx;
+                    }
+                }
+                cmp::Ordering::Greater => {
+                    mem::swap(&mut lhs, &mut rhs);
+                    mem::swap(&mut lhs_node, &mut rhs_node);
+                }
+                cmp::Ordering::Less => (),
+            }
+
+            // `lhs` has lesser bitmask
+
+            if xor_high_bits & rhs_node.shared_high_bitmask != rhs_node.shared_high_bits {
+                let idx = compute_arena.len();
+                compute_arena.push(ComputeNode {
+                    left,
+                    right,
+                    shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
+                    shared_high_bitmask,
+                    compute_ns: lhs_node.compute_ns + rhs_node.compute_ns,
+                });
+                idx
+            } else {
+                let [left, right] = if lhs_node.shared_high_bits
+                    <= rhs_node.shared_high_bits | (!rhs_node.shared_high_bitmask).wrapping_shr(1)
+                {
+                    let left = ComputeNode::union(lhs, rhs_node.left, compute_arena);
+                    if left == rhs_node.left {
+                        return rhs;
+                    }
+                    [left, rhs_node.right]
+                } else {
+                    let right = ComputeNode::union(lhs, rhs_node.right, compute_arena);
+                    if right == rhs_node.right {
+                        return rhs;
+                    }
+                    [rhs_node.left, right]
+                };
+                let idx = compute_arena.len();
+                let get_compute_ns = |idx: usize| {
+                    if idx != ComputeNode::NULL_IDX { compute_arena[idx].compute_ns } else { 0 }
+                };
+                compute_arena.push(ComputeNode {
+                    left,
+                    right,
+                    shared_high_bits: rhs_node.shared_high_bits,
+                    shared_high_bitmask: rhs_node.shared_high_bitmask,
+                    compute_ns: get_compute_ns(left) + get_compute_ns(right),
+                });
+                idx
+            }
+        }
     }
 
     let (nodes_to_indices, mut hierarchy): (FxHashMap<_, _>, Vec<_>) = query
         .graph
-        .all_nodes()
-        .iter()
-        .enumerate()
+        .enumerated_nodes()
         .map(|(idx, node)| {
-            let realtime = u64::try_from(node.data.timeframe.as_nanos()).unwrap();
+            let realtime = node.data.timeframe.as_nanos() as u64;
             (
-                (node.data.inner, idx),
+                (node.data.inner, idx.node_id()),
                 Timeframe {
                     dep_kind: node.data.inner.kind,
-                    compute_ns: Cell::new(realtime),
+                    realtime_ns: realtime,
                     own_ns: realtime,
-                    children: UnhashSet::default(),
+                    children: FxHashSet::default(),
+                    compute_tree_idx: Cell::new(ComputeNode::NULL_IDX),
                 },
             )
         })
         .collect();
-    assert_eq!(nodes_to_indices.len(), hierarchy.len());
+    debug_assert_eq!(nodes_to_indices.len(), hierarchy.len());
 
-    // for edge in query.graph.all_edges() {
-    //     edge.source()
-    //     let child_compute = *hierarchy
-    //         .entry(child.inner)
-    //         .or_insert_with(|| {
-    //             let realtime = u64::try_from(child.timeframe.as_nanos()).unwrap();
-    //             Timeframe {
-    //                 compute_ns: Cell::new(realtime),
-    //                 own_ns: realtime,
-    //                 children: FxHashSet::default(),
-    //             }
-    //         })
-    //         .compute_ns
-    //         .get_mut();
+    let mut saturation_errors = FxHashMap::default();
+    let mut kind_deps = FxHashMap::<DepKind, FxHashSet<DepKind>>::default();
+    for edge in query.graph.all_edges() {
+        let child_idx = edge.target().node_id();
+        let child = &hierarchy[child_idx];
+        let child_kind = child.dep_kind;
+        let substract_ns = match edge.data {
+            DepCache::Computed => child.realtime_ns,
+            DepCache::Cached => 0,
+        };
+        let parent = &mut hierarchy[edge.source().node_id()];
+        if !parent.children.insert(child_idx) {
+            continue;
+        }
+        kind_deps.entry(parent.dep_kind).or_default().insert(child_kind);
+        let (new_own, overflow) = parent.own_ns.overflowing_sub(substract_ns);
+        if overflow {
+            parent.own_ns = 0;
+            *saturation_errors.entry(parent.dep_kind).or_insert(0_u64) += new_own.wrapping_neg();
+        } else {
+            parent.own_ns = new_own;
+        }
+    }
 
-    //     let parent = hierarchy.entry(parent.inner).or_insert_with(|| {
-    //         let realtime = u64::try_from(parent.timeframe.as_nanos()).unwrap();
-    //         Timeframe {
-    //             compute_ns: Cell::new(realtime),
-    //             own_ns: realtime,
-    //             children: FxHashSet::default(),
-    //         }
-    //     });
+    let saturation_errors = saturation_errors
+        .into_iter()
+        .map(|(k, v)| (k, (v, kind_deps.remove(&k).unwrap_or_default())))
+        .collect::<FxHashMap<_, _>>();
+    eprintln!("saturation_errors: {saturation_errors:#?}");
 
-    //     parent.children.insert(child.inner);
-    //     if cache == DepCache::Computed {
-    //         parent.own_ns = parent.own_ns.saturating_sub(child_compute);
-    //     }
-    // }
+    let mut compute_arena = Vec::with_capacity(query.graph.len_edges());
+    let mut compute_kinds = FxHashMap::<DepKind, u64>::default();
 
-    // let mut total_compute_map = DenseBitSet::new();
-    // for timeframe in hierarchy.values() {
-    //     fn eval_total_compute(
-    //         hierarchy: &FxHashMap<DepNode, Timeframe>,
-    //         node: DepNode,
-    //         timeframe: &Timeframe,
-    //         total_compute_map: &mut FxHashMap<DepNode, u64>,
-    //     ) {
-    //         total_compute_map.entry(node).or_insert(timeframe.own_ns);
-    //     }
+    for i in 0..hierarchy.len() {
+        fn calc_compute_tree(
+            i: usize,
+            hierarchy: &[Timeframe],
+            compute_arena: &mut Vec<ComputeNode>,
+        ) -> usize {
+            let timeframe = &hierarchy[i];
+            let this_tree = timeframe.compute_tree_idx.get();
+            if this_tree != ComputeNode::NULL_IDX {
+                return this_tree;
+            }
 
-    //     hierarchy.stage.set(Stage::Total);
-    //     total_compute_map.clear();
-    // }
+            let this_leaf = ComputeNode::alloc_leaf_node(timeframe.own_ns, i, compute_arena);
+            let this_tree = ensure_sufficient_stack(|| {
+                timeframe.children.iter().fold(this_leaf, |acc, &child| {
+                    ComputeNode::union(
+                        acc,
+                        calc_compute_tree(child, hierarchy, compute_arena),
+                        compute_arena,
+                    )
+                })
+            });
+            timeframe.compute_tree_idx.set(this_tree);
+            this_tree
+        }
+
+        let compute_tree = calc_compute_tree(i, &hierarchy, &mut compute_arena);
+        let compute_sum_ns = compute_arena[compute_tree].compute_ns;
+        let timeframe = &hierarchy[i];
+        let compute_max_ns = timeframe.own_ns
+            + timeframe
+                .children
+                .iter()
+                .map(|&child| compute_arena[hierarchy[child].compute_tree_idx.get()].compute_ns)
+                .max()
+                .unwrap_or(0);
+        *compute_kinds.entry(timeframe.dep_kind).or_default() += compute_sum_ns - compute_max_ns;
+    }
+
+    let compute_kinds: BTreeMap<_, _> = compute_kinds.into_iter().map(|(k, c)| (c, k)).collect();
 
     {
         // dump a .txt file with just the edges:
         let txt_path = format!("{path}.txt");
         let mut file = File::create_buffered(&txt_path).unwrap();
-        write!(file, "{}", hierarchy.len()).unwrap();
-        // for (source, target, cache) in &edges {
-        //     write!(file, "{source:?} -> {target:?}\n").unwrap();
-        // }
+        for (compute_ns, kind) in compute_kinds.into_iter().rev() {
+            writeln!(file, "{kind:?},{compute_ns}").unwrap();
+        }
     }
 }
 
