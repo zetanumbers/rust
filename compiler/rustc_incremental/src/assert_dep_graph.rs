@@ -45,11 +45,12 @@ use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_middle::dep_graph::{
-    DepCache, DepGraphQuery, DepKind, DepNode, DepNodeExt, DepNodeFilter, dep_kinds,
+    DepCache, DepContext, DepGraphQuery, DepKind, DepNode, DepNodeExt, DepNodeFilter, dep_kinds,
 };
 use rustc_middle::hir::nested_filter;
 use rustc_middle::span_bug;
 use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::tls::with_context;
 use rustc_span::{Span, Symbol, sym};
 use tracing::debug;
 use {rustc_graphviz as dot, rustc_hir as hir};
@@ -369,11 +370,19 @@ fn dump_graph(query: &DepGraphQuery) {
         }
     }
 
+    let mut side_effect_node_count = 0;
     let (nodes_to_indices, mut hierarchy): (FxHashMap<_, _>, Vec<_>) = query
         .graph
         .enumerated_nodes()
         .map(|(idx, node)| {
-            let realtime = node.data.timeframe.as_nanos() as u64;
+            if node.data.inner.kind == dep_kinds::SideEffect {
+                side_effect_node_count += 1;
+            }
+            let realtime = if node.data.inner.kind != dep_kinds::crate_hash {
+                node.data.timeframe.as_nanos() as u64
+            } else {
+                0
+            };
             (
                 (node.data.inner, idx.node_id()),
                 Timeframe {
@@ -386,37 +395,30 @@ fn dump_graph(query: &DepGraphQuery) {
             )
         })
         .collect();
-    debug_assert_eq!(nodes_to_indices.len(), hierarchy.len());
+    debug_assert_eq!(nodes_to_indices.len() + side_effect_node_count - 1, hierarchy.len());
 
-    let mut saturation_errors = FxHashMap::default();
-    let mut kind_deps = FxHashMap::<DepKind, FxHashSet<DepKind>>::default();
-    for edge in query.graph.all_edges() {
-        let child_idx = edge.target().node_id();
-        let child = &hierarchy[child_idx];
-        let child_kind = child.dep_kind;
-        let substract_ns = match edge.data {
-            DepCache::Computed => child.realtime_ns,
-            DepCache::Cached => 0,
-        };
-        let parent = &mut hierarchy[edge.source().node_id()];
-        if !parent.children.insert(child_idx) {
-            continue;
+    with_context(|icx| {
+        let tcx = icx.tcx;
+        for edge in query.graph.all_edges() {
+            let child_idx = edge.target().node_id();
+            let child = &hierarchy[child_idx];
+            let child_kind = child.dep_kind;
+            let child_realtime_ns = child.realtime_ns;
+            let substract_ns = match edge.data {
+                DepCache::Computed => child_realtime_ns,
+                DepCache::Cached => 0,
+            };
+            let parent = &mut hierarchy[edge.source().node_id()];
+            if !parent.children.insert(child_idx) {
+                continue;
+            }
+            if let Some(new_own) = parent.own_ns.checked_sub(substract_ns) {
+                parent.own_ns = new_own;
+            } else {
+                assert!(tcx.dep_kind_info(parent.dep_kind).is_anon)
+            }
         }
-        kind_deps.entry(parent.dep_kind).or_default().insert(child_kind);
-        let (new_own, overflow) = parent.own_ns.overflowing_sub(substract_ns);
-        if overflow {
-            parent.own_ns = 0;
-            *saturation_errors.entry(parent.dep_kind).or_insert(0_u64) += new_own.wrapping_neg();
-        } else {
-            parent.own_ns = new_own;
-        }
-    }
-
-    let saturation_errors = saturation_errors
-        .into_iter()
-        .map(|(k, v)| (k, (v, kind_deps.remove(&k).unwrap_or_default())))
-        .collect::<FxHashMap<_, _>>();
-    eprintln!("saturation_errors: {saturation_errors:#?}");
+    });
 
     let mut compute_arena = Vec::with_capacity(query.graph.len_edges());
     let mut compute_kinds = FxHashMap::<DepKind, u64>::default();

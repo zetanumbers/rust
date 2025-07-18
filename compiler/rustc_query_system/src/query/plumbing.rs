@@ -424,7 +424,7 @@ where
         )
     } else {
         let (res, index) = execute_job_non_incr(query, qcx, key, id);
-        (res, index, DepCache::Computed)
+        (res, index, Some(DepCache::Computed))
     };
 
     let cache = query.query_cache(qcx);
@@ -463,7 +463,9 @@ where
         }
     }
     job_owner.complete(cache, key_hash, result, dep_node_index);
-    qcx.dep_context().dep_graph().read_index(dep_node_index, dep_cache);
+    if let Some(dep_cache) = dep_cache {
+        qcx.dep_context().dep_graph().read_index(dep_node_index, dep_cache);
+    }
 
     result
 }
@@ -514,7 +516,7 @@ fn execute_job_incr<Q, Qcx>(
     key: Q::Key,
     mut dep_node_opt: Option<DepNode>,
     job_id: QueryJobId,
-) -> (Q::Value, DepNodeIndex, DepCache)
+) -> (Q::Value, DepNodeIndex, Option<DepCache>)
 where
     Q: QueryConfig<Qcx>,
     Qcx: QueryContext,
@@ -529,7 +531,7 @@ where
         if let Some((ret, index)) = qcx.start_query(job_id, false, || {
             try_load_from_disk_and_cache_in_memory(query, dep_graph_data, qcx, &key, dep_node)
         }) {
-            return (ret, index, DepCache::Cached);
+            return (ret, index, Some(DepCache::Cached));
         }
     }
 
@@ -540,6 +542,7 @@ where
             return dep_graph_data.with_anon_task_inner(
                 *qcx.dep_context(),
                 query.dep_kind(),
+                false,
                 || query.compute(qcx, key),
             );
         }
@@ -555,7 +558,7 @@ where
             |(qcx, query), key| query.compute(qcx, key),
             query.hash_result(),
         );
-        (res, index, DepCache::Computed)
+        (res, index, Some(DepCache::Computed))
     });
 
     prof_timer.finish_with_query_invocation_id(dep_node_index.into());
@@ -852,6 +855,7 @@ where
     // Ensure that only one of them runs the query.
     if let Some((_, index)) = query.query_cache(qcx).lookup(&key) {
         qcx.dep_context().profiler().query_cache_hit(index.into());
+        qcx.dep_context().dep_graph().read_index(index, DepCache::Cached);
         return;
     }
 
