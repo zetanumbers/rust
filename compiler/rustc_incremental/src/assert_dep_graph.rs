@@ -241,7 +241,7 @@ fn dump_graph(query: &DepGraphQuery) {
         compute_tree_idx: Cell<usize>,
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     struct ComputeNode {
         left: usize,
         right: usize,
@@ -297,6 +297,11 @@ fn dump_graph(query: &DepGraphQuery) {
                             return lhs;
                         }
 
+                        debug_assert!(
+                            left | right != ComputeNode::NULL_IDX
+                                || left & right == ComputeNode::NULL_IDX
+                        );
+
                         let idx = compute_arena.len();
                         compute_arena.push(ComputeNode {
                             left,
@@ -342,18 +347,23 @@ fn dump_graph(query: &DepGraphQuery) {
                 let [left, right] = if lhs_node.shared_high_bits
                     <= rhs_node.shared_high_bits | (!rhs_node.shared_high_bitmask).wrapping_shr(1)
                 {
-                    let left = ComputeNode::union(lhs, rhs_node.left, compute_arena);
-                    if left == rhs_node.left {
-                        return rhs;
+                    let left = ComputeNode::union(lhs_node.left, rhs, compute_arena);
+                    if left == lhs_node.left {
+                        return lhs;
                     }
-                    [left, rhs_node.right]
+                    [left, lhs_node.right]
                 } else {
-                    let right = ComputeNode::union(lhs, rhs_node.right, compute_arena);
-                    if right == rhs_node.right {
+                    let right = ComputeNode::union(lhs_node.right, rhs, compute_arena);
+                    if right == lhs_node.right {
                         return rhs;
                     }
-                    [rhs_node.left, right]
+                    [lhs_node.left, right]
                 };
+
+                debug_assert!(
+                    left | right != ComputeNode::NULL_IDX || left & right == ComputeNode::NULL_IDX
+                );
+
                 let idx = compute_arena.len();
                 let get_compute_ns = |idx: usize| {
                     if idx != ComputeNode::NULL_IDX { compute_arena[idx].compute_ns } else { 0 }
@@ -361,8 +371,8 @@ fn dump_graph(query: &DepGraphQuery) {
                 compute_arena.push(ComputeNode {
                     left,
                     right,
-                    shared_high_bits: rhs_node.shared_high_bits,
-                    shared_high_bitmask: rhs_node.shared_high_bitmask,
+                    shared_high_bits: lhs_node.shared_high_bits,
+                    shared_high_bitmask: lhs_node.shared_high_bitmask,
                     compute_ns: get_compute_ns(left) + get_compute_ns(right),
                 });
                 idx
@@ -402,7 +412,6 @@ fn dump_graph(query: &DepGraphQuery) {
         for edge in query.graph.all_edges() {
             let child_idx = edge.target().node_id();
             let child = &hierarchy[child_idx];
-            let child_kind = child.dep_kind;
             let child_realtime_ns = child.realtime_ns;
             let substract_ns = match edge.data {
                 DepCache::Computed => child_realtime_ns,
@@ -460,6 +469,13 @@ fn dump_graph(query: &DepGraphQuery) {
                 .max()
                 .unwrap_or(0);
         *compute_kinds.entry(timeframe.dep_kind).or_default() += compute_sum_ns - compute_max_ns;
+        if i % 100 == 0 {
+            eprintln!(
+                "{i}/{}, compute_arena: {}MiB",
+                hierarchy.len(),
+                mem::size_of::<ComputeNode>() * compute_arena.len() / 1024 / 1024
+            );
+        }
     }
 
     let compute_kinds: BTreeMap<_, _> = compute_kinds.into_iter().map(|(k, c)| (c, k)).collect();
