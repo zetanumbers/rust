@@ -1,4 +1,3 @@
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use rustc_index::bit_set::GrowableBitSet;
@@ -19,13 +18,6 @@ pub enum EdgeCache {
     Computed,
 }
 
-impl Hash for EdgesVec {
-    #[inline]
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        Hash::hash(&self.edges, hasher)
-    }
-}
-
 impl EdgesVec {
     pub(crate) const INLINE_CAPACITY: usize = 8;
 
@@ -37,10 +29,9 @@ impl EdgesVec {
     #[inline]
     pub(crate) fn push(&mut self, edge: DepNodeIndex, cache: EdgeCache) {
         self.max = self.max.max(edge.as_u32());
+        let last = self.edges.len();
         self.edges.push(edge);
         if let EdgeCache::Cached = cache {
-            let last = self.edges.len();
-            self.cached.ensure(last);
             self.cached.insert(last);
         }
     }
@@ -83,9 +74,7 @@ impl FromIterator<(DepNodeIndex, EdgeCache)> for EdgesVec {
         T: IntoIterator<Item = (DepNodeIndex, EdgeCache)>,
     {
         let mut vec = EdgesVec::new();
-        for (index, cache) in iter {
-            vec.push(index, cache);
-        }
+        vec.extend(iter);
         vec
     }
 }
@@ -96,6 +85,10 @@ impl Extend<(DepNodeIndex, EdgeCache)> for EdgesVec {
     where
         T: IntoIterator<Item = (DepNodeIndex, EdgeCache)>,
     {
+        let iter = iter.into_iter();
+        let (additional_lo, _) = iter.size_hint();
+        self.edges.reserve(additional_lo);
+        self.cached.ensure(self.edges.len() + additional_lo);
         for (index, cache) in iter {
             self.push(index, cache);
         }
