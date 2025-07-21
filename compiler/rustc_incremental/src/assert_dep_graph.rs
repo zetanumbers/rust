@@ -238,6 +238,7 @@ fn dump_graph(query: &DepGraphQuery) {
         realtime_ns: u64,
         own_ns: u64,
         children: FxHashSet<u32>,
+        height: Cell<u32>,
         compute_tree_idx: Cell<usize>,
     }
 
@@ -380,9 +381,9 @@ fn dump_graph(query: &DepGraphQuery) {
         }
     }
 
-    assert!(query.graph.len_nodes() <= u32::MAX as usize);
+    assert!(query.graph.len_nodes() < u32::MAX as usize);
     let mut side_effect_node_count = 0;
-    let (nodes_to_indices, mut hierarchy): (FxHashMap<_, u32>, Vec<_>) = query
+    let (mut nodes_to_indices, mut hierarchy): (FxHashMap<_, u32>, Vec<_>) = query
         .graph
         .enumerated_nodes()
         .map(|(idx, node)| {
@@ -401,6 +402,7 @@ fn dump_graph(query: &DepGraphQuery) {
                     realtime_ns: realtime,
                     own_ns: realtime,
                     children: FxHashSet::default(),
+                    height: Cell::new(0),
                     compute_tree_idx: Cell::new(ComputeNode::NULL_IDX),
                 },
             )
@@ -430,37 +432,68 @@ fn dump_graph(query: &DepGraphQuery) {
         }
     });
 
+    for timeframe in &hierarchy {
+        fn calc_height(timeframe: &Timeframe, hierarchy: &Vec<Timeframe>) -> u32 {
+            let height = timeframe.height.get();
+            if height != u32::MAX {
+                return height;
+            }
+            let height = timeframe
+                .children
+                .iter()
+                .map(|&i| calc_height(&hierarchy[i as usize], hierarchy))
+                .max()
+                .unwrap_or(0)
+                + 1;
+            timeframe.height.set(height);
+            height
+        }
+
+        calc_height(timeframe, &hierarchy);
+    }
+
+    let mut backward_permutation: Vec<u32> = (0..hierarchy.len() as u32).collect();
+    backward_permutation.sort_unstable_by_key(|&i| *hierarchy[i as usize].height.get_mut());
+    let mut forward_permutation = vec![0_u32; hierarchy.len()];
+    for (new, &old) in backward_permutation.iter().enumerate() {
+        forward_permutation[old as usize] = new as u32;
+    }
+    hierarchy = backward_permutation
+        .iter()
+        .map(|&i| {
+            let old = &hierarchy[i as usize];
+            Timeframe {
+                dep_kind: old.dep_kind,
+                realtime_ns: old.realtime_ns,
+                own_ns: old.own_ns,
+                children: old.children.iter().map(|&i| forward_permutation[i as usize]).collect(),
+                height: old.height.clone(),
+                compute_tree_idx: old.compute_tree_idx.clone(),
+            }
+        })
+        .collect();
+
+    for idx in nodes_to_indices.values_mut() {
+        *idx = forward_permutation[*idx as usize];
+    }
+
     let mut compute_arena = Vec::with_capacity(query.graph.len_edges());
     let mut compute_kinds = FxHashMap::<DepKind, u64>::default();
 
     for i in 0..hierarchy.len() as u32 {
-        fn calc_compute_tree(
-            i: u32,
-            hierarchy: &[Timeframe],
-            compute_arena: &mut Vec<ComputeNode>,
-        ) -> usize {
-            let timeframe = &hierarchy[i as usize];
-            let this_tree = timeframe.compute_tree_idx.get();
-            if this_tree != ComputeNode::NULL_IDX {
-                return this_tree;
-            }
+        let timeframe = &hierarchy[i as usize];
 
-            let this_leaf = ComputeNode::alloc_leaf_node(timeframe.own_ns, i, compute_arena);
-            let this_tree = ensure_sufficient_stack(|| {
-                timeframe.children.iter().fold(this_leaf, |acc, &child| {
-                    ComputeNode::union(
-                        acc,
-                        calc_compute_tree(child, hierarchy, compute_arena),
-                        compute_arena,
-                    )
-                })
-            });
-            timeframe.compute_tree_idx.set(this_tree);
-            this_tree
-        }
+        let this_leaf = ComputeNode::alloc_leaf_node(timeframe.own_ns, i, &mut compute_arena);
+        let this_tree = ensure_sufficient_stack(|| {
+            timeframe.children.iter().fold(this_leaf, |acc, &child| {
+                let child_tree = hierarchy[child as usize].compute_tree_idx.get();
+                debug_assert_ne!(child_tree, ComputeNode::NULL_IDX);
+                ComputeNode::union(acc, child_tree, &mut compute_arena)
+            })
+        });
+        timeframe.compute_tree_idx.set(this_tree);
 
-        let compute_tree = calc_compute_tree(i, &hierarchy, &mut compute_arena);
-        let compute_sum_ns = compute_arena[compute_tree].compute_ns;
+        let compute_sum_ns = compute_arena[this_tree].compute_ns;
         let timeframe = &hierarchy[i as usize];
         let compute_max_ns = timeframe.own_ns
             + timeframe
@@ -472,7 +505,7 @@ fn dump_graph(query: &DepGraphQuery) {
                 .max()
                 .unwrap_or(0);
         *compute_kinds.entry(timeframe.dep_kind).or_default() += compute_sum_ns - compute_max_ns;
-        if i % 100 == 0 {
+        if i % 200 == 0 {
             eprintln!(
                 "{i}/{}, compute_arena: {}MiB",
                 hierarchy.len(),
