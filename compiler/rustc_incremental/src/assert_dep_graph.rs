@@ -37,11 +37,10 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Write;
-use std::{cmp, env, mem};
+use std::{cmp, env, mem, ops};
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
 use rustc_data_structures::graph::linked_graph::{Direction, INCOMING, NodeIndex, OUTGOING};
-use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_middle::dep_graph::{
@@ -238,48 +237,92 @@ fn dump_graph(query: &DepGraphQuery) {
         realtime_ns: u64,
         own_ns: u64,
         children: FxHashSet<u32>,
-        height: Cell<u32>,
-        compute_tree_idx: Cell<usize>,
+        parents: FxHashSet<u32>,
+        depth: Cell<u32>,
+        compute_tree: Cell<ComputeIdx>,
     }
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Clone, Copy)]
     struct ComputeNode {
-        left: usize,
-        right: usize,
+        left: ComputeIdx,
+        right: ComputeIdx,
         shared_high_bits: u32,
         shared_high_bitmask: u32,
         compute_ns: u64,
     }
 
-    impl ComputeNode {
-        // Has to be top element
-        const NULL_IDX: usize = usize::MAX;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ComputeIdx(usize);
 
-        fn alloc_leaf_node(
-            own_ns: u64,
-            timeframe_idx: u32,
-            compute_arena: &mut Vec<ComputeNode>,
-        ) -> usize {
-            let new_idx = compute_arena.len();
-            compute_arena.push(ComputeNode {
-                left: ComputeNode::NULL_IDX,
-                right: ComputeNode::NULL_IDX,
+    impl ComputeIdx {
+        #[inline]
+        const fn null() -> ComputeIdx {
+            // Has to be top element
+            ComputeIdx(usize::MAX)
+        }
+
+        #[inline]
+        const fn is_null(self) -> bool {
+            self.0 == ComputeIdx::null().0
+        }
+
+        #[inline]
+        const fn is_either_null(self, other: ComputeIdx) -> bool {
+            self.0 | other.0 == ComputeIdx::null().0
+        }
+
+        #[inline]
+        const fn is_both_null(self, other: ComputeIdx) -> bool {
+            self.0 & other.0 == ComputeIdx::null().0
+        }
+    }
+
+    struct ComputeRing {
+        data: Vec<ComputeNode>,
+    }
+
+    impl ops::Index<ComputeIdx> for ComputeRing {
+        type Output = ComputeNode;
+
+        fn index(&self, index: ComputeIdx) -> &Self::Output {
+            &self.data[index.0]
+        }
+    }
+
+    impl ComputeRing {
+        const fn new() -> Self {
+            ComputeRing { data: Vec::new() }
+        }
+
+        fn len(&self) -> usize {
+            self.data.len()
+        }
+
+        fn alloc_node(&mut self, node: ComputeNode) -> ComputeIdx {
+            let new_idx = self.data.len();
+            self.data.push(node);
+            ComputeIdx(new_idx)
+        }
+
+        fn alloc_leaf_node(&mut self, own_ns: u64, timeframe_idx: u32) -> ComputeIdx {
+            self.alloc_node(ComputeNode {
+                left: ComputeIdx::null(),
+                right: ComputeIdx::null(),
                 compute_ns: own_ns,
                 shared_high_bitmask: !0,
                 shared_high_bits: timeframe_idx,
-            });
-            new_idx
+            })
         }
 
-        fn union(mut lhs: usize, mut rhs: usize, compute_arena: &mut Vec<ComputeNode>) -> usize {
-            if lhs | rhs == ComputeNode::NULL_IDX {
-                return lhs & rhs;
+        fn union(&mut self, mut lhs: ComputeIdx, mut rhs: ComputeIdx) -> ComputeIdx {
+            if lhs.is_either_null(rhs) {
+                return ComputeIdx(lhs.0 & rhs.0);
             }
             if lhs == rhs {
                 return lhs;
             }
-            let mut lhs_node = compute_arena[lhs];
-            let mut rhs_node = compute_arena[rhs];
+            let mut lhs_node = self[lhs];
+            let mut rhs_node = self[rhs];
             let xor_high_bits = lhs_node.shared_high_bits ^ rhs_node.shared_high_bits;
             let shared_high_bitmask = !((!0_u32).wrapping_shr(xor_high_bits.leading_zeros()));
             let [left, right] = if lhs_node.shared_high_bits <= rhs_node.shared_high_bits {
@@ -291,38 +334,29 @@ fn dump_graph(query: &DepGraphQuery) {
             match lhs_node.shared_high_bitmask.cmp(&rhs_node.shared_high_bitmask) {
                 cmp::Ordering::Equal => {
                     if xor_high_bits == 0 {
-                        let left = ComputeNode::union(lhs_node.left, rhs_node.left, compute_arena);
-                        let right =
-                            ComputeNode::union(lhs_node.right, rhs_node.right, compute_arena);
+                        let left = self.union(lhs_node.left, rhs_node.left);
+                        let right = self.union(lhs_node.right, rhs_node.right);
                         if [left, right] == [lhs_node.left, lhs_node.right] {
                             return lhs;
                         }
 
-                        debug_assert!(
-                            left | right != ComputeNode::NULL_IDX
-                                || left & right == ComputeNode::NULL_IDX
-                        );
+                        debug_assert!(!left.is_either_null(right) || left.is_both_null(right));
 
-                        let idx = compute_arena.len();
-                        compute_arena.push(ComputeNode {
+                        return self.alloc_node(ComputeNode {
                             left,
                             right,
                             shared_high_bits: lhs_node.shared_high_bits,
                             shared_high_bitmask: lhs_node.shared_high_bitmask,
-                            compute_ns: compute_arena[left].compute_ns
-                                + compute_arena[right].compute_ns,
+                            compute_ns: self[left].compute_ns + self[right].compute_ns,
                         });
-                        return idx;
                     } else {
-                        let idx = compute_arena.len();
-                        compute_arena.push(ComputeNode {
+                        return self.alloc_node(ComputeNode {
                             left,
                             right,
                             shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
                             shared_high_bitmask,
                             compute_ns: lhs_node.compute_ns + rhs_node.compute_ns,
                         });
-                        return idx;
                     }
                 }
                 cmp::Ordering::Greater => {
@@ -335,48 +369,42 @@ fn dump_graph(query: &DepGraphQuery) {
             // `lhs` has lesser bitmask
 
             if xor_high_bits & rhs_node.shared_high_bitmask != rhs_node.shared_high_bits {
-                let idx = compute_arena.len();
-                compute_arena.push(ComputeNode {
+                self.alloc_node(ComputeNode {
                     left,
                     right,
                     shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
                     shared_high_bitmask,
                     compute_ns: lhs_node.compute_ns + rhs_node.compute_ns,
-                });
-                idx
+                })
             } else {
                 let [left, right] = if lhs_node.shared_high_bits
                     <= rhs_node.shared_high_bits | (!rhs_node.shared_high_bitmask).wrapping_shr(1)
                 {
-                    let left = ComputeNode::union(lhs_node.left, rhs, compute_arena);
+                    let left = self.union(lhs_node.left, rhs);
                     if left == lhs_node.left {
                         return lhs;
                     }
                     [left, lhs_node.right]
                 } else {
-                    let right = ComputeNode::union(lhs_node.right, rhs, compute_arena);
+                    let right = self.union(lhs_node.right, rhs);
                     if right == lhs_node.right {
                         return rhs;
                     }
                     [lhs_node.left, right]
                 };
 
-                debug_assert!(
-                    left | right != ComputeNode::NULL_IDX || left & right == ComputeNode::NULL_IDX
-                );
+                debug_assert!(!left.is_either_null(right) || left.is_both_null(right));
 
-                let idx = compute_arena.len();
-                let get_compute_ns = |idx: usize| {
-                    if idx != ComputeNode::NULL_IDX { compute_arena[idx].compute_ns } else { 0 }
+                let get_compute_ns = |idx: ComputeIdx| {
+                    if idx.is_null() { 0 } else { self[idx].compute_ns }
                 };
-                compute_arena.push(ComputeNode {
+                self.alloc_node(ComputeNode {
                     left,
                     right,
                     shared_high_bits: lhs_node.shared_high_bits,
                     shared_high_bitmask: lhs_node.shared_high_bitmask,
                     compute_ns: get_compute_ns(left) + get_compute_ns(right),
-                });
-                idx
+                })
             }
         }
     }
@@ -402,8 +430,9 @@ fn dump_graph(query: &DepGraphQuery) {
                     realtime_ns: realtime,
                     own_ns: realtime,
                     children: FxHashSet::default(),
-                    height: Cell::new(0),
-                    compute_tree_idx: Cell::new(ComputeNode::NULL_IDX),
+                    parents: FxHashSet::default(),
+                    depth: Cell::new(0),
+                    compute_tree: Cell::new(ComputeIdx::null()),
                 },
             )
         })
@@ -414,16 +443,19 @@ fn dump_graph(query: &DepGraphQuery) {
         let tcx = icx.tcx;
         for edge in query.graph.all_edges() {
             let child_idx = edge.target().node_id();
-            let child = &hierarchy[child_idx];
+            let parent_idx = edge.source().node_id();
+            let child = &mut hierarchy[child_idx];
             let child_realtime_ns = child.realtime_ns;
             let substract_ns = match edge.data {
                 DepCache::Computed => child_realtime_ns,
                 DepCache::Cached => 0,
             };
-            let parent = &mut hierarchy[edge.source().node_id()];
-            if !parent.children.insert(child_idx as u32) {
+            if !child.parents.insert(parent_idx as u32) {
                 continue;
             }
+            let parent = &mut hierarchy[parent_idx];
+            let new_child = parent.children.insert(child_idx as u32);
+            debug_assert!(new_child);
             if let Some(new_own) = parent.own_ns.checked_sub(substract_ns) {
                 parent.own_ns = new_own;
             } else {
@@ -433,88 +465,91 @@ fn dump_graph(query: &DepGraphQuery) {
     });
 
     for timeframe in &hierarchy {
-        fn calc_height(timeframe: &Timeframe, hierarchy: &Vec<Timeframe>) -> u32 {
-            let height = timeframe.height.get();
-            if height != u32::MAX {
-                return height;
+        fn calc_depth(timeframe: &Timeframe, hierarchy: &Vec<Timeframe>) -> u32 {
+            let depth = timeframe.depth.get();
+            if depth != 0 {
+                return depth;
             }
-            let height = timeframe
-                .children
+            let depth = timeframe
+                .parents
                 .iter()
-                .map(|&i| calc_height(&hierarchy[i as usize], hierarchy))
+                .map(|&i| calc_depth(&hierarchy[i as usize], hierarchy))
                 .max()
                 .unwrap_or(0)
                 + 1;
-            timeframe.height.set(height);
-            height
+            timeframe.depth.set(depth);
+            depth
         }
 
-        calc_height(timeframe, &hierarchy);
+        calc_depth(timeframe, &hierarchy);
     }
 
-    let mut backward_permutation: Vec<u32> = (0..hierarchy.len() as u32).collect();
-    backward_permutation.sort_unstable_by_key(|&i| *hierarchy[i as usize].height.get_mut());
-    let mut forward_permutation = vec![0_u32; hierarchy.len()];
-    for (new, &old) in backward_permutation.iter().enumerate() {
-        forward_permutation[old as usize] = new as u32;
-    }
-    hierarchy = backward_permutation
-        .iter()
-        .map(|&i| {
-            let old = &hierarchy[i as usize];
-            Timeframe {
-                dep_kind: old.dep_kind,
-                realtime_ns: old.realtime_ns,
-                own_ns: old.own_ns,
-                children: old.children.iter().map(|&i| forward_permutation[i as usize]).collect(),
-                height: old.height.clone(),
-                compute_tree_idx: old.compute_tree_idx.clone(),
-            }
-        })
-        .collect();
+    {
+        let mut backward_permutation: Vec<u32> = (0..hierarchy.len() as u32).collect();
+        backward_permutation
+            .sort_unstable_by_key(|&i| cmp::Reverse(*hierarchy[i as usize].depth.get_mut()));
+        let mut forward_permutation = vec![0_u32; hierarchy.len()];
+        for (new, &old) in backward_permutation.iter().enumerate() {
+            forward_permutation[old as usize] = new as u32;
+        }
+        hierarchy = backward_permutation
+            .iter()
+            .map(|&i| {
+                let old = &hierarchy[i as usize];
+                let permute = |&i| forward_permutation[i as usize];
+                Timeframe {
+                    dep_kind: old.dep_kind,
+                    realtime_ns: old.realtime_ns,
+                    own_ns: old.own_ns,
+                    children: old.children.iter().map(permute).collect(),
+                    parents: old.parents.iter().map(permute).collect(),
+                    depth: old.depth.clone(),
+                    compute_tree: old.compute_tree.clone(),
+                }
+            })
+            .collect();
 
-    for idx in nodes_to_indices.values_mut() {
-        *idx = forward_permutation[*idx as usize];
+        for idx in nodes_to_indices.values_mut() {
+            *idx = forward_permutation[*idx as usize];
+        }
     }
 
-    let mut compute_arena = Vec::with_capacity(query.graph.len_edges());
-    let mut compute_kinds = FxHashMap::<DepKind, u64>::default();
+    let mut ring = ComputeRing::new();
+    let mut compute_parallelism = FxHashMap::<DepKind, u64>::default();
 
     for i in 0..hierarchy.len() as u32 {
         let timeframe = &hierarchy[i as usize];
 
-        let this_leaf = ComputeNode::alloc_leaf_node(timeframe.own_ns, i, &mut compute_arena);
-        let this_tree = ensure_sufficient_stack(|| {
-            timeframe.children.iter().fold(this_leaf, |acc, &child| {
-                let child_tree = hierarchy[child as usize].compute_tree_idx.get();
-                debug_assert_ne!(child_tree, ComputeNode::NULL_IDX);
-                ComputeNode::union(acc, child_tree, &mut compute_arena)
-            })
+        let this_leaf = ring.alloc_leaf_node(timeframe.own_ns, i);
+        let this_tree = timeframe.children.iter().fold(this_leaf, |acc, &child| {
+            let child_tree = hierarchy[child as usize].compute_tree.get();
+            debug_assert_ne!(child_tree, ComputeIdx::null());
+            ring.union(acc, child_tree)
         });
-        timeframe.compute_tree_idx.set(this_tree);
+        timeframe.compute_tree.set(this_tree);
 
-        let compute_sum_ns = compute_arena[this_tree].compute_ns;
+        let compute_sum_ns = ring[this_tree].compute_ns;
         let timeframe = &hierarchy[i as usize];
         let compute_max_ns = timeframe.own_ns
             + timeframe
                 .children
                 .iter()
-                .map(|&child| {
-                    compute_arena[hierarchy[child as usize].compute_tree_idx.get()].compute_ns
-                })
+                .map(|&child| ring[hierarchy[child as usize].compute_tree.get()].compute_ns)
                 .max()
                 .unwrap_or(0);
-        *compute_kinds.entry(timeframe.dep_kind).or_default() += compute_sum_ns - compute_max_ns;
+        *compute_parallelism.entry(timeframe.dep_kind).or_default() +=
+            compute_sum_ns - compute_max_ns;
         if i % 200 == 0 {
             eprintln!(
                 "{i}/{}, compute_arena: {}MiB",
                 hierarchy.len(),
-                mem::size_of::<ComputeNode>() * compute_arena.len() / 1024 / 1024
+                mem::size_of::<ComputeNode>() * ring.len() / 1024 / 1024
             );
         }
     }
 
-    let compute_kinds: BTreeMap<_, _> = compute_kinds.into_iter().map(|(k, c)| (c, k)).collect();
+    let compute_kinds: BTreeMap<_, _> =
+        compute_parallelism.into_iter().map(|(k, c)| (c, k)).collect();
 
     {
         // dump a .txt file with just the edges:
