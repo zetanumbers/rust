@@ -237,7 +237,7 @@ fn dump_graph(query: &DepGraphQuery) {
         dep_kind: DepKind,
         realtime_ns: u64,
         own_ns: u64,
-        children: FxHashSet<usize>,
+        children: FxHashSet<u32>,
         compute_tree_idx: Cell<usize>,
     }
 
@@ -245,8 +245,8 @@ fn dump_graph(query: &DepGraphQuery) {
     struct ComputeNode {
         left: usize,
         right: usize,
-        shared_high_bits: usize,
-        shared_high_bitmask: usize,
+        shared_high_bits: u32,
+        shared_high_bitmask: u32,
         compute_ns: u64,
     }
 
@@ -256,7 +256,7 @@ fn dump_graph(query: &DepGraphQuery) {
 
         fn alloc_leaf_node(
             own_ns: u64,
-            timeframe_idx: usize,
+            timeframe_idx: u32,
             compute_arena: &mut Vec<ComputeNode>,
         ) -> usize {
             let new_idx = compute_arena.len();
@@ -280,7 +280,7 @@ fn dump_graph(query: &DepGraphQuery) {
             let mut lhs_node = compute_arena[lhs];
             let mut rhs_node = compute_arena[rhs];
             let xor_high_bits = lhs_node.shared_high_bits ^ rhs_node.shared_high_bits;
-            let shared_high_bitmask = !((!0_usize).wrapping_shr(xor_high_bits.leading_zeros()));
+            let shared_high_bitmask = !((!0_u32).wrapping_shr(xor_high_bits.leading_zeros()));
             let [left, right] = if lhs_node.shared_high_bits <= rhs_node.shared_high_bits {
                 [lhs, rhs]
             } else {
@@ -380,8 +380,9 @@ fn dump_graph(query: &DepGraphQuery) {
         }
     }
 
+    assert!(query.graph.len_nodes() <= u32::MAX as usize);
     let mut side_effect_node_count = 0;
-    let (nodes_to_indices, mut hierarchy): (FxHashMap<_, _>, Vec<_>) = query
+    let (nodes_to_indices, mut hierarchy): (FxHashMap<_, u32>, Vec<_>) = query
         .graph
         .enumerated_nodes()
         .map(|(idx, node)| {
@@ -394,7 +395,7 @@ fn dump_graph(query: &DepGraphQuery) {
                 0
             };
             (
-                (node.data.inner, idx.node_id()),
+                (node.data.inner, idx.node_id() as u32),
                 Timeframe {
                     dep_kind: node.data.inner.kind,
                     realtime_ns: realtime,
@@ -418,7 +419,7 @@ fn dump_graph(query: &DepGraphQuery) {
                 DepCache::Cached => 0,
             };
             let parent = &mut hierarchy[edge.source().node_id()];
-            if !parent.children.insert(child_idx) {
+            if !parent.children.insert(child_idx as u32) {
                 continue;
             }
             if let Some(new_own) = parent.own_ns.checked_sub(substract_ns) {
@@ -432,13 +433,13 @@ fn dump_graph(query: &DepGraphQuery) {
     let mut compute_arena = Vec::with_capacity(query.graph.len_edges());
     let mut compute_kinds = FxHashMap::<DepKind, u64>::default();
 
-    for i in 0..hierarchy.len() {
+    for i in 0..hierarchy.len() as u32 {
         fn calc_compute_tree(
-            i: usize,
+            i: u32,
             hierarchy: &[Timeframe],
             compute_arena: &mut Vec<ComputeNode>,
         ) -> usize {
-            let timeframe = &hierarchy[i];
+            let timeframe = &hierarchy[i as usize];
             let this_tree = timeframe.compute_tree_idx.get();
             if this_tree != ComputeNode::NULL_IDX {
                 return this_tree;
@@ -460,12 +461,14 @@ fn dump_graph(query: &DepGraphQuery) {
 
         let compute_tree = calc_compute_tree(i, &hierarchy, &mut compute_arena);
         let compute_sum_ns = compute_arena[compute_tree].compute_ns;
-        let timeframe = &hierarchy[i];
+        let timeframe = &hierarchy[i as usize];
         let compute_max_ns = timeframe.own_ns
             + timeframe
                 .children
                 .iter()
-                .map(|&child| compute_arena[hierarchy[child].compute_tree_idx.get()].compute_ns)
+                .map(|&child| {
+                    compute_arena[hierarchy[child as usize].compute_tree_idx.get()].compute_ns
+                })
                 .max()
                 .unwrap_or(0);
         *compute_kinds.entry(timeframe.dep_kind).or_default() += compute_sum_ns - compute_max_ns;
