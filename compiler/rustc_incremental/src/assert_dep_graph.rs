@@ -252,13 +252,13 @@ fn dump_graph(query: &DepGraphQuery) {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct ComputeIdx(usize);
+    struct ComputeIdx(u32);
 
     impl ComputeIdx {
         #[inline]
         const fn null() -> ComputeIdx {
             // Has to be top element
-            ComputeIdx(usize::MAX)
+            ComputeIdx(u32::MAX)
         }
 
         #[inline]
@@ -285,7 +285,7 @@ fn dump_graph(query: &DepGraphQuery) {
         type Output = ComputeNode;
 
         fn index(&self, index: ComputeIdx) -> &Self::Output {
-            &self.data[index.0]
+            &self.data[index.0 as usize]
         }
     }
 
@@ -299,7 +299,11 @@ fn dump_graph(query: &DepGraphQuery) {
         }
 
         fn alloc_node(&mut self, node: ComputeNode) -> ComputeIdx {
-            let new_idx = self.data.len();
+            if self.data.try_reserve(1).is_err() {
+                self.data = Vec::new();
+                panic!("Out of memory!");
+            }
+            let new_idx = u32::try_from(self.data.len()).unwrap();
             self.data.push(node);
             ComputeIdx(new_idx)
         }
