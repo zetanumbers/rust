@@ -234,8 +234,8 @@ fn dump_graph(query: &DepGraphQuery) {
 
     struct Timeframe {
         dep_kind: DepKind,
-        realtime_ns: u64,
-        own_ns: u64,
+        realtime: u32,
+        own: u32,
         children: FxHashSet<u32>,
         parents: FxHashSet<u32>,
         depth: Cell<u32>,
@@ -248,7 +248,7 @@ fn dump_graph(query: &DepGraphQuery) {
         right: ComputeIdx,
         shared_high_bits: u32,
         shared_high_bitmask: u32,
-        compute_ns: u64,
+        compute: u32,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,11 +308,11 @@ fn dump_graph(query: &DepGraphQuery) {
             ComputeIdx(new_idx)
         }
 
-        fn alloc_leaf_node(&mut self, own_ns: u64, timeframe_idx: u32) -> ComputeIdx {
+        fn alloc_leaf_node(&mut self, own: u32, timeframe_idx: u32) -> ComputeIdx {
             self.alloc_node(ComputeNode {
                 left: ComputeIdx::null(),
                 right: ComputeIdx::null(),
-                compute_ns: own_ns,
+                compute: own,
                 shared_high_bitmask: !0,
                 shared_high_bits: timeframe_idx,
             })
@@ -351,7 +351,7 @@ fn dump_graph(query: &DepGraphQuery) {
                             right,
                             shared_high_bits: lhs_node.shared_high_bits,
                             shared_high_bitmask: lhs_node.shared_high_bitmask,
-                            compute_ns: self[left].compute_ns + self[right].compute_ns,
+                            compute: self[left].compute + self[right].compute,
                         });
                     } else {
                         return self.alloc_node(ComputeNode {
@@ -359,7 +359,7 @@ fn dump_graph(query: &DepGraphQuery) {
                             right,
                             shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
                             shared_high_bitmask,
-                            compute_ns: lhs_node.compute_ns + rhs_node.compute_ns,
+                            compute: lhs_node.compute + rhs_node.compute,
                         });
                     }
                 }
@@ -378,7 +378,7 @@ fn dump_graph(query: &DepGraphQuery) {
                     right,
                     shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
                     shared_high_bitmask,
-                    compute_ns: lhs_node.compute_ns + rhs_node.compute_ns,
+                    compute: lhs_node.compute + rhs_node.compute,
                 })
             } else {
                 let [left, right] = if lhs_node.shared_high_bits
@@ -400,14 +400,14 @@ fn dump_graph(query: &DepGraphQuery) {
                 debug_assert!(!left.is_either_null(right) || left.is_both_null(right));
 
                 let get_compute_ns = |idx: ComputeIdx| {
-                    if idx.is_null() { 0 } else { self[idx].compute_ns }
+                    if idx.is_null() { 0 } else { self[idx].compute }
                 };
                 self.alloc_node(ComputeNode {
                     left,
                     right,
                     shared_high_bits: lhs_node.shared_high_bits,
                     shared_high_bitmask: lhs_node.shared_high_bitmask,
-                    compute_ns: get_compute_ns(left) + get_compute_ns(right),
+                    compute: get_compute_ns(left) + get_compute_ns(right),
                 })
             }
         }
@@ -423,7 +423,8 @@ fn dump_graph(query: &DepGraphQuery) {
                 side_effect_node_count += 1;
             }
             let realtime = if node.data.inner.kind != dep_kinds::crate_hash {
-                node.data.timeframe.as_nanos() as u64
+                // quantize by 16ns
+                u32::try_from(node.data.timeframe.as_nanos() as u64 / 16).unwrap()
             } else {
                 0
             };
@@ -431,8 +432,8 @@ fn dump_graph(query: &DepGraphQuery) {
                 (node.data.inner, idx.node_id() as u32),
                 Timeframe {
                     dep_kind: node.data.inner.kind,
-                    realtime_ns: realtime,
-                    own_ns: realtime,
+                    realtime,
+                    own: realtime,
                     children: FxHashSet::default(),
                     parents: FxHashSet::default(),
                     depth: Cell::new(0),
@@ -449,7 +450,7 @@ fn dump_graph(query: &DepGraphQuery) {
             let child_idx = edge.target().node_id();
             let parent_idx = edge.source().node_id();
             let child = &mut hierarchy[child_idx];
-            let child_realtime_ns = child.realtime_ns;
+            let child_realtime_ns = child.realtime;
             let substract_ns = match edge.data {
                 DepCache::Computed => child_realtime_ns,
                 DepCache::Cached => 0,
@@ -460,8 +461,8 @@ fn dump_graph(query: &DepGraphQuery) {
             let parent = &mut hierarchy[parent_idx];
             let new_child = parent.children.insert(child_idx as u32);
             debug_assert!(new_child);
-            if let Some(new_own) = parent.own_ns.checked_sub(substract_ns) {
-                parent.own_ns = new_own;
+            if let Some(new_own) = parent.own.checked_sub(substract_ns) {
+                parent.own = new_own;
             } else {
                 assert!(tcx.dep_kind_info(parent.dep_kind).is_anon)
             }
@@ -503,8 +504,8 @@ fn dump_graph(query: &DepGraphQuery) {
                 let permute = |&i| forward_permutation[i as usize];
                 Timeframe {
                     dep_kind: old.dep_kind,
-                    realtime_ns: old.realtime_ns,
-                    own_ns: old.own_ns,
+                    realtime: old.realtime,
+                    own: old.own,
                     children: old.children.iter().map(permute).collect(),
                     parents: old.parents.iter().map(permute).collect(),
                     depth: old.depth.clone(),
@@ -519,12 +520,12 @@ fn dump_graph(query: &DepGraphQuery) {
     }
 
     let mut ring = ComputeRing::new();
-    let mut compute_parallelism = FxHashMap::<DepKind, u64>::default();
+    let mut compute_parallelism = FxHashMap::<DepKind, u32>::default();
 
     for i in 0..hierarchy.len() as u32 {
         let timeframe = &hierarchy[i as usize];
 
-        let this_leaf = ring.alloc_leaf_node(timeframe.own_ns, i);
+        let this_leaf = ring.alloc_leaf_node(timeframe.own, i);
         let this_tree = timeframe.children.iter().fold(this_leaf, |acc, &child| {
             let child_tree = hierarchy[child as usize].compute_tree.get();
             debug_assert_ne!(child_tree, ComputeIdx::null());
@@ -532,17 +533,16 @@ fn dump_graph(query: &DepGraphQuery) {
         });
         timeframe.compute_tree.set(this_tree);
 
-        let compute_sum_ns = ring[this_tree].compute_ns;
+        let compute_sum = ring[this_tree].compute;
         let timeframe = &hierarchy[i as usize];
-        let compute_max_ns = timeframe.own_ns
+        let compute_max = timeframe.own
             + timeframe
                 .children
                 .iter()
-                .map(|&child| ring[hierarchy[child as usize].compute_tree.get()].compute_ns)
+                .map(|&child| ring[hierarchy[child as usize].compute_tree.get()].compute)
                 .max()
                 .unwrap_or(0);
-        *compute_parallelism.entry(timeframe.dep_kind).or_default() +=
-            compute_sum_ns - compute_max_ns;
+        *compute_parallelism.entry(timeframe.dep_kind).or_default() += compute_sum - compute_max;
         if i % 200 == 0 {
             eprintln!(
                 "{i}/{}, compute_arena: {}MiB",
