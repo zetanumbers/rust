@@ -242,13 +242,56 @@ fn dump_graph(query: &DepGraphQuery) {
         compute_tree: Cell<ComputeIdx>,
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     struct ComputeNode {
         left: ComputeIdx,
         right: ComputeIdx,
-        shared_high_bits: u32,
-        shared_high_bitmask: u32,
+        neighborhood: IndexNeighborhood,
         compute: u32,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    struct IndexNeighborhood(u32);
+
+    impl IndexNeighborhood {
+        #[inline(always)]
+        fn new(certain_idx: u32) -> Self {
+            IndexNeighborhood(certain_idx << 1)
+        }
+
+        #[inline(always)]
+        fn uncertain_bitmask(self) -> u32 {
+            self.0 ^ (self.0 + 1)
+        }
+
+        #[inline]
+        fn cmp_or_union(self, other: Self) -> Result<cmp::Ordering, Self> {
+            let self_unknown_bitmask = self.uncertain_bitmask();
+            let other_unknown_bitmask = other.uncertain_bitmask();
+            let known_bitmask = !(self_unknown_bitmask | other_unknown_bitmask);
+            let distance = (self.0 ^ other.0) & known_bitmask;
+            if distance == 0 {
+                Ok(self_unknown_bitmask.cmp(&other_unknown_bitmask))
+            } else {
+                let unknown_bitmask =
+                    (distance + 1).checked_next_power_of_two().map(|n| n - 1).unwrap_or(u32::MAX);
+                Err(IndexNeighborhood(
+                    self.0 & other.0 & !unknown_bitmask | unknown_bitmask.wrapping_shr(1),
+                ))
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    impl cmp::PartialOrd for IndexNeighborhood {
+        #[inline]
+        fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+            let self_unknown_bitmask = self.uncertain_bitmask();
+            let other_unknown_bitmask = other.uncertain_bitmask();
+            let known_bitmask = !(self_unknown_bitmask | other_unknown_bitmask);
+            ((self.0 ^ other.0) & known_bitmask == 0)
+                .then(|| self_unknown_bitmask.cmp(&other_unknown_bitmask))
+        }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,11 +302,6 @@ fn dump_graph(query: &DepGraphQuery) {
         const fn null() -> ComputeIdx {
             // Has to be top element
             ComputeIdx(u32::MAX)
-        }
-
-        #[inline]
-        const fn is_null(self) -> bool {
-            self.0 == ComputeIdx::null().0
         }
 
         #[inline]
@@ -303,9 +341,15 @@ fn dump_graph(query: &DepGraphQuery) {
                 self.data = Vec::new();
                 panic!("Out of memory!");
             }
-            let new_idx = u32::try_from(self.data.len()).unwrap();
+            let new_idx = ComputeIdx(u32::try_from(self.data.len()).unwrap());
             self.data.push(node);
-            ComputeIdx(new_idx)
+            // if self.has_duplicates(new_idx) {
+            //     panic!(
+            //         "Found duplicated nodes:\n  node: {node:x?}\n  left: {:x?},\n  right: {:x?},",
+            //         self[node.left], self[node.right],
+            //     )
+            // }
+            new_idx
         }
 
         fn alloc_leaf_node(&mut self, own: u32, timeframe_idx: u32) -> ComputeIdx {
@@ -313,104 +357,150 @@ fn dump_graph(query: &DepGraphQuery) {
                 left: ComputeIdx::null(),
                 right: ComputeIdx::null(),
                 compute: own,
-                shared_high_bitmask: !0,
-                shared_high_bits: timeframe_idx,
+                neighborhood: IndexNeighborhood::new(timeframe_idx),
             })
         }
 
-        fn union(&mut self, mut lhs: ComputeIdx, mut rhs: ComputeIdx) -> ComputeIdx {
+        fn union(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> ComputeIdx {
             if lhs.is_either_null(rhs) {
                 return ComputeIdx(lhs.0 & rhs.0);
             }
             if lhs == rhs {
                 return lhs;
             }
-            let mut lhs_node = self[lhs];
-            let mut rhs_node = self[rhs];
-            let xor_high_bits = lhs_node.shared_high_bits ^ rhs_node.shared_high_bits;
-            let shared_high_bitmask = !((!0_u32).wrapping_shr(xor_high_bits.leading_zeros()));
-            let [left, right] = if lhs_node.shared_high_bits <= rhs_node.shared_high_bits {
-                [lhs, rhs]
-            } else {
-                [rhs, lhs]
-            };
+            let lhs_node = self[lhs];
+            let rhs_node = self[rhs];
 
-            match lhs_node.shared_high_bitmask.cmp(&rhs_node.shared_high_bitmask) {
-                cmp::Ordering::Equal => {
-                    if xor_high_bits == 0 {
-                        let left = self.union(lhs_node.left, rhs_node.left);
-                        let right = self.union(lhs_node.right, rhs_node.right);
-                        if [left, right] == [lhs_node.left, lhs_node.right] {
-                            return lhs;
-                        }
+            // struct DebugNodes {
+            //     lhs_node: ComputeNode,
+            //     lhs_left_right: Option<[ComputeNode; 2]>,
+            //     rhs_node: ComputeNode,
+            //     rhs_left_right: Option<[ComputeNode; 2]>,
+            // }
 
-                        debug_assert!(!left.is_either_null(right) || left.is_both_null(right));
+            // impl Drop for DebugNodes {
+            //     fn drop(&mut self) {
+            //         if std::thread::panicking() {
+            //             eprintln!(
+            //                 "=======================\n  lhs: {:x?},\n  lhs_left: {:x?},\n  lhs_right: {:x?},\n  rhs: {:x?},\n  rhs_left: {:x?},\n  rhs_right: {:x?}",
+            //                 self.lhs_node,
+            //                 self.lhs_left_right.map(|a| a[0]),
+            //                 self.lhs_left_right.map(|a| a[1]),
+            //                 self.rhs_node,
+            //                 self.rhs_left_right.map(|a| a[0]),
+            //                 self.rhs_left_right.map(|a| a[1]),
+            //             )
+            //         }
+            //     }
+            // }
 
-                        return self.alloc_node(ComputeNode {
-                            left,
-                            right,
-                            shared_high_bits: lhs_node.shared_high_bits,
-                            shared_high_bitmask: lhs_node.shared_high_bitmask,
-                            compute: self[left].compute + self[right].compute,
-                        });
-                    } else {
-                        return self.alloc_node(ComputeNode {
-                            left,
-                            right,
-                            shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
-                            shared_high_bitmask,
-                            compute: lhs_node.compute + rhs_node.compute,
-                        });
-                    }
-                }
-                cmp::Ordering::Greater => {
-                    mem::swap(&mut lhs, &mut rhs);
-                    mem::swap(&mut lhs_node, &mut rhs_node);
-                }
-                cmp::Ordering::Less => (),
-            }
+            // let _g = DebugNodes {
+            //     lhs_node,
+            //     rhs_node,
+            //     lhs_left_right: self
+            //         .data
+            //         .get(lhs_node.left.0 as usize)
+            //         .map(|l| [*l, self[lhs_node.right]]),
+            //     rhs_left_right: self
+            //         .data
+            //         .get(rhs_node.left.0 as usize)
+            //         .map(|l| [*l, self[rhs_node.right]]),
+            // };
 
-            // `lhs` has lesser bitmask
-
-            if xor_high_bits & rhs_node.shared_high_bitmask != rhs_node.shared_high_bits {
-                self.alloc_node(ComputeNode {
-                    left,
-                    right,
-                    shared_high_bits: lhs_node.shared_high_bits & shared_high_bitmask,
-                    shared_high_bitmask,
-                    compute: lhs_node.compute + rhs_node.compute,
-                })
-            } else {
-                let [left, right] = if lhs_node.shared_high_bits
-                    <= rhs_node.shared_high_bits | (!rhs_node.shared_high_bitmask).wrapping_shr(1)
-                {
-                    let left = self.union(lhs_node.left, rhs);
-                    if left == lhs_node.left {
+            match lhs_node.neighborhood.cmp_or_union(rhs_node.neighborhood) {
+                Ok(cmp::Ordering::Equal) => {
+                    let left = self.union(lhs_node.left, rhs_node.left);
+                    let right = self.union(lhs_node.right, rhs_node.right);
+                    debug_assert!(!left.is_either_null(right) || left.is_both_null(right));
+                    if [left, right] == [lhs_node.left, lhs_node.right] {
                         return lhs;
                     }
-                    [left, lhs_node.right]
-                } else {
-                    let right = self.union(lhs_node.right, rhs);
-                    if right == lhs_node.right {
+                    if [left, right] == [rhs_node.left, rhs_node.right] {
                         return rhs;
                     }
-                    [lhs_node.left, right]
-                };
-
-                debug_assert!(!left.is_either_null(right) || left.is_both_null(right));
-
-                let get_compute_ns = |idx: ComputeIdx| {
-                    if idx.is_null() { 0 } else { self[idx].compute }
-                };
-                self.alloc_node(ComputeNode {
-                    left,
-                    right,
-                    shared_high_bits: lhs_node.shared_high_bits,
-                    shared_high_bitmask: lhs_node.shared_high_bitmask,
-                    compute: get_compute_ns(left) + get_compute_ns(right),
-                })
+                    self.alloc_node(ComputeNode {
+                        left,
+                        right,
+                        neighborhood: lhs_node.neighborhood,
+                        compute: self[left].compute + self[right].compute,
+                    })
+                }
+                Err(disjoint_union) => {
+                    let [left, right] = if lhs_node.neighborhood.0 < rhs_node.neighborhood.0 {
+                        [lhs, rhs]
+                    } else {
+                        [rhs, lhs]
+                    };
+                    self.alloc_node(ComputeNode {
+                        left,
+                        right,
+                        neighborhood: disjoint_union,
+                        compute: lhs_node.compute + rhs_node.compute,
+                    })
+                }
+                Ok(cmp::Ordering::Less) => {
+                    self.union_included(rhs, &rhs_node, lhs, lhs_node.neighborhood)
+                }
+                Ok(cmp::Ordering::Greater) => {
+                    self.union_included(lhs, &lhs_node, rhs, rhs_node.neighborhood)
+                }
             }
         }
+
+        fn union_included(
+            &mut self,
+            larger: ComputeIdx,
+            larger_node: &ComputeNode,
+            smaller: ComputeIdx,
+            smaller_neighborhood: IndexNeighborhood,
+        ) -> ComputeIdx {
+            debug_assert!(smaller_neighborhood < larger_node.neighborhood);
+            let [left, right];
+            if smaller_neighborhood.0 <= larger_node.neighborhood.0 {
+                left = self.union(smaller, larger_node.left);
+                if larger_node.left == left {
+                    return larger;
+                }
+                right = larger_node.right;
+            } else {
+                right = self.union(smaller, larger_node.right);
+                if larger_node.right == right {
+                    return larger;
+                }
+                left = larger_node.left;
+            };
+            let node = ComputeNode {
+                left,
+                right,
+                neighborhood: larger_node.neighborhood,
+                compute: self[left].compute + self[right].compute,
+            };
+            self.alloc_node(node)
+        }
+
+        // fn has_duplicates(&mut self, tree: ComputeIdx) -> bool {
+        //     struct CheckIndices<'a> {
+        //         indices: FxHashSet<IndexNeighborhood>,
+        //         ring: &'a ComputeRing,
+        //     }
+
+        //     impl CheckIndices<'_> {
+        //         fn check(&mut self, node: ComputeIdx) -> bool {
+        //             let node = &self.ring[node];
+        //             !self.indices.insert(node.neighborhood)
+        //                 || if node.neighborhood.0 % 2 != 0 {
+        //                     debug_assert_ne!(node.left, ComputeIdx::null());
+        //                     debug_assert_ne!(node.right, ComputeIdx::null());
+        //                     self.check(node.left) || self.check(node.right)
+        //                 } else {
+        //                     false
+        //                 }
+        //         }
+        //     }
+
+        //     let mut check_indices = CheckIndices { indices: FxHashSet::default(), ring: self };
+        //     check_indices.check(tree)
+        // }
     }
 
     assert!(query.graph.len_nodes() < u32::MAX as usize);
@@ -520,7 +610,7 @@ fn dump_graph(query: &DepGraphQuery) {
     }
 
     let mut ring = ComputeRing::new();
-    let mut compute_parallelism = FxHashMap::<DepKind, u32>::default();
+    let mut compute_parallelism = FxHashMap::<DepKind, u64>::default();
 
     for i in 0..hierarchy.len() as u32 {
         let timeframe = &hierarchy[i as usize];
@@ -542,13 +632,10 @@ fn dump_graph(query: &DepGraphQuery) {
                 .map(|&child| ring[hierarchy[child as usize].compute_tree.get()].compute)
                 .max()
                 .unwrap_or(0);
-        *compute_parallelism.entry(timeframe.dep_kind).or_default() += compute_sum - compute_max;
-        if i % 200 == 0 {
-            eprintln!(
-                "{i}/{}, compute_arena: {}MiB",
-                hierarchy.len(),
-                mem::size_of::<ComputeNode>() * ring.len() / 1024 / 1024
-            );
+        *compute_parallelism.entry(timeframe.dep_kind).or_default() +=
+            (compute_sum - compute_max) as u64;
+        if i % 1024 == 0 {
+            eprintln!("{i}/{}", hierarchy.len());
         }
     }
 
