@@ -34,9 +34,9 @@
 //! ```
 
 use std::cell::Cell;
-use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Write;
+use std::time::{Duration, Instant};
 use std::{cmp, env, ops};
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
@@ -237,8 +237,6 @@ fn dump_graph(query: &DepGraphQuery) {
         realtime: u32,
         own: u32,
         children: FxHashSet<u32>,
-        parents: FxHashSet<u32>,
-        depth: Cell<u32>,
         compute_tree: Cell<ComputeIdx>,
     }
 
@@ -280,14 +278,6 @@ fn dump_graph(query: &DepGraphQuery) {
                 ))
             }
         }
-
-        #[inline]
-        fn disjoint_union(self, other: Self) -> Option<Self> {
-            match self.cmp_or_union(other) {
-                Err(result) => Some(result),
-                Ok(_) => None,
-            }
-        }
     }
 
     impl cmp::PartialOrd for IndexNeighborhood {
@@ -318,7 +308,7 @@ fn dump_graph(query: &DepGraphQuery) {
 
         #[inline(always)]
         const fn is_either_null(self, other: ComputeIdx) -> bool {
-            self.0 | other.0 == ComputeIdx::null().0
+            self.is_null() || other.is_null()
         }
 
         #[inline]
@@ -352,27 +342,67 @@ fn dump_graph(query: &DepGraphQuery) {
         }
 
         fn alloc_node(&mut self, node: ComputeNode) -> ComputeIdx {
+            #[cfg(debug_assertions)]
+            if !node.left.is_both_null(node.right) {
+                assert!(!node.left.is_either_null(node.right));
+                let left_neighborhood = self[node.left].neighborhood;
+                let right_neighborhood = self[node.right].neighborhood;
+                assert_eq!(
+                    left_neighborhood.partial_cmp(&right_neighborhood),
+                    None,
+                    "Overlapping neighborhoods:\n  node: {:x?},\n  left: {:x?},\n  right: {:x?},",
+                    node.neighborhood,
+                    left_neighborhood,
+                    right_neighborhood,
+                );
+                assert_eq!(
+                    node.neighborhood.partial_cmp(&left_neighborhood),
+                    Some(cmp::Ordering::Greater),
+                    "Non-nested left neighborhood:\n  node: {:x?},\n  left: {:x?},\n  right: {:x?},",
+                    node.neighborhood,
+                    left_neighborhood,
+                    right_neighborhood,
+                );
+                assert_eq!(
+                    node.neighborhood.partial_cmp(&right_neighborhood),
+                    Some(cmp::Ordering::Greater),
+                    "Non-nested right neighborhood:\n  node: {:x?},\n  left: {:x?},\n  right: {:x?},",
+                    node.neighborhood,
+                    left_neighborhood,
+                    right_neighborhood,
+                );
+            }
             if self.data.try_reserve(1).is_err() {
                 self.data = Vec::new();
                 panic!("Out of memory!");
             }
             let new_idx = ComputeIdx(u32::try_from(self.data.len()).unwrap());
             self.data.push(node);
-            // if self.has_duplicates(new_idx) {
-            //     panic!(
-            //         "Found duplicated nodes:\n  node: {node:x?}\n  left: {:x?},\n  right: {:x?},",
-            //         self[node.left], self[node.right],
-            //     )
-            // }
             new_idx
         }
 
-        fn alloc_union_node(&mut self, node: ComputeNode) -> ComputeIdx {
-            if self.union_mode { self.alloc_node(node) } else { ComputeIdx::null() }
+        fn alloc_union_node<F>(&mut self, f: F) -> ComputeIdx
+        where
+            F: FnOnce(&mut Self) -> ComputeNode,
+        {
+            if self.union_mode {
+                let node = f(self);
+                self.alloc_node(node)
+            } else {
+                ComputeIdx::null()
+            }
         }
 
-        fn alloc_difference_node(&mut self, node: ComputeNode) -> ComputeIdx {
-            if self.difference_mode { self.alloc_node(node) } else { ComputeIdx::null() }
+        fn alloc_difference_node<F>(&mut self, f: F) -> ComputeIdx
+        where
+            F: FnOnce(&mut Self) -> ComputeNode,
+        {
+            if self.difference_mode {
+                let node = f(self);
+                self.alloc_node(node)
+            } else {
+                ComputeIdx::null()
+            }
         }
 
         fn alloc_leaf_node(&mut self, own: u32, timeframe_idx: u32) -> ComputeIdx {
@@ -387,16 +417,26 @@ fn dump_graph(query: &DepGraphQuery) {
         fn union(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> ComputeIdx {
             self.union_mode = true;
             self.difference_mode = false;
-            self.union_and_difference(lhs, rhs)[0]
+            self.mode_aware_union_and_difference(lhs, rhs)[0]
         }
 
         fn difference(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> ComputeIdx {
             self.union_mode = false;
             self.difference_mode = true;
-            self.union_and_difference(lhs, rhs)[1]
+            self.mode_aware_union_and_difference(lhs, rhs)[1]
         }
 
         fn union_and_difference(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> [ComputeIdx; 2] {
+            self.union_mode = true;
+            self.difference_mode = true;
+            self.mode_aware_union_and_difference(lhs, rhs)
+        }
+
+        fn mode_aware_union_and_difference(
+            &mut self,
+            lhs: ComputeIdx,
+            rhs: ComputeIdx,
+        ) -> [ComputeIdx; 2] {
             if let Some(union) = lhs.exclusive_or(rhs) {
                 return [union, lhs];
             }
@@ -408,12 +448,18 @@ fn dump_graph(query: &DepGraphQuery) {
 
             match lhs_node.neighborhood.cmp_or_union(rhs_node.neighborhood) {
                 Ok(cmp::Ordering::Equal) => {
+                    debug_assert_ne!(
+                        lhs_node.neighborhood.0 % 2,
+                        0,
+                        "Duplicate leaves (lhs: {lhs:?}, rhs: {rhs:?})"
+                    );
                     let [union_left, diff_left] =
-                        self.union_and_difference(lhs_node.left, rhs_node.left);
+                        self.mode_aware_union_and_difference(lhs_node.left, rhs_node.left);
                     let [union_right, diff_right] =
-                        self.union_and_difference(lhs_node.right, rhs_node.right);
+                        self.mode_aware_union_and_difference(lhs_node.right, rhs_node.right);
                     debug_assert!(
-                        !union_left.is_either_null(union_right)
+                        !self.union_mode
+                            || !union_left.is_either_null(union_right)
                             || union_left.is_both_null(union_right)
                     );
                     let union = if [union_left, union_right] == [lhs_node.left, lhs_node.right] {
@@ -421,30 +467,24 @@ fn dump_graph(query: &DepGraphQuery) {
                     } else if [union_left, union_right] == [rhs_node.left, rhs_node.right] {
                         rhs
                     } else {
-                        self.alloc_union_node(ComputeNode {
+                        self.alloc_union_node(|this| ComputeNode {
                             left: union_left,
                             right: union_right,
                             neighborhood: lhs_node.neighborhood,
-                            compute: self[union_left].compute + self[union_right].compute,
+                            compute: this[union_left].compute + this[union_right].compute,
                         })
                     };
-                    debug_assert!(
-                        !diff_left.is_either_null(diff_right) || diff_left.is_both_null(diff_right)
-                    );
-                    let difference = if [diff_left, diff_right] == [lhs_node.left, lhs_node.right] {
+                    let difference = if diff_left.is_both_null(diff_right) {
+                        ComputeIdx::null()
+                    } else if [diff_left, diff_right] == [lhs_node.left, lhs_node.right] {
                         lhs
                     } else {
                         diff_left.exclusive_or(diff_right).unwrap_or_else(|| {
-                            let diff_left_node = &self[diff_left];
-                            let diff_right_node = &self[diff_right];
-                            self.alloc_difference_node(ComputeNode {
+                            self.alloc_difference_node(|this| ComputeNode {
                                 left: diff_left,
                                 right: diff_right,
-                                neighborhood: diff_left_node
-                                    .neighborhood
-                                    .disjoint_union(diff_right_node.neighborhood)
-                                    .unwrap(),
-                                compute: diff_left_node.compute + diff_right_node.compute,
+                                neighborhood: lhs_node.neighborhood,
+                                compute: this[diff_left].compute + this[diff_right].compute,
                             })
                         })
                     };
@@ -457,7 +497,7 @@ fn dump_graph(query: &DepGraphQuery) {
                         [rhs, lhs]
                     };
                     [
-                        self.alloc_union_node(ComputeNode {
+                        self.alloc_union_node(|_| ComputeNode {
                             left,
                             right,
                             neighborhood: disjoint_union,
@@ -484,14 +524,15 @@ fn dump_graph(query: &DepGraphQuery) {
             larger_is_rhs: bool,
         ) -> [ComputeIdx; 2] {
             debug_assert!(smaller_node.neighborhood < larger_node.neighborhood);
-            let [union_left, union_right, diff_left, diff_right];
+            let [union_left, union_right, diff_left, diff_right, diff_new];
             if smaller_node.neighborhood.0 <= larger_node.neighborhood.0 {
                 let [lhs, rhs] = if larger_is_rhs {
                     [smaller, larger_node.left]
                 } else {
                     [larger_node.left, smaller]
                 };
-                [union_left, diff_left] = self.union_and_difference(lhs, rhs);
+                [union_left, diff_left] = self.mode_aware_union_and_difference(lhs, rhs);
+                diff_new = diff_left;
                 union_right = larger_node.right;
                 diff_right = larger_node.right;
             } else {
@@ -500,34 +541,37 @@ fn dump_graph(query: &DepGraphQuery) {
                 } else {
                     [larger_node.right, smaller]
                 };
-                [union_right, diff_right] = self.union_and_difference(lhs, rhs);
+                [union_right, diff_right] = self.mode_aware_union_and_difference(lhs, rhs);
+                diff_new = diff_right;
                 union_left = larger_node.left;
                 diff_left = larger_node.left;
             };
+            debug_assert!(
+                !self.union_mode
+                    || !union_left.is_either_null(union_right)
+                    || union_left.is_both_null(union_right),
+            );
             let union = if [union_left, union_right] == [larger_node.left, larger_node.right] {
                 larger
             } else {
-                self.alloc_union_node(ComputeNode {
+                self.alloc_union_node(|this| ComputeNode {
                     left: union_left,
                     right: union_right,
                     neighborhood: larger_node.neighborhood,
-                    compute: self[union_left].compute + self[union_right].compute,
+                    compute: this[union_left].compute + this[union_right].compute,
                 })
             };
-            let [lhs_left, lhs_right, lhs] = if larger_is_rhs {
-                [smaller_node.left, smaller_node.right, smaller]
-            } else {
-                [larger_node.left, larger_node.right, larger]
-            };
-            let difference = if [diff_left, diff_right] == [lhs_left, lhs_right] {
-                lhs
+            let difference = if larger_is_rhs {
+                diff_new
+            } else if [diff_left, diff_right] == [larger_node.left, larger_node.right] {
+                larger
             } else {
                 diff_left.exclusive_or(diff_right).unwrap_or_else(|| {
-                    self.alloc_difference_node(ComputeNode {
+                    self.alloc_difference_node(|this| ComputeNode {
                         left: diff_left,
                         right: diff_right,
                         neighborhood: larger_node.neighborhood,
-                        compute: self[diff_left].compute + self[diff_right].compute,
+                        compute: this[diff_left].compute + this[diff_right].compute,
                     })
                 })
             };
@@ -535,21 +579,21 @@ fn dump_graph(query: &DepGraphQuery) {
         }
     }
 
+    const QUANTIZATION_STEP_NS: u64 = 16;
+
     assert!(query.graph.len_nodes() < u32::MAX as usize);
     let mut side_effect_node_count = 0;
-    let (mut nodes_to_indices, mut hierarchy): (FxHashMap<_, u32>, Vec<_>) = query
+    let (nodes_to_indices, mut hierarchy): (FxHashMap<_, u32>, Vec<_>) = query
         .graph
         .enumerated_nodes()
         .map(|(idx, node)| {
             if node.data.inner.kind == dep_kinds::SideEffect {
                 side_effect_node_count += 1;
             }
-            let realtime = if node.data.inner.kind != dep_kinds::crate_hash {
-                // quantize by 16ns
-                u32::try_from(node.data.timeframe.as_nanos() as u64 / 16).unwrap()
-            } else {
-                0
-            };
+            // quantize by 16ns
+            let realtime =
+                u32::try_from(node.data.timeframe.as_nanos() as u64 / QUANTIZATION_STEP_NS)
+                    .unwrap();
             (
                 (node.data.inner, idx.node_id() as u32),
                 Timeframe {
@@ -557,8 +601,6 @@ fn dump_graph(query: &DepGraphQuery) {
                     realtime,
                     own: realtime,
                     children: FxHashSet::default(),
-                    parents: FxHashSet::default(),
-                    depth: Cell::new(0),
                     compute_tree: Cell::new(ComputeIdx::null()),
                 },
             )
@@ -572,17 +614,18 @@ fn dump_graph(query: &DepGraphQuery) {
             let child_idx = edge.target().node_id();
             let parent_idx = edge.source().node_id();
             let child = &mut hierarchy[child_idx];
+            if child.dep_kind == dep_kinds::crate_hash || child.dep_kind == dep_kinds::Red {
+                continue;
+            }
             let child_realtime_ns = child.realtime;
             let substract_ns = match edge.data {
                 DepCache::Computed => child_realtime_ns,
                 DepCache::Cached => 0,
             };
-            if !child.parents.insert(parent_idx as u32) {
+            let parent = &mut hierarchy[parent_idx];
+            if !parent.children.insert(child_idx as u32) {
                 continue;
             }
-            let parent = &mut hierarchy[parent_idx];
-            let new_child = parent.children.insert(child_idx as u32);
-            debug_assert!(new_child);
             if let Some(new_own) = parent.own.checked_sub(substract_ns) {
                 parent.own = new_own;
             } else {
@@ -591,59 +634,12 @@ fn dump_graph(query: &DepGraphQuery) {
         }
     });
 
-    for timeframe in &hierarchy {
-        fn calc_depth(timeframe: &Timeframe, hierarchy: &Vec<Timeframe>) -> u32 {
-            let depth = timeframe.depth.get();
-            if depth != 0 {
-                return depth;
-            }
-            let depth = timeframe
-                .parents
-                .iter()
-                .map(|&i| calc_depth(&hierarchy[i as usize], hierarchy))
-                .max()
-                .unwrap_or(0)
-                + 1;
-            timeframe.depth.set(depth);
-            depth
-        }
-
-        calc_depth(timeframe, &hierarchy);
-    }
-
-    {
-        let mut backward_permutation: Vec<u32> = (0..hierarchy.len() as u32).collect();
-        backward_permutation
-            .sort_unstable_by_key(|&i| cmp::Reverse(*hierarchy[i as usize].depth.get_mut()));
-        let mut forward_permutation = vec![0_u32; hierarchy.len()];
-        for (new, &old) in backward_permutation.iter().enumerate() {
-            forward_permutation[old as usize] = new as u32;
-        }
-        hierarchy = backward_permutation
-            .iter()
-            .map(|&i| {
-                let old = &hierarchy[i as usize];
-                let permute = |&i| forward_permutation[i as usize];
-                Timeframe {
-                    dep_kind: old.dep_kind,
-                    realtime: old.realtime,
-                    own: old.own,
-                    children: old.children.iter().map(permute).collect(),
-                    parents: old.parents.iter().map(permute).collect(),
-                    depth: old.depth.clone(),
-                    compute_tree: old.compute_tree.clone(),
-                }
-            })
-            .collect();
-
-        for idx in nodes_to_indices.values_mut() {
-            *idx = forward_permutation[*idx as usize];
-        }
-    }
-
     struct CollectedParallelism {
         completed_queries: ComputeIdx,
         parallelism_difference: u32,
+        count: u32,
+        max_realtime: u32,
+        sum_own: u32,
     }
 
     impl Default for CollectedParallelism {
@@ -651,6 +647,9 @@ fn dump_graph(query: &DepGraphQuery) {
             CollectedParallelism {
                 completed_queries: ComputeIdx::null(),
                 parallelism_difference: 0,
+                count: 0,
+                max_realtime: 0,
+                sum_own: 0,
             }
         }
     }
@@ -658,26 +657,23 @@ fn dump_graph(query: &DepGraphQuery) {
     let mut ring = ComputeRing::new();
     let mut compute_parallelism = FxHashMap::<DepKind, CollectedParallelism>::default();
 
+    let mut update = Instant::now();
     for i in 0..hierarchy.len() as u32 {
         let timeframe = &hierarchy[i as usize];
 
         let this_leaf = ring.alloc_leaf_node(timeframe.own, i);
         let this_tree = timeframe.children.iter().fold(this_leaf, |acc, &child| {
             let child_tree = hierarchy[child as usize].compute_tree.get();
-            debug_assert_ne!(child_tree, ComputeIdx::null());
+            debug_assert!(!child_tree.is_null());
             ring.union(acc, child_tree)
         });
         timeframe.compute_tree.set(this_tree);
 
         let entry = compute_parallelism.entry(timeframe.dep_kind).or_default();
-        let [new_completed_queries, this_tree] =
-            ring.union_and_difference(entry.completed_queries, this_tree);
+        let [new_completed_queries, new_tree] =
+            ring.union_and_difference(this_tree, entry.completed_queries);
 
-        // new tree could be empty in case of recursion
-        if this_tree.is_null() {
-            continue;
-        }
-        let compute_sum = ring[this_tree].compute;
+        let compute_sum = ring[new_tree].compute;
         let timeframe = &hierarchy[i as usize];
         let compute_max = timeframe.own
             + timeframe
@@ -688,26 +684,84 @@ fn dump_graph(query: &DepGraphQuery) {
                         hierarchy[child as usize].compute_tree.get(),
                         entry.completed_queries,
                     );
-                    ring[difference].compute
+                    if difference.is_null() { 0 } else { ring[difference].compute }
                 })
                 .max()
                 .unwrap_or(0);
-        entry.parallelism_difference += compute_sum - compute_max;
+        // entry.parallelism_difference += compute_sum - compute_max;
+        entry.parallelism_difference += compute_sum.checked_sub(compute_max).unwrap_or_else(|| {
+                struct CollectIndices<'a> {
+                    ring: &'a ComputeRing,
+                    indices: FxHashSet<u32>,
+                }
+
+                impl CollectIndices<'_> {
+                    fn collect(&mut self, tree: ComputeIdx) {
+                        if tree.is_null() {
+                            return;
+                        }
+                        let node = self.ring[tree];
+                        let new = self.indices.insert(node.neighborhood.0);
+                        assert!(new);
+                        self.collect(node.left);
+                        self.collect(node.right);
+                    }
+                }
+
+                let mut leaves = CollectIndices { ring: &ring, indices: FxHashSet::default() };
+                eprintln!("Overflow while calculating parallelism difference");
+                leaves.collect(this_tree);
+                eprintln!("this_tree: {:x?};", leaves.indices);
+                leaves.indices.clear();
+                leaves.collect(new_tree);
+                eprintln!("new_tree: {:x?};", leaves.indices);
+                leaves.indices.clear();
+                for &child in &timeframe.children {
+                    let child = &hierarchy[child as usize];
+                    let child_compute_tree = child.compute_tree.get();
+                    leaves.collect(child_compute_tree);
+                    eprintln!("{:?}: {:x?}", child.dep_kind, leaves.indices);
+                    leaves.indices.clear();
+                    let indices = leaves.indices;
+                    let diff = ring.difference(child_compute_tree, entry.completed_queries);
+                    leaves = CollectIndices { ring: &ring, indices };
+                    leaves.collect(diff);
+                    eprintln!("{:?} \\ completed_queries: {:x?}", child.dep_kind, leaves.indices);
+                    leaves.indices.clear();
+                }
+                leaves.collect(entry.completed_queries);
+                eprintln!("completed_queries: {:x?};", leaves.indices);
+
+                panic!("Overflow while calculating parallelism difference: sum = {compute_sum}, max = {compute_max}, own = {}, dep_kind = {:?}, child_deps = {:?}", timeframe.own, timeframe.dep_kind, timeframe.children.iter().map(|&i| hierarchy[i as usize].dep_kind).collect::<Vec<_>>());
+            });
+
         entry.completed_queries = new_completed_queries;
-        if i % 1024 == 0 {
-            eprintln!("{i}/{}", hierarchy.len());
+        entry.count += 1;
+        entry.max_realtime = entry.max_realtime.max(timeframe.realtime);
+        entry.sum_own += timeframe.own;
+        if i % 256 == 0 {
+            let new_update = Instant::now();
+            if new_update.duration_since(update) >= Duration::from_secs(1) {
+                update = new_update;
+                eprintln!("{i}/{}", hierarchy.len());
+            }
         }
     }
 
-    let compute_kinds: BTreeMap<_, _> =
-        compute_parallelism.into_iter().map(|(k, c)| (c.parallelism_difference, k)).collect();
+    let mut compute_kinds: Vec<_> = compute_parallelism.into_iter().collect();
+    compute_kinds.sort_unstable_by_key(|(_, p)| cmp::Reverse(p.parallelism_difference));
 
     {
         // dump a .txt file with just the edges:
-        let txt_path = format!("{path}.txt");
+        let txt_path = format!("{path}.csv");
         let mut file = File::create_buffered(&txt_path).unwrap();
-        for (compute_ns, kind) in compute_kinds.into_iter().rev() {
-            writeln!(file, "{kind:?},{compute_ns}").unwrap();
+        writeln!(file, "query,count,parallelism_ns,max_realtime_ns,sum_own_ns").unwrap();
+        for (kind, data) in compute_kinds.into_iter().rev() {
+            let compute = (data.parallelism_difference as u64) * QUANTIZATION_STEP_NS;
+            let count = data.count;
+            let max_realtime = (data.max_realtime as u64) * QUANTIZATION_STEP_NS;
+            let sum_own = (data.sum_own as u64) * QUANTIZATION_STEP_NS;
+            writeln!(file, "{kind:?},{count},{compute},{max_realtime},{sum_own}").unwrap();
         }
     }
 }
