@@ -648,18 +648,14 @@ fn dump_graph(query: &DepGraphQuery) {
     for i in 0..hierarchy.len() as u32 {
         let timeframe = &hierarchy[i as usize];
 
-        let mut claim = 0;
         let mut unclaimed_iter = unclaimed_nodes.iter().rev();
         for child in timeframe.children.iter().rev() {
             if child.dep_cache() == DepCache::Cached {
                 continue;
             }
-            while *unclaimed_iter.next().unwrap() != child.index() {
-                claim += 1;
-            }
-            claim += 1;
+            while *unclaimed_iter.next().unwrap() != child.index() {}
         }
-        unclaimed_nodes.resize_with(unclaimed_nodes.len() - claim, || panic!());
+        unclaimed_nodes.resize_with(unclaimed_iter.len(), || panic!());
         if timeframe.dep_kind != dep_kinds::SideEffect {
             unclaimed_nodes.push(i);
         }
