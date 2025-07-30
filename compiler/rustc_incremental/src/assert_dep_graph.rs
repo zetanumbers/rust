@@ -39,7 +39,7 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 use std::{cmp, env, ops};
 
-use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
+use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
 use rustc_data_structures::graph::linked_graph::{Direction, INCOMING, NodeIndex, OUTGOING};
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
@@ -232,11 +232,37 @@ fn check_paths<'tcx>(tcx: TyCtxt<'tcx>, if_this_changed: &Sources, then_this_wou
 fn dump_graph(query: &DepGraphQuery) {
     let path: String = env::var("RUST_DEP_GRAPH").unwrap_or_else(|_| "dep_graph".to_string());
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    struct ChildIdx(u32);
+
+    impl ChildIdx {
+        const DEP_CACHE_BIT: u32 = 1 << 31;
+
+        const fn new(index: u32, cache: DepCache) -> Self {
+            debug_assert!(index & Self::DEP_CACHE_BIT == 0);
+            ChildIdx(
+                index
+                    | match cache {
+                        DepCache::Cached => 0,
+                        DepCache::Computed => Self::DEP_CACHE_BIT,
+                    },
+            )
+        }
+
+        const fn dep_cache(self) -> DepCache {
+            if self.0 & Self::DEP_CACHE_BIT != 0 { DepCache::Computed } else { DepCache::Cached }
+        }
+
+        const fn index(self) -> u32 {
+            self.0 & !Self::DEP_CACHE_BIT
+        }
+    }
+
     struct Timeframe {
         dep_kind: DepKind,
         realtime: u32,
         own: u32,
-        children: FxHashSet<u32>,
+        children: Vec<ChildIdx>,
         compute_tree: Cell<ComputeIdx>,
     }
 
@@ -544,55 +570,52 @@ fn dump_graph(query: &DepGraphQuery) {
 
     const QUANTIZATION_STEP_NS: u64 = 16;
 
-    assert!(query.graph.len_nodes() < u32::MAX as usize);
-    let mut side_effect_node_count = 0;
-    let (nodes_to_indices, mut hierarchy): (FxHashMap<_, u32>, Vec<_>) = query
+    assert!(query.graph.len_nodes() < u32::MAX.wrapping_shr(1) as usize);
+    let mut side_effect_nodes = Vec::new();
+    let mut nodes_to_indices =
+        FxHashMap::with_capacity_and_hasher(query.graph.len_nodes(), <_>::default());
+    let mut hierarchy: Vec<_> = query
         .graph
         .enumerated_nodes()
         .map(|(idx, node)| {
             if node.data.inner.kind == dep_kinds::SideEffect {
-                side_effect_node_count += 1;
+                side_effect_nodes.push(idx.node_id() as u32);
+            } else {
+                let old = nodes_to_indices.insert(node.data.inner, idx.node_id() as u32);
+                debug_assert_eq!(old, None);
             }
             // quantize by 16ns
             let realtime =
                 u32::try_from(node.data.timeframe.as_nanos() as u64 / QUANTIZATION_STEP_NS)
                     .unwrap();
-            (
-                (node.data.inner, idx.node_id() as u32),
-                Timeframe {
-                    dep_kind: node.data.inner.kind,
-                    realtime,
-                    own: realtime,
-                    children: FxHashSet::default(),
-                    compute_tree: Cell::new(ComputeIdx::null()),
-                },
-            )
+
+            Timeframe {
+                dep_kind: node.data.inner.kind,
+                realtime,
+                own: realtime,
+                children: Vec::new(),
+                compute_tree: Cell::new(ComputeIdx::null()),
+            }
         })
         .collect();
-    debug_assert_eq!(nodes_to_indices.len() + side_effect_node_count - 1, hierarchy.len());
 
     with_context(|icx| {
         let tcx = icx.tcx;
         for edge in query.graph.all_edges() {
             let child_idx = edge.target().node_id();
             let parent_idx = edge.source().node_id();
-            let child = &mut hierarchy[child_idx];
-            if child.dep_kind == dep_kinds::crate_hash || child.dep_kind == dep_kinds::Red {
-                continue;
-            }
+            let child = &hierarchy[child_idx];
             let child_realtime_ns = child.realtime;
-            let substract_ns = match edge.data {
-                DepCache::Computed => child_realtime_ns,
-                DepCache::Cached => 0,
-            };
+            let child_dep_kind = child.dep_kind;
             let parent = &mut hierarchy[parent_idx];
-            if !parent.children.insert(child_idx as u32) {
-                continue;
-            }
-            if let Some(new_own) = parent.own.checked_sub(substract_ns) {
-                parent.own = new_own;
-            } else {
-                assert!(tcx.dep_kind_info(parent.dep_kind).is_anon)
+            if !tcx.dep_kind_info(parent.dep_kind).is_anon
+                && child_dep_kind != dep_kinds::SideEffect
+                && child_dep_kind != dep_kinds::crate_hash
+            {
+                parent.children.push(ChildIdx::new(child_idx as u32, edge.data));
+                if edge.data == DepCache::Computed {
+                    parent.own -= child_realtime_ns
+                }
             }
         }
     });
@@ -621,12 +644,29 @@ fn dump_graph(query: &DepGraphQuery) {
     let mut compute_parallelism = FxHashMap::<DepKind, CollectedParallelism>::default();
 
     let mut update = Instant::now();
+    let mut unclaimed_nodes = Vec::new();
     for i in 0..hierarchy.len() as u32 {
         let timeframe = &hierarchy[i as usize];
 
+        let mut claim = 0;
+        let mut unclaimed_iter = unclaimed_nodes.iter().rev();
+        for child in timeframe.children.iter().rev() {
+            if child.dep_cache() == DepCache::Cached {
+                continue;
+            }
+            while *unclaimed_iter.next().unwrap() != child.index() {
+                claim += 1;
+            }
+            claim += 1;
+        }
+        unclaimed_nodes.resize_with(unclaimed_nodes.len() - claim, || panic!());
+        if timeframe.dep_kind != dep_kinds::SideEffect {
+            unclaimed_nodes.push(i);
+        }
+
         let this_leaf = ring.alloc_leaf_node(timeframe.own, i);
         let this_tree = timeframe.children.iter().fold(this_leaf, |acc, &child| {
-            let child_tree = hierarchy[child as usize].compute_tree.get();
+            let child_tree = hierarchy[child.index() as usize].compute_tree.get();
             debug_assert!(!child_tree.is_null());
             ring.union(acc, child_tree)
         });
@@ -644,7 +684,7 @@ fn dump_graph(query: &DepGraphQuery) {
                 .iter()
                 .map(|&child| {
                     let difference = ring.difference(
-                        hierarchy[child as usize].compute_tree.get(),
+                        hierarchy[child.index() as usize].compute_tree.get(),
                         entry.completed_queries,
                     );
                     if difference.is_null() { 0 } else { ring[difference].compute }
@@ -666,7 +706,7 @@ fn dump_graph(query: &DepGraphQuery) {
     }
 
     let mut compute_kinds: Vec<_> = compute_parallelism.into_iter().collect();
-    compute_kinds.sort_unstable_by_key(|(_, p)| cmp::Reverse(p.parallelism_difference));
+    compute_kinds.sort_unstable_by_key(|(_, p)| p.parallelism_difference);
 
     {
         // dump a .txt file with just the edges:
