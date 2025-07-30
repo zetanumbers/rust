@@ -39,7 +39,7 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 use std::{cmp, env, ops};
 
-use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
+use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
 use rustc_data_structures::graph::linked_graph::{Direction, INCOMING, NodeIndex, OUTGOING};
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
@@ -644,6 +644,7 @@ fn dump_graph(query: &DepGraphQuery) {
     let mut compute_parallelism = FxHashMap::<DepKind, CollectedParallelism>::default();
 
     let mut update = Instant::now();
+    let mut unclaimed_interspersed_kinds = FxHashSet::default();
     let mut unclaimed_nodes = Vec::new();
     for i in 0..hierarchy.len() as u32 {
         let timeframe = &hierarchy[i as usize];
@@ -653,7 +654,13 @@ fn dump_graph(query: &DepGraphQuery) {
             if child.dep_cache() == DepCache::Cached {
                 continue;
             }
-            while *unclaimed_iter.next().unwrap() != child.index() {}
+            loop {
+                let unclaimed = *unclaimed_iter.next().unwrap();
+                if unclaimed == child.index() {
+                    break;
+                }
+                unclaimed_interspersed_kinds.insert(hierarchy[unclaimed as usize].dep_kind);
+            }
         }
         unclaimed_nodes.resize_with(unclaimed_iter.len(), || panic!());
         if timeframe.dep_kind != dep_kinds::SideEffect {
@@ -700,6 +707,7 @@ fn dump_graph(query: &DepGraphQuery) {
             }
         }
     }
+    eprintln!("unclaimed_interspersed_kinds = {unclaimed_interspersed_kinds:#?}");
 
     let mut compute_kinds: Vec<_> = compute_parallelism.into_iter().collect();
     compute_kinds.sort_unstable_by_key(|(_, p)| p.parallelism_difference);

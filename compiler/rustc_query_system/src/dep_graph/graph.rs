@@ -358,16 +358,16 @@ impl<D: Deps> DepGraphData<D> {
                 (task(cx, arg), start.elapsed())
             })
         };
+        let task_deps = Lock::new(TaskDeps {
+            #[cfg(debug_assertions)]
+            node: Some(key),
+            reads: EdgesVec::new(),
+            read_set: Default::default(),
+            phantom_data: PhantomData,
+        });
         let ((result, timeframe), edges) = if cx.dep_context().is_eval_always(key.kind) {
-            (with_deps(TaskDepsRef::EvalAlways), EdgesVec::new())
+            (with_deps(TaskDepsRef::EvalAlways(&task_deps)), EdgesVec::new())
         } else {
-            let task_deps = Lock::new(TaskDeps {
-                #[cfg(debug_assertions)]
-                node: Some(key),
-                reads: EdgesVec::new(),
-                read_set: Default::default(),
-                phantom_data: PhantomData,
-            });
             (with_deps(TaskDepsRef::Allow(&task_deps)), task_deps.into_inner().reads)
         };
 
@@ -443,8 +443,10 @@ impl<D: Deps> DepGraphData<D> {
                 // Ignore other anonymous tasks as their nodes could be identical.
                 if inline {
                     D::read_deps(|deps| match deps {
-                        TaskDepsRef::Allow(lock) => lock.lock().reads.extend_from_other(&task_deps),
-                        TaskDepsRef::EvalAlways | TaskDepsRef::Ignore | TaskDepsRef::Forbid => (),
+                        TaskDepsRef::Allow(lock) | TaskDepsRef::EvalAlways(lock) => {
+                            lock.lock().reads.extend_from_other(&task_deps)
+                        }
+                        TaskDepsRef::Ignore | TaskDepsRef::Forbid => (),
                     });
                 }
 
@@ -500,12 +502,7 @@ impl<D: Deps> DepGraph<D> {
         if let Some(ref data) = self.data {
             D::read_deps(|task_deps| {
                 let mut task_deps = match task_deps {
-                    TaskDepsRef::Allow(deps) => deps.lock(),
-                    TaskDepsRef::EvalAlways => {
-                        // We don't need to record dependencies of eval_always
-                        // queries. They are re-evaluated unconditionally anyway.
-                        return;
-                    }
+                    TaskDepsRef::Allow(deps) | TaskDepsRef::EvalAlways(deps) => deps.lock(),
                     TaskDepsRef::Ignore => return,
                     TaskDepsRef::Forbid => {
                         // Reading is forbidden in this context. ICE with a useful error message.
@@ -557,8 +554,8 @@ impl<D: Deps> DepGraph<D> {
     pub fn record_diagnostic<Qcx: QueryContext>(&self, qcx: Qcx, diagnostic: &DiagInner) {
         if let Some(ref data) = self.data {
             D::read_deps(|task_deps| match task_deps {
-                TaskDepsRef::EvalAlways | TaskDepsRef::Ignore => return,
-                TaskDepsRef::Forbid | TaskDepsRef::Allow(..) => {
+                TaskDepsRef::Ignore => return,
+                TaskDepsRef::EvalAlways(..) | TaskDepsRef::Forbid | TaskDepsRef::Allow(..) => {
                     self.read_index(data.encode_diagnostic(qcx, diagnostic), DepCache::Cached);
                 }
             })
@@ -634,7 +631,8 @@ impl<D: Deps> DepGraph<D> {
             let mut edges = EdgesVec::new();
             D::read_deps(|task_deps| match task_deps {
                 TaskDepsRef::Allow(deps) => edges = deps.lock().reads.clone_cached(),
-                TaskDepsRef::EvalAlways => {
+                TaskDepsRef::EvalAlways(deps) => {
+                    edges = deps.lock().reads.clone_cached();
                     edges.push(DepNodeIndex::FOREVER_RED_NODE, DepCache::Cached);
                 }
                 TaskDepsRef::Ignore => {}
@@ -1332,7 +1330,7 @@ pub enum TaskDepsRef<'a> {
     /// re-executed -- but we need to know that this is an `eval_always`
     /// query in order to emit dependencies to `DepNodeIndex::FOREVER_RED_NODE`
     /// when directly feeding other queries.
-    EvalAlways,
+    EvalAlways(&'a Lock<TaskDeps>),
     /// New dependencies are ignored. This is also used for `dep_graph.with_ignore`.
     Ignore,
     /// Any attempt to add new dependencies will cause a panic.
