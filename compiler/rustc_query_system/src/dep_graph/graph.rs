@@ -416,7 +416,7 @@ impl<D: Deps> DepGraphData<D> {
                 // going to be (i.e. equal to the precomputed
                 // `SINGLETON_DEPENDENCYLESS_ANON_NODE`). As a consequence we can skip creating
                 // a `StableHasher` and sending the node through interning.
-                (DepNodeIndex::SINGLETON_ZERO_DEPS_ANON_NODE, Some(DepCache::Computed))
+                (DepNodeIndex::SINGLETON_ZERO_DEPS_ANON_NODE, Some(DepCache::Cached))
             }
             1 => {
                 // When there is only one dependency, don't bother creating a node.
@@ -633,7 +633,7 @@ impl<D: Deps> DepGraph<D> {
 
             let mut edges = EdgesVec::new();
             D::read_deps(|task_deps| match task_deps {
-                TaskDepsRef::Allow(deps) => edges.extend_from_other(&deps.lock().reads),
+                TaskDepsRef::Allow(deps) => edges = deps.lock().reads.clone_cached(),
                 TaskDepsRef::EvalAlways => {
                     edges.push(DepNodeIndex::FOREVER_RED_NODE, DepCache::Cached);
                 }

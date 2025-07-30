@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use rustc_index::bit_set::GrowableBitSet;
+use rustc_index::bit_set::{DenseBitSet, GrowableBitSet};
 use smallvec::SmallVec;
 
 use crate::dep_graph::DepNodeIndex;
@@ -50,6 +50,14 @@ impl EdgesVec {
         self.cached.ensure(self.edges.len());
         for i in other.cached.iter() {
             self.cached.insert(append_base + i);
+        }
+    }
+
+    pub(crate) fn clone_cached(&self) -> Self {
+        EdgesVec {
+            max: self.max,
+            edges: self.edges.clone(),
+            cached: DenseBitSet::new_filled(self.edges.len()).into(),
         }
     }
 
