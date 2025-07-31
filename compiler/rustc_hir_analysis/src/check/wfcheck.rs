@@ -1,9 +1,11 @@
 use std::cell::LazyCell;
 use std::ops::{ControlFlow, Deref};
+use std::sync::atomic::{self, AtomicBool};
 
 use hir::intravisit::{self, Visitor};
 use rustc_abi::ExternAbi;
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap, FxIndexSet};
+use rustc_data_structures::sync::par_for_each_in;
 use rustc_errors::codes::*;
 use rustc_errors::{Applicability, ErrorGuaranteed, pluralize, struct_span_code_err};
 use rustc_hir::def::{DefKind, Res};
@@ -192,13 +194,19 @@ pub(super) fn check_well_formed(
     tcx: TyCtxt<'_>,
     def_id: LocalDefId,
 ) -> Result<(), ErrorGuaranteed> {
-    let mut res = crate::check::check::check_item_type(tcx, def_id);
+    let res = crate::check::check::check_item_type(tcx, def_id);
 
-    for param in &tcx.generics_of(def_id).own_params {
-        res = res.and(check_param_wf(tcx, param));
-    }
+    let ok = AtomicBool::new(res.is_ok());
 
-    res
+    par_for_each_in(&tcx.generics_of(def_id).own_params, |param| {
+        if check_param_wf(tcx, param).is_err() {
+            ok.store(false, atomic::Ordering::Relaxed);
+        }
+    });
+
+    // We need this to use atomic bools
+    #[allow(deprecated)]
+    if ok.into_inner() { Ok(()) } else { Err(ErrorGuaranteed::unchecked_error_guaranteed()) }
 }
 
 /// Checks that the field types (in a struct def'n) or argument types (in an enum def'n) are
