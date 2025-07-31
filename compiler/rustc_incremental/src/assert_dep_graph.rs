@@ -264,6 +264,7 @@ fn dump_graph(query: &DepGraphQuery) {
         own: u32,
         children: Vec<ChildIdx>,
         compute_tree: Cell<ComputeIdx>,
+        realtime_tree: Cell<ComputeIdx>,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -595,6 +596,7 @@ fn dump_graph(query: &DepGraphQuery) {
                 own: realtime,
                 children: Vec::new(),
                 compute_tree: Cell::new(ComputeIdx::null()),
+                realtime_tree: Cell::new(ComputeIdx::null()),
             }
         })
         .collect();
@@ -622,9 +624,9 @@ fn dump_graph(query: &DepGraphQuery) {
 
     struct CollectedParallelism {
         completed_queries: ComputeIdx,
+        computed_queries: ComputeIdx,
         parallelism_difference: u32,
         count: u32,
-        max_realtime: u32,
         sum_own: u32,
     }
 
@@ -632,9 +634,9 @@ fn dump_graph(query: &DepGraphQuery) {
         fn default() -> Self {
             CollectedParallelism {
                 completed_queries: ComputeIdx::null(),
+                computed_queries: ComputeIdx::null(),
                 parallelism_difference: 0,
                 count: 0,
-                max_realtime: 0,
                 sum_own: 0,
             }
         }
@@ -668,16 +670,32 @@ fn dump_graph(query: &DepGraphQuery) {
         }
 
         let this_leaf = ring.alloc_leaf_node(timeframe.own, i);
-        let this_tree = timeframe.children.iter().fold(this_leaf, |acc, &child| {
-            let child_tree = hierarchy[child.index() as usize].compute_tree.get();
-            debug_assert!(!child_tree.is_null());
-            ring.union(acc, child_tree)
-        });
-        timeframe.compute_tree.set(this_tree);
+        let (this_total_tree, this_real_tree) = timeframe.children.iter().fold(
+            (this_leaf, this_leaf),
+            |(acc_total, acc_real), &child| {
+                let child_node = &hierarchy[child.index() as usize];
+                let child_total_tree = child_node.compute_tree.get();
+                debug_assert!(!child_total_tree.is_null());
+                let new_total_tree = ring.union(acc_total, child_total_tree);
+
+                let new_real_tree = match child.dep_cache() {
+                    DepCache::Computed => {
+                        let child_real_tree = child_node.realtime_tree.get();
+                        debug_assert!(!child_real_tree.is_null());
+                        ring.union(acc_real, child_real_tree)
+                    }
+                    DepCache::Cached => acc_real,
+                };
+                (new_total_tree, new_real_tree)
+            },
+        );
+        timeframe.compute_tree.set(this_total_tree);
+        timeframe.realtime_tree.set(this_real_tree);
 
         let entry = compute_parallelism.entry(timeframe.dep_kind).or_default();
         let [new_completed_queries, new_tree] =
-            ring.union_and_difference(this_tree, entry.completed_queries);
+            ring.union_and_difference(this_total_tree, entry.completed_queries);
+        let new_computed_queries = ring.union(this_real_tree, entry.computed_queries);
 
         let compute_sum = ring[new_tree].compute;
         let timeframe = &hierarchy[i as usize];
@@ -696,8 +714,8 @@ fn dump_graph(query: &DepGraphQuery) {
                 .unwrap_or(0);
         entry.parallelism_difference += compute_sum - compute_max;
         entry.completed_queries = new_completed_queries;
+        entry.computed_queries = new_computed_queries;
         entry.count += 1;
-        entry.max_realtime = entry.max_realtime.max(timeframe.realtime);
         entry.sum_own += timeframe.own;
         if i % 256 == 0 {
             let new_update = Instant::now();
@@ -716,13 +734,13 @@ fn dump_graph(query: &DepGraphQuery) {
         // dump a .txt file with just the edges:
         let txt_path = format!("{path}.csv");
         let mut file = File::create_buffered(&txt_path).unwrap();
-        writeln!(file, "query,count,parallelism_ns,max_realtime_ns,sum_own_ns").unwrap();
+        writeln!(file, "query,count,parallelism_ns,sum_realtime_ns,sum_own_ns").unwrap();
         for (kind, data) in compute_kinds.into_iter().rev() {
             let compute = (data.parallelism_difference as u64) * QUANTIZATION_STEP_NS;
             let count = data.count;
-            let max_realtime = (data.max_realtime as u64) * QUANTIZATION_STEP_NS;
+            let sum_realtime = (ring[data.computed_queries].compute as u64) * QUANTIZATION_STEP_NS;
             let sum_own = (data.sum_own as u64) * QUANTIZATION_STEP_NS;
-            writeln!(file, "{kind:?},{count},{compute},{max_realtime},{sum_own}").unwrap();
+            writeln!(file, "{kind:?},{count},{compute},{sum_realtime},{sum_own}").unwrap();
         }
     }
 }
