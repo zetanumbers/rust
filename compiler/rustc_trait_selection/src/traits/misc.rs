@@ -4,6 +4,7 @@ use std::assert_matches::assert_matches;
 
 use hir::LangItem;
 use rustc_ast::Mutability;
+use rustc_data_structures::sync::{Lock, par_for_each_in};
 use rustc_hir as hir;
 use rustc_infer::infer::{RegionResolutionError, TyCtxtInferExt};
 use rustc_middle::ty::{self, AdtDef, Ty, TyCtxt, TypeVisitableExt, TypingMode};
@@ -147,8 +148,8 @@ pub fn type_allowed_to_implement_const_param_ty<'tcx>(
         _ => return Err(ConstParamTyImplementationError::NotAnAdtOrBuiltinAllowed),
     };
 
-    let mut infringing_inner_tys = vec![];
-    for inner_ty in inner_tys {
+    let infringing_inner_tys = Lock::new(vec![]);
+    par_for_each_in(inner_tys, |&inner_ty| {
         // We use an ocx per inner ty for better diagnostics
         let infcx = tcx.infer_ctxt().build(TypingMode::non_body_analysis());
         let ocx = traits::ObligationCtxt::new_with_diagnostics(&infcx);
@@ -162,18 +163,19 @@ pub fn type_allowed_to_implement_const_param_ty<'tcx>(
 
         let errors = ocx.select_all_or_error();
         if !errors.is_empty() {
-            infringing_inner_tys.push((inner_ty, InfringingFieldsReason::Fulfill(errors)));
-            continue;
+            infringing_inner_tys.lock().push((inner_ty, InfringingFieldsReason::Fulfill(errors)));
+            return;
         }
 
         // Check regions assuming the self type of the impl is WF
         let errors = infcx.resolve_regions(parent_cause.body_id, param_env, [self_type]);
         if !errors.is_empty() {
-            infringing_inner_tys.push((inner_ty, InfringingFieldsReason::Regions(errors)));
-            continue;
+            infringing_inner_tys.lock().push((inner_ty, InfringingFieldsReason::Regions(errors)));
+            return;
         }
-    }
+    });
 
+    let infringing_inner_tys = infringing_inner_tys.into_inner();
     if !infringing_inner_tys.is_empty() {
         return Err(ConstParamTyImplementationError::InvalidInnerTyOfBuiltinTy(
             infringing_inner_tys,
@@ -195,67 +197,66 @@ pub fn all_fields_implement_trait<'tcx>(
 ) -> Result<(), Vec<(&'tcx ty::FieldDef, Ty<'tcx>, InfringingFieldsReason<'tcx>)>> {
     let trait_def_id = tcx.require_lang_item(lang_item, parent_cause.span);
 
-    let mut infringing = Vec::new();
-    for variant in adt.variants() {
-        for field in &variant.fields {
-            // Do this per-field to get better error messages.
-            let infcx = tcx.infer_ctxt().build(TypingMode::non_body_analysis());
-            let ocx = traits::ObligationCtxt::new_with_diagnostics(&infcx);
+    let infringing = Lock::new(Vec::new());
+    par_for_each_in(adt.variants().iter().flat_map(|variant| variant.fields.iter()), |&field| {
+        // Do this per-field to get better error messages.
+        let infcx = tcx.infer_ctxt().build(TypingMode::non_body_analysis());
+        let ocx = traits::ObligationCtxt::new_with_diagnostics(&infcx);
 
-            let unnormalized_ty = field.ty(tcx, args);
-            if unnormalized_ty.references_error() {
-                continue;
-            }
-
-            let field_span = tcx.def_span(field.did);
-            let field_ty_span = match tcx.hir_get_if_local(field.did) {
-                Some(hir::Node::Field(field_def)) => field_def.ty.span,
-                _ => field_span,
-            };
-
-            // FIXME(compiler-errors): This gives us better spans for bad
-            // projection types like in issue-50480.
-            // If the ADT has args, point to the cause we are given.
-            // If it does not, then this field probably doesn't normalize
-            // to begin with, and point to the bad field's span instead.
-            let normalization_cause = if field
-                .ty(tcx, traits::GenericArgs::identity_for_item(tcx, adt.did()))
-                .has_non_region_param()
-            {
-                parent_cause.clone()
-            } else {
-                ObligationCause::dummy_with_span(field_ty_span)
-            };
-            let ty = ocx.normalize(&normalization_cause, param_env, unnormalized_ty);
-            let normalization_errors = ocx.select_where_possible();
-
-            // NOTE: The post-normalization type may also reference errors,
-            // such as when we project to a missing type or we have a mismatch
-            // between expected and found const-generic types. Don't report an
-            // additional copy error here, since it's not typically useful.
-            if !normalization_errors.is_empty() || ty.references_error() {
-                tcx.dcx().span_delayed_bug(field_span, format!("couldn't normalize struct field `{unnormalized_ty}` when checking {tr} implementation", tr = tcx.def_path_str(trait_def_id)));
-                continue;
-            }
-
-            ocx.register_bound(
-                ObligationCause::dummy_with_span(field_ty_span),
-                param_env,
-                ty,
-                trait_def_id,
-            );
-            let errors = ocx.select_all_or_error();
-            if !errors.is_empty() {
-                infringing.push((field, ty, InfringingFieldsReason::Fulfill(errors)));
-            }
-
-            // Check regions assuming the self type of the impl is WF
-            let errors = infcx.resolve_regions(parent_cause.body_id, param_env, [self_type]);
-            if !errors.is_empty() {
-                infringing.push((field, ty, InfringingFieldsReason::Regions(errors)));
-            }
+        let unnormalized_ty = field.ty(tcx, args);
+        if unnormalized_ty.references_error() {
+            return;
         }
-    }
 
+        let field_span = tcx.def_span(field.did);
+        let field_ty_span = match tcx.hir_get_if_local(field.did) {
+            Some(hir::Node::Field(field_def)) => field_def.ty.span,
+            _ => field_span,
+        };
+
+        // FIXME(compiler-errors): This gives us better spans for bad
+        // projection types like in issue-50480.
+        // If the ADT has args, point to the cause we are given.
+        // If it does not, then this field probably doesn't normalize
+        // to begin with, and point to the bad field's span instead.
+        let normalization_cause = if field
+            .ty(tcx, traits::GenericArgs::identity_for_item(tcx, adt.did()))
+            .has_non_region_param()
+        {
+            parent_cause.clone()
+        } else {
+            ObligationCause::dummy_with_span(field_ty_span)
+        };
+        let ty = ocx.normalize(&normalization_cause, param_env, unnormalized_ty);
+        let normalization_errors = ocx.select_where_possible();
+
+        // NOTE: The post-normalization type may also reference errors,
+        // such as when we project to a missing type or we have a mismatch
+        // between expected and found const-generic types. Don't report an
+        // additional copy error here, since it's not typically useful.
+        if !normalization_errors.is_empty() || ty.references_error() {
+            tcx.dcx().span_delayed_bug(field_span, format!("couldn't normalize struct field `{unnormalized_ty}` when checking {tr} implementation", tr = tcx.def_path_str(trait_def_id)));
+            return;
+        }
+
+        ocx.register_bound(
+            ObligationCause::dummy_with_span(field_ty_span),
+            param_env,
+            ty,
+            trait_def_id,
+        );
+        let errors = ocx.select_all_or_error();
+        if !errors.is_empty() {
+            infringing.lock().push((field, ty, InfringingFieldsReason::Fulfill(errors)));
+        }
+
+        // Check regions assuming the self type of the impl is WF
+        let errors = infcx.resolve_regions(parent_cause.body_id, param_env, [self_type]);
+        if !errors.is_empty() {
+            infringing.lock().push((field, ty, InfringingFieldsReason::Regions(errors)));
+        }
+    });
+
+    let infringing = infringing.into_inner();
     if infringing.is_empty() { Ok(()) } else { Err(infringing) }
 }
