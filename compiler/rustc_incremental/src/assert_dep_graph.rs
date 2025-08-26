@@ -351,8 +351,6 @@ fn dump_graph(query: &DepGraphQuery) {
 
     struct ComputeRing {
         data: Vec<ComputeNode>,
-        union_mode: bool,
-        difference_mode: bool,
     }
 
     impl ops::Index<ComputeIdx> for ComputeRing {
@@ -365,46 +363,19 @@ fn dump_graph(query: &DepGraphQuery) {
 
     impl ComputeRing {
         const fn new() -> Self {
-            ComputeRing { data: Vec::new(), union_mode: false, difference_mode: false }
+            ComputeRing { data: Vec::new() }
         }
 
         fn alloc_node(&mut self, node: ComputeNode) -> ComputeIdx {
             debug_assert!(
                 node.left.is_both_null(node.right) || !node.left.is_either_null(node.right)
             );
-            if self.data.try_reserve(1).is_err() {
-                self.data = Vec::new();
-                panic!("Out of memory!");
-            }
             let new_idx = ComputeIdx(u32::try_from(self.data.len()).unwrap());
             self.data.push(node);
             new_idx
         }
 
-        fn alloc_union_node<F>(&mut self, f: F) -> ComputeIdx
-        where
-            F: FnOnce(&mut Self) -> ComputeNode,
-        {
-            if self.union_mode {
-                let node = f(self);
-                self.alloc_node(node)
-            } else {
-                ComputeIdx::null()
-            }
-        }
-
-        fn alloc_difference_node<F>(&mut self, f: F) -> ComputeIdx
-        where
-            F: FnOnce(&mut Self) -> ComputeNode,
-        {
-            if self.difference_mode {
-                let node = f(self);
-                self.alloc_node(node)
-            } else {
-                ComputeIdx::null()
-            }
-        }
-
+        #[inline]
         fn alloc_leaf_node(&mut self, own: u32, timeframe_idx: u32) -> ComputeIdx {
             self.alloc_node(ComputeNode {
                 left: ComputeIdx::null(),
@@ -414,34 +385,37 @@ fn dump_graph(query: &DepGraphQuery) {
             })
         }
 
-        fn union(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> ComputeIdx {
-            self.union_mode = true;
-            self.difference_mode = false;
-            self.mode_aware_union_and_difference(lhs, rhs)[0]
-        }
-
-        fn difference(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> ComputeIdx {
-            self.union_mode = false;
-            self.difference_mode = true;
-            self.mode_aware_union_and_difference(lhs, rhs)[1]
-        }
-
-        fn union_and_difference(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> [ComputeIdx; 2] {
-            self.union_mode = true;
-            self.difference_mode = true;
-            self.mode_aware_union_and_difference(lhs, rhs)
-        }
-
-        fn mode_aware_union_and_difference(
+        #[inline]
+        fn recombine<const N: usize>(
             &mut self,
-            lhs: ComputeIdx,
-            rhs: ComputeIdx,
-        ) -> [ComputeIdx; 2] {
-            if let Some(union) = lhs.exclusive_or(rhs) {
-                return [union, lhs];
+            left: ComputeIdx,
+            right: ComputeIdx,
+            neighborhood: IndexNeighborhood,
+            cache: [ComputeIdx; N],
+        ) -> ComputeIdx {
+            if let Some(res) = left.exclusive_or(right) {
+                return res;
+            }
+            for cache_idx in cache {
+                let cache_node = &self[cache_idx];
+                if [cache_node.left, cache_node.right] == [left, right] {
+                    return cache_idx;
+                }
+            }
+            self.alloc_node(ComputeNode {
+                left,
+                right,
+                neighborhood,
+                compute: self[left].compute + self[right].compute,
+            })
+        }
+
+        fn union(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> ComputeIdx {
+            if let Some(res) = lhs.exclusive_or(rhs) {
+                return res;
             }
             if lhs == rhs {
-                return [lhs, ComputeIdx::null()];
+                return lhs;
             }
             let lhs_node = self[lhs];
             let rhs_node = self[rhs];
@@ -453,37 +427,10 @@ fn dump_graph(query: &DepGraphQuery) {
                         0,
                         "Duplicate leaves (lhs: {lhs:?}, rhs: {rhs:?})"
                     );
-                    let [union_left, diff_left] =
-                        self.mode_aware_union_and_difference(lhs_node.left, rhs_node.left);
-                    let [union_right, diff_right] =
-                        self.mode_aware_union_and_difference(lhs_node.right, rhs_node.right);
-                    let union = if [union_left, union_right] == [lhs_node.left, lhs_node.right] {
-                        lhs
-                    } else if [union_left, union_right] == [rhs_node.left, rhs_node.right] {
-                        rhs
-                    } else {
-                        self.alloc_union_node(|this| ComputeNode {
-                            left: union_left,
-                            right: union_right,
-                            neighborhood: lhs_node.neighborhood,
-                            compute: this[union_left].compute + this[union_right].compute,
-                        })
-                    };
-                    let difference = if diff_left.is_both_null(diff_right) {
-                        ComputeIdx::null()
-                    } else if [diff_left, diff_right] == [lhs_node.left, lhs_node.right] {
-                        lhs
-                    } else {
-                        diff_left.exclusive_or(diff_right).unwrap_or_else(|| {
-                            self.alloc_difference_node(|this| ComputeNode {
-                                left: diff_left,
-                                right: diff_right,
-                                neighborhood: lhs_node.neighborhood,
-                                compute: this[diff_left].compute + this[diff_right].compute,
-                            })
-                        })
-                    };
-                    [union, difference]
+                    let left = self.union(lhs_node.left, rhs_node.left);
+                    let right = self.union(lhs_node.right, rhs_node.right);
+                    let union = self.recombine(left, right, lhs_node.neighborhood, [lhs, rhs]);
+                    union
                 }
                 Err(disjoint_union) => {
                     let [left, right] = if lhs_node.neighborhood.0 < rhs_node.neighborhood.0 {
@@ -491,81 +438,78 @@ fn dump_graph(query: &DepGraphQuery) {
                     } else {
                         [rhs, lhs]
                     };
-                    [
-                        self.alloc_union_node(|_| ComputeNode {
-                            left,
-                            right,
-                            neighborhood: disjoint_union,
-                            compute: lhs_node.compute + rhs_node.compute,
-                        }),
-                        lhs,
-                    ]
+                    self.recombine(left, right, disjoint_union, [])
                 }
-                Ok(cmp::Ordering::Less) => {
-                    self.union_and_difference_included(rhs, &rhs_node, lhs, &lhs_node, true)
+                Ok(cmp::Ordering::Less) => self.union_included(rhs, &rhs_node, lhs, &lhs_node),
+                Ok(cmp::Ordering::Greater) => self.union_included(lhs, &lhs_node, rhs, &rhs_node),
+            }
+        }
+
+        fn intersection(&mut self, lhs: ComputeIdx, rhs: ComputeIdx) -> ComputeIdx {
+            if let Some(res) = lhs.exclusive_or(rhs) {
+                return res;
+            }
+            if lhs == rhs {
+                return lhs;
+            }
+            let lhs_node = self[lhs];
+            let rhs_node = self[rhs];
+
+            match lhs_node.neighborhood.partial_cmp(&rhs_node.neighborhood) {
+                Some(cmp::Ordering::Equal) => {
+                    debug_assert_ne!(
+                        lhs_node.neighborhood.0 % 2,
+                        0,
+                        "Duplicate leaves (lhs: {lhs:?}, rhs: {rhs:?})"
+                    );
+                    let left = self.intersection(lhs_node.left, rhs_node.left);
+                    let right = self.intersection(lhs_node.right, rhs_node.right);
+                    let intersection =
+                        self.recombine(left, right, lhs_node.neighborhood, [lhs, rhs]);
+                    intersection
                 }
-                Ok(cmp::Ordering::Greater) => {
-                    self.union_and_difference_included(lhs, &lhs_node, rhs, &rhs_node, false)
+                None => ComputeIdx::null(),
+                Some(cmp::Ordering::Less) => self.intersection_included(&rhs_node, lhs, &lhs_node),
+                Some(cmp::Ordering::Greater) => {
+                    self.intersection_included(&lhs_node, rhs, &rhs_node)
                 }
             }
         }
 
-        fn union_and_difference_included(
+        #[inline]
+        fn union_included(
             &mut self,
             larger: ComputeIdx,
             larger_node: &ComputeNode,
             smaller: ComputeIdx,
             smaller_node: &ComputeNode,
-            larger_is_rhs: bool,
-        ) -> [ComputeIdx; 2] {
+        ) -> ComputeIdx {
             debug_assert!(smaller_node.neighborhood < larger_node.neighborhood);
-            let [union_left, union_right, diff_left, diff_right, diff_new];
-            if smaller_node.neighborhood.0 <= larger_node.neighborhood.0 {
-                let [lhs, rhs] = if larger_is_rhs {
-                    [smaller, larger_node.left]
+            let [union_left, union_right] =
+                if smaller_node.neighborhood.0 <= larger_node.neighborhood.0 {
+                    [self.union(smaller, larger_node.left), larger_node.right]
                 } else {
-                    [larger_node.left, smaller]
+                    [larger_node.left, self.union(smaller, larger_node.right)]
                 };
-                [union_left, diff_left] = self.mode_aware_union_and_difference(lhs, rhs);
-                diff_new = diff_left;
-                union_right = larger_node.right;
-                diff_right = larger_node.right;
-            } else {
-                let [lhs, rhs] = if larger_is_rhs {
-                    [smaller, larger_node.right]
+            let union = self.recombine(union_left, union_right, larger_node.neighborhood, [larger]);
+            union
+        }
+
+        #[inline]
+        fn intersection_included(
+            &mut self,
+            larger_node: &ComputeNode,
+            smaller: ComputeIdx,
+            smaller_node: &ComputeNode,
+        ) -> ComputeIdx {
+            debug_assert!(smaller_node.neighborhood < larger_node.neighborhood);
+            let [intersect_left, intersect_right] =
+                if smaller_node.neighborhood.0 <= larger_node.neighborhood.0 {
+                    [self.intersection(smaller, larger_node.left), larger_node.right]
                 } else {
-                    [larger_node.right, smaller]
+                    [larger_node.left, self.intersection(smaller, larger_node.right)]
                 };
-                [union_right, diff_right] = self.mode_aware_union_and_difference(lhs, rhs);
-                diff_new = diff_right;
-                union_left = larger_node.left;
-                diff_left = larger_node.left;
-            };
-            let union = if [union_left, union_right] == [larger_node.left, larger_node.right] {
-                larger
-            } else {
-                self.alloc_union_node(|this| ComputeNode {
-                    left: union_left,
-                    right: union_right,
-                    neighborhood: larger_node.neighborhood,
-                    compute: this[union_left].compute + this[union_right].compute,
-                })
-            };
-            let difference = if larger_is_rhs {
-                diff_new
-            } else if [diff_left, diff_right] == [larger_node.left, larger_node.right] {
-                larger
-            } else {
-                diff_left.exclusive_or(diff_right).unwrap_or_else(|| {
-                    self.alloc_difference_node(|this| ComputeNode {
-                        left: diff_left,
-                        right: diff_right,
-                        neighborhood: larger_node.neighborhood,
-                        compute: this[diff_left].compute + this[diff_right].compute,
-                    })
-                })
-            };
-            [union, difference]
+            self.recombine(intersect_left, intersect_right, larger_node.neighborhood, [smaller])
         }
     }
 
