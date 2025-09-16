@@ -263,6 +263,7 @@ fn dump_graph(query: &DepGraphQuery) {
         realtime: u64,
         own: u64,
         children: Vec<ChildIdx>,
+        cache_hits: usize,
     }
 
     assert!(query.graph.len_nodes() < u32::MAX.wrapping_shr(1) as usize);
@@ -286,6 +287,7 @@ fn dump_graph(query: &DepGraphQuery) {
                 realtime,
                 own: realtime,
                 children: Vec::new(),
+                cache_hits: 0,
             }
         })
         .collect();
@@ -306,6 +308,8 @@ fn dump_graph(query: &DepGraphQuery) {
                 parent.children.push(ChildIdx::new(child_idx as u32, edge.data));
                 if edge.data == DepCache::Computed {
                     parent.own -= child_realtime_ns
+                } else {
+                    hierarchy[child_idx].cache_hits += 1;
                 }
             }
         }
@@ -314,12 +318,13 @@ fn dump_graph(query: &DepGraphQuery) {
     {
         let txt_path = format!("{path}.csv");
         let mut file = File::create_buffered(&txt_path).unwrap();
-        writeln!(file, "query_kind,total_ns,self_ns").unwrap();
+        writeln!(file, "query_kind,total_ns,self_ns,cache_hits").unwrap();
         for timeframe in &hierarchy {
             let query_kind = timeframe.dep_kind;
             let total_ns = timeframe.realtime;
             let self_ns = timeframe.own;
-            writeln!(file, "{query_kind:?},{total_ns},{self_ns}").unwrap();
+            let cache_hits = timeframe.cache_hits;
+            writeln!(file, "{query_kind:?},{total_ns},{self_ns},{cache_hits}").unwrap();
         }
     }
 }
