@@ -630,9 +630,8 @@ impl<D: Deps> DepGraph<D> {
 
             let mut edges = EdgesVec::new();
             D::read_deps(|task_deps| match task_deps {
-                TaskDepsRef::Allow(deps) => edges = deps.lock().reads.clone_cached(),
-                TaskDepsRef::EvalAlways(deps) => {
-                    edges = deps.lock().reads.clone_cached();
+                TaskDepsRef::Allow(_) => {}
+                TaskDepsRef::EvalAlways(_) => {
                     edges.push(DepNodeIndex::FOREVER_RED_NODE, DepCache::Cached);
                 }
                 TaskDepsRef::Ignore => {}
