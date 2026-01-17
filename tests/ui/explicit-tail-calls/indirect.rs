@@ -1,5 +1,8 @@
 //@ run-pass
 //@ ignore-backends: gcc
+//
+//@ ignore-wasm
+//@ ignore-riscv64
 #![feature(explicit_tail_calls)]
 #![expect(incomplete_features)]
 
