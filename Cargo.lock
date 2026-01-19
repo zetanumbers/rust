@@ -5038,6 +5038,7 @@ dependencies = [
 [[package]]
 name = "scc"
 version = "3.4.11"
+source = "git+https://github.com/zetanumbers/scalable-concurrent-containers.git?branch=rustc#39158559799fdd38bc26c1e8433493becebe3e14"
 dependencies = [
  "saa",
  "sdd",
