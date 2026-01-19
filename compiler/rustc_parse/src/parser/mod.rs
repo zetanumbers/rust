@@ -235,6 +235,8 @@ pub struct Parser<'a> {
     recovery: Recovery = Recovery::Allowed,
     /// Whether we're parsing a function body.
     in_fn_body: bool = false,
+    /// Whether we have detected a missing semicolon in the function body.
+    pub fn_body_missing_semi_guar: Option<ErrorGuaranteed> = None,
 }
 
 // This type is used a lot, e.g. it's cloned when matching many declarative macro rules with
