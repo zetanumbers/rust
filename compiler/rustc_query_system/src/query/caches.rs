@@ -54,22 +54,21 @@ where
 
     #[inline(always)]
     fn lookup(&self, key: &K) -> Option<(V, DepNodeIndex)> {
-        self.cache.get(key)
+        self.cache.read_sync(key, |_, v| *v)
     }
 
     #[inline]
     fn complete(&self, key: K, value: V, index: DepNodeIndex) {
         // We may be overwriting another value. This is all right, since the dep-graph
         // will check that the fingerprint matches.
-        self.cache.insert(key, (value, index));
+        let _ = self.cache.insert_sync(key, (value, index));
     }
 
     fn iter(&self, f: &mut dyn FnMut(&Self::Key, &Self::Value, DepNodeIndex)) {
-        for shard in self.cache.lock_shards() {
-            for (k, v) in shard.iter() {
-                f(k, &v.0, v.1);
-            }
-        }
+        self.cache.iter_sync(|k, v| {
+            f(k, &v.0, v.1);
+            true
+        });
     }
 }
 

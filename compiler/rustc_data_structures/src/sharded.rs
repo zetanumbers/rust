@@ -140,120 +140,111 @@ pub fn shards() -> usize {
     1
 }
 
-pub type ShardedHashMap<K, V> = Sharded<HashTable<(K, V)>>;
+pub type ShardedHashMap<K, V> = scc::HashMap<K, V, rustc_hash::FxBuildHasher>;
 
-impl<K: Eq, V> ShardedHashMap<K, V> {
-    pub fn with_capacity(cap: usize) -> Self {
-        Self::new(|| HashTable::with_capacity(cap))
-    }
-    pub fn len(&self) -> usize {
-        self.lock_shards().map(|shard| shard.len()).sum()
-    }
+// impl<K: Eq, V> ShardedHashMap<K, V> {
+//     pub fn with_capacity(cap: usize) -> Self {
+//         Self::new(|| HashTable::with_capacity(cap))
+//     }
+//     pub fn len(&self) -> usize {
+//         self.lock_shards().map(|shard| shard.len()).sum()
+//     }
+// }
+
+// impl<K: Eq + Hash, V> ShardedHashMap<K, V> {
+//     #[inline]
+//     pub fn get<Q>(&self, key: &Q) -> Option<V>
+//     where
+//         K: Borrow<Q>,
+//         Q: Hash + Eq,
+//         V: Clone,
+//     {
+//         let hash = make_hash(key);
+//         let shard = self.lock_shard_by_hash(hash);
+//         let (_, value) = shard.find(hash, |(k, _)| k.borrow() == key)?;
+//         Some(value.clone())
+//     }
+
+//     #[inline]
+//     pub fn get_or_insert_with(&self, key: K, default: impl FnOnce() -> V) -> V
+//     where
+//         V: Copy,
+//     {
+//         let hash = make_hash(&key);
+//         let mut shard = self.lock_shard_by_hash(hash);
+
+//         match table_entry(&mut shard, hash, &key) {
+//             Entry::Occupied(e) => e.get().1,
+//             Entry::Vacant(e) => {
+//                 let value = default();
+//                 e.insert((key, value));
+//                 value
+//             }
+//         }
+//     }
+
+//     #[inline]
+//     pub fn insert(&self, key: K, value: V) -> Option<V> {
+//         let hash = make_hash(&key);
+//         let mut shard = self.lock_shard_by_hash(hash);
+
+//         match table_entry(&mut shard, hash, &key) {
+//             Entry::Occupied(e) => {
+//                 let previous = mem::replace(&mut e.into_mut().1, value);
+//                 Some(previous)
+//             }
+//             Entry::Vacant(e) => {
+//                 e.insert((key, value));
+//                 None
+//             }
+//         }
+//     }
+// }
+
+// impl<K: Eq + Hash + Copy> ShardedHashMap<K, ()> {
+#[inline]
+pub fn intern_ref<K: Eq + Hash + Copy, Q: ?Sized>(
+    map: &ShardedHashMap<K, ()>,
+    value: &Q,
+    make: impl FnOnce() -> K,
+) -> K
+where
+    K: Borrow<Q>,
+    Q: Hash + Eq,
+{
+    *map.insert_sync_lazy_ref(value, move || (make(), ())).1.key()
 }
 
-impl<K: Eq + Hash, V> ShardedHashMap<K, V> {
-    #[inline]
-    pub fn get<Q>(&self, key: &Q) -> Option<V>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq,
-        V: Clone,
-    {
-        let hash = make_hash(key);
-        let shard = self.lock_shard_by_hash(hash);
-        let (_, value) = shard.find(hash, |(k, _)| k.borrow() == key)?;
-        Some(value.clone())
-    }
-
-    #[inline]
-    pub fn get_or_insert_with(&self, key: K, default: impl FnOnce() -> V) -> V
-    where
-        V: Copy,
-    {
-        let hash = make_hash(&key);
-        let mut shard = self.lock_shard_by_hash(hash);
-
-        match table_entry(&mut shard, hash, &key) {
-            Entry::Occupied(e) => e.get().1,
-            Entry::Vacant(e) => {
-                let value = default();
-                e.insert((key, value));
-                value
-            }
-        }
-    }
-
-    #[inline]
-    pub fn insert(&self, key: K, value: V) -> Option<V> {
-        let hash = make_hash(&key);
-        let mut shard = self.lock_shard_by_hash(hash);
-
-        match table_entry(&mut shard, hash, &key) {
-            Entry::Occupied(e) => {
-                let previous = mem::replace(&mut e.into_mut().1, value);
-                Some(previous)
-            }
-            Entry::Vacant(e) => {
-                e.insert((key, value));
-                None
-            }
-        }
-    }
+#[inline]
+pub fn intern<K: Eq + Hash + Copy, Q>(
+    map: &ShardedHashMap<K, ()>,
+    value: Q,
+    make: impl FnOnce(Q) -> K,
+) -> K
+where
+    K: Borrow<Q>,
+    Q: Hash + Eq,
+{
+    *map.insert_sync_lazy(value, move |v| (make(v), ())).1.key()
 }
-
-impl<K: Eq + Hash + Copy> ShardedHashMap<K, ()> {
-    #[inline]
-    pub fn intern_ref<Q: ?Sized>(&self, value: &Q, make: impl FnOnce() -> K) -> K
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq,
-    {
-        let hash = make_hash(value);
-        let mut shard = self.lock_shard_by_hash(hash);
-
-        match table_entry(&mut shard, hash, value) {
-            Entry::Occupied(e) => e.get().0,
-            Entry::Vacant(e) => {
-                let v = make();
-                e.insert((v, ()));
-                v
-            }
-        }
-    }
-
-    #[inline]
-    pub fn intern<Q>(&self, value: Q, make: impl FnOnce(Q) -> K) -> K
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq,
-    {
-        let hash = make_hash(&value);
-        let mut shard = self.lock_shard_by_hash(hash);
-
-        match table_entry(&mut shard, hash, &value) {
-            Entry::Occupied(e) => e.get().0,
-            Entry::Vacant(e) => {
-                let v = make(value);
-                e.insert((v, ()));
-                v
-            }
-        }
-    }
-}
+// }
 
 pub trait IntoPointer {
     /// Returns a pointer which outlives `self`.
     fn into_pointer(&self) -> *const ();
 }
 
-impl<K: Eq + Hash + Copy + IntoPointer> ShardedHashMap<K, ()> {
-    pub fn contains_pointer_to<T: Hash + IntoPointer>(&self, value: &T) -> bool {
-        let hash = make_hash(&value);
-        let shard = self.lock_shard_by_hash(hash);
-        let value = value.into_pointer();
-        shard.find(hash, |(k, ())| k.into_pointer() == value).is_some()
-    }
+// impl<> ShardedHashMap<K, ()> {
+pub fn contains_pointer_to<K, T>(map: &ShardedHashMap<K, ()>, value: &T) -> bool
+where
+    K: Eq + Hash + Copy + IntoPointer,
+    T: Hash + IntoPointer,
+{
+    map.contains_custom_sync(value, |outside: &T, inside: &K| {
+        outside.into_pointer() == inside.into_pointer()
+    })
 }
+// }
 
 #[inline]
 pub fn make_hash<K: Hash + ?Sized>(val: &K) -> u64 {

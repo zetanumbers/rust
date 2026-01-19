@@ -3,7 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, OnceLock};
-use std::{env, fs, iter};
+use std::{env, fs, iter, mem};
 
 use rustc_ast as ast;
 use rustc_attr_parsing::{AttributeParser, ShouldEmit};
@@ -967,7 +967,7 @@ pub fn create_and_enter_global_ctxt<T, F: for<'tcx> FnOnce(TyCtxt<'tcx>) -> T>(
 
     let incremental = dep_graph.is_fully_enabled();
 
-    let gcx_cell = OnceLock::new();
+    let gcx_cell = OnceLock::<GlobalCtxt<'_>>::new();
     let arena = WorkerLocal::new(|_| Arena::default());
     let hir_arena = WorkerLocal::new(|_| rustc_hir::Arena::default());
 
@@ -1025,15 +1025,17 @@ pub fn create_and_enter_global_ctxt<T, F: for<'tcx> FnOnce(TyCtxt<'tcx>) -> T>(
         )
     });
 
-    inner(
-        &compiler.sess,
-        compiler.current_gcx.clone(),
-        Arc::clone(&compiler.jobserver_proxy),
-        &gcx_cell,
-        &arena,
-        &hir_arena,
-        f,
-    )
+    unsafe {
+        inner(
+            &compiler.sess,
+            compiler.current_gcx.clone(),
+            Arc::clone(&compiler.jobserver_proxy),
+            mem::transmute(&gcx_cell),
+            mem::transmute(&arena),
+            mem::transmute(&hir_arena),
+            f,
+        )
+    }
 }
 
 /// Runs all analyses that we guarantee to run, even if errors were reported in earlier analyses.

@@ -19,11 +19,13 @@ use rustc_abi::{ExternAbi, FieldIdx, Layout, LayoutData, TargetDataLayout, Varia
 use rustc_ast as ast;
 use rustc_data_structures::defer;
 use rustc_data_structures::fingerprint::Fingerprint;
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::{FxBuildHasher, FxHashMap};
 use rustc_data_structures::intern::Interned;
 use rustc_data_structures::jobserver::Proxy;
 use rustc_data_structures::profiling::SelfProfilerRef;
-use rustc_data_structures::sharded::{IntoPointer, ShardedHashMap};
+use rustc_data_structures::sharded::{
+    IntoPointer, ShardedHashMap, contains_pointer_to, intern, intern_ref,
+};
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::steal::Steal;
 use rustc_data_structures::sync::{
@@ -966,31 +968,34 @@ impl<'tcx> CtxtInterners<'tcx> {
             // The factors have been chosen by @FractalFir based on observed interner sizes, and local perf runs.
             // To get the interner sizes, insert `eprintln` printing the size of the interner in functions like `intern_ty`.
             // Bigger benchmarks tend to give more accurate ratios, so use something like `x perf eprintln --includes cargo`.
-            type_: InternedSet::with_capacity(N * 16),
-            const_lists: InternedSet::with_capacity(N * 4),
-            args: InternedSet::with_capacity(N * 4),
-            type_lists: InternedSet::with_capacity(N * 4),
-            region: InternedSet::with_capacity(N * 4),
-            poly_existential_predicates: InternedSet::with_capacity(N / 4),
-            canonical_var_kinds: InternedSet::with_capacity(N / 2),
-            predicate: InternedSet::with_capacity(N),
-            clauses: InternedSet::with_capacity(N),
-            projs: InternedSet::with_capacity(N * 4),
-            place_elems: InternedSet::with_capacity(N * 2),
-            const_: InternedSet::with_capacity(N * 2),
-            pat: InternedSet::with_capacity(N),
-            const_allocation: InternedSet::with_capacity(N),
-            bound_variable_kinds: InternedSet::with_capacity(N * 2),
-            layout: InternedSet::with_capacity(N),
-            adt_def: InternedSet::with_capacity(N),
-            external_constraints: InternedSet::with_capacity(N),
-            predefined_opaques_in_body: InternedSet::with_capacity(N),
-            fields: InternedSet::with_capacity(N * 4),
-            local_def_ids: InternedSet::with_capacity(N),
-            captures: InternedSet::with_capacity(N),
-            valtree: InternedSet::with_capacity(N),
-            patterns: InternedSet::with_capacity(N),
-            outlives: InternedSet::with_capacity(N),
+            type_: InternedSet::with_capacity_and_hasher(N * 16, FxBuildHasher),
+            const_lists: InternedSet::with_capacity_and_hasher(N * 4, FxBuildHasher),
+            args: InternedSet::with_capacity_and_hasher(N * 4, FxBuildHasher),
+            type_lists: InternedSet::with_capacity_and_hasher(N * 4, FxBuildHasher),
+            region: InternedSet::with_capacity_and_hasher(N * 4, FxBuildHasher),
+            poly_existential_predicates: InternedSet::with_capacity_and_hasher(
+                N / 4,
+                FxBuildHasher,
+            ),
+            canonical_var_kinds: InternedSet::with_capacity_and_hasher(N / 2, FxBuildHasher),
+            predicate: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            clauses: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            projs: InternedSet::with_capacity_and_hasher(N * 4, FxBuildHasher),
+            place_elems: InternedSet::with_capacity_and_hasher(N * 2, FxBuildHasher),
+            const_: InternedSet::with_capacity_and_hasher(N * 2, FxBuildHasher),
+            pat: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            const_allocation: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            bound_variable_kinds: InternedSet::with_capacity_and_hasher(N * 2, FxBuildHasher),
+            layout: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            adt_def: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            external_constraints: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            predefined_opaques_in_body: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            fields: InternedSet::with_capacity_and_hasher(N * 4, FxBuildHasher),
+            local_def_ids: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            captures: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            valtree: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            patterns: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
+            outlives: InternedSet::with_capacity_and_hasher(N, FxBuildHasher),
         }
     }
 
@@ -999,19 +1004,18 @@ impl<'tcx> CtxtInterners<'tcx> {
     #[inline(never)]
     fn intern_ty(&self, kind: TyKind<'tcx>, sess: &Session, untracked: &Untracked) -> Ty<'tcx> {
         Ty(Interned::new_unchecked(
-            self.type_
-                .intern(kind, |kind| {
-                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_kind(&kind);
-                    let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
+            intern(&self.type_, kind, |kind| {
+                let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_kind(&kind);
+                let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
 
-                    InternedInSet(self.arena.alloc(WithCachedTypeInfo {
-                        internee: kind,
-                        stable_hash,
-                        flags: flags.flags,
-                        outer_exclusive_binder: flags.outer_exclusive_binder,
-                    }))
-                })
-                .0,
+                InternedInSet(self.arena.alloc(WithCachedTypeInfo {
+                    internee: kind,
+                    stable_hash,
+                    flags: flags.flags,
+                    outer_exclusive_binder: flags.outer_exclusive_binder,
+                }))
+            })
+            .0,
         ))
     }
 
@@ -1025,19 +1029,18 @@ impl<'tcx> CtxtInterners<'tcx> {
         untracked: &Untracked,
     ) -> Const<'tcx> {
         Const(Interned::new_unchecked(
-            self.const_
-                .intern(kind, |kind: ty::ConstKind<'_>| {
-                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_const_kind(&kind);
-                    let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
+            intern(&self.const_, kind, |kind: ty::ConstKind<'_>| {
+                let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_const_kind(&kind);
+                let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
 
-                    InternedInSet(self.arena.alloc(WithCachedTypeInfo {
-                        internee: kind,
-                        stable_hash,
-                        flags: flags.flags,
-                        outer_exclusive_binder: flags.outer_exclusive_binder,
-                    }))
-                })
-                .0,
+                InternedInSet(self.arena.alloc(WithCachedTypeInfo {
+                    internee: kind,
+                    stable_hash,
+                    flags: flags.flags,
+                    outer_exclusive_binder: flags.outer_exclusive_binder,
+                }))
+            })
+            .0,
         ))
     }
 
@@ -1069,20 +1072,19 @@ impl<'tcx> CtxtInterners<'tcx> {
         untracked: &Untracked,
     ) -> Predicate<'tcx> {
         Predicate(Interned::new_unchecked(
-            self.predicate
-                .intern(kind, |kind| {
-                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_predicate(kind);
+            intern(&self.predicate, kind, |kind| {
+                let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_predicate(kind);
 
-                    let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
+                let stable_hash = self.stable_hash(&flags, sess, untracked, &kind);
 
-                    InternedInSet(self.arena.alloc(WithCachedTypeInfo {
-                        internee: kind,
-                        stable_hash,
-                        flags: flags.flags,
-                        outer_exclusive_binder: flags.outer_exclusive_binder,
-                    }))
-                })
-                .0,
+                InternedInSet(self.arena.alloc(WithCachedTypeInfo {
+                    internee: kind,
+                    stable_hash,
+                    flags: flags.flags,
+                    outer_exclusive_binder: flags.outer_exclusive_binder,
+                }))
+            })
+            .0,
         ))
     }
 
@@ -1090,17 +1092,16 @@ impl<'tcx> CtxtInterners<'tcx> {
         if clauses.is_empty() {
             ListWithCachedTypeInfo::empty()
         } else {
-            self.clauses
-                .intern_ref(clauses, || {
-                    let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_clauses(clauses);
+            intern_ref(&self.clauses, clauses, || {
+                let flags = ty::FlagComputation::<TyCtxt<'tcx>>::for_clauses(clauses);
 
-                    InternedInSet(ListWithCachedTypeInfo::from_arena(
-                        &*self.arena,
-                        flags.into(),
-                        clauses,
-                    ))
-                })
-                .0
+                InternedInSet(ListWithCachedTypeInfo::from_arena(
+                    &*self.arena,
+                    flags.into(),
+                    clauses,
+                ))
+            })
+            .0
         }
     }
 }
@@ -1291,7 +1292,7 @@ impl<'tcx> CommonLifetimes<'tcx> {
     fn new(interners: &CtxtInterners<'tcx>) -> CommonLifetimes<'tcx> {
         let mk = |r| {
             Region(Interned::new_unchecked(
-                interners.region.intern(r, |r| InternedInSet(interners.arena.alloc(r))).0,
+                intern(&interners.region, r, |r| InternedInSet(interners.arena.alloc(r))).0,
             ))
         };
 
@@ -1349,7 +1350,7 @@ impl<'tcx> CommonConsts<'tcx> {
 
         let mk_valtree = |v| {
             ty::ValTree(Interned::new_unchecked(
-                interners.valtree.intern(v, |v| InternedInSet(interners.arena.alloc(v))).0,
+                intern(&interners.valtree, v, |v| InternedInSet(interners.arena.alloc(v))).0,
             ))
         };
 
@@ -2488,12 +2489,10 @@ macro_rules! nop_lift {
                     _type_eq(&interner, &tcx.interners.$set);
                 }
 
-                tcx.interners
-                    .$set
-                    .contains_pointer_to(&InternedInSet(&*self.0.0))
-                    // SAFETY: `self` is interned and therefore valid
-                    // for the entire lifetime of the `TyCtxt`.
-                    .then(|| unsafe { mem::transmute(self) })
+                let contains = contains_pointer_to(&tcx.interners.$set, &InternedInSet(&*self.0.0));
+                // SAFETY: `self` is interned and therefore valid
+                // for the entire lifetime of the `TyCtxt`.
+                contains.then(move || unsafe { mem::transmute(self) })
             }
         }
     };
@@ -2512,9 +2511,8 @@ macro_rules! nop_list_lift {
                 if self.is_empty() {
                     return Some(List::empty());
                 }
-                tcx.interners
-                    .$set
-                    .contains_pointer_to(&InternedInSet(self))
+
+                contains_pointer_to(&tcx.interners.$set, &InternedInSet(self))
                     .then(|| unsafe { mem::transmute(self) })
             }
         }
@@ -2568,29 +2566,25 @@ macro_rules! sty_debug_print {
                 };
                 $(let mut $variant = total;)*
 
-                for shard in tcx.interners.type_.lock_shards() {
-                    // It seems that ordering doesn't affect anything here.
-                    #[allow(rustc::potential_query_instability)]
-                    let types = shard.iter();
-                    for &(InternedInSet(t), ()) in types {
-                        let variant = match t.internee {
-                            ty::Bool | ty::Char | ty::Int(..) | ty::Uint(..) |
-                                ty::Float(..) | ty::Str | ty::Never => continue,
-                            ty::Error(_) => /* unimportant */ continue,
-                            $(ty::$variant(..) => &mut $variant,)*
-                        };
-                        let lt = t.flags.intersects(ty::TypeFlags::HAS_RE_INFER);
-                        let ty = t.flags.intersects(ty::TypeFlags::HAS_TY_INFER);
-                        let ct = t.flags.intersects(ty::TypeFlags::HAS_CT_INFER);
+                tcx.interners.type_.iter_sync(|&InternedInSet(t), &()| {
+                    let variant = match t.internee {
+                        ty::Bool | ty::Char | ty::Int(..) | ty::Uint(..) |
+                            ty::Float(..) | ty::Str | ty::Never => return true,
+                        ty::Error(_) => /* unimportant */ return true,
+                        $(ty::$variant(..) => &mut $variant,)*
+                    };
+                    let lt = t.flags.intersects(ty::TypeFlags::HAS_RE_INFER);
+                    let ty = t.flags.intersects(ty::TypeFlags::HAS_TY_INFER);
+                    let ct = t.flags.intersects(ty::TypeFlags::HAS_CT_INFER);
 
-                        variant.total += 1;
-                        total.total += 1;
-                        if lt { total.lt_infer += 1; variant.lt_infer += 1 }
-                        if ty { total.ty_infer += 1; variant.ty_infer += 1 }
-                        if ct { total.ct_infer += 1; variant.ct_infer += 1 }
-                        if lt && ty && ct { total.all_infer += 1; variant.all_infer += 1 }
-                    }
-                }
+                    variant.total += 1;
+                    total.total += 1;
+                    if lt { total.lt_infer += 1; variant.lt_infer += 1 }
+                    if ty { total.ty_infer += 1; variant.ty_infer += 1 }
+                    if ct { total.ct_infer += 1; variant.ct_infer += 1 }
+                    if lt && ty && ct { total.all_infer += 1; variant.all_infer += 1 }
+                    true
+                });
                 writeln!(fmt, "Ty interner             total           ty lt ct all")?;
                 $(writeln!(fmt, "    {:18}: {uses:6} {usespc:4.1}%, \
                             {ty:4.1}% {lt:5.1}% {ct:4.1}% {all:4.1}%",
@@ -2773,7 +2767,7 @@ macro_rules! direct_interners {
 
         impl<'tcx> TyCtxt<'tcx> {
             $vis fn $method(self, v: $ty) -> $ret_ty {
-                $ret_ctor(Interned::new_unchecked(self.interners.$name.intern(v, |v| {
+                $ret_ctor(Interned::new_unchecked(intern(&self.interners.$name, v, |v| {
                     InternedInSet(self.interners.arena.alloc(v))
                 }).0))
             }
@@ -2802,7 +2796,7 @@ macro_rules! slice_interners {
                 if v.is_empty() {
                     List::empty()
                 } else {
-                    self.interners.$field.intern_ref(v, || {
+                    intern_ref(&self.interners.$field, v, || {
                         InternedInSet(List::from_arena(&*self.arena, (), v))
                     }).0
                 }

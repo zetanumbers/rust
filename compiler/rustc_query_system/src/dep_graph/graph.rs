@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use rustc_data_structures::fingerprint::{Fingerprint, PackedFingerprint};
-use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_data_structures::fx::{FxBuildHasher, FxHashMap, FxHashSet};
 use rustc_data_structures::outline;
 use rustc_data_structures::profiling::QueryInvocationId;
 use rustc_data_structures::sharded::{self, ShardedHashMap};
@@ -423,7 +423,7 @@ impl<D: Deps> DepGraphData<D> {
                 // As anonymous nodes are a small quantity compared to the full dep-graph, the
                 // memory impact of this `anon_node_to_index` map remains tolerable, and helps
                 // us avoid useless growth of the graph with almost-equivalent nodes.
-                self.current.anon_node_to_index.get_or_insert_with(target_dep_node, || {
+                *self.current.anon_node_to_index.entry_sync(target_dep_node).or_insert_with(|| {
                     self.current.alloc_new_node(target_dep_node, reads, Fingerprint::ZERO)
                 })
             }
@@ -1189,9 +1189,10 @@ impl<D: Deps> CurrentDepGraph<D> {
 
         CurrentDepGraph {
             encoder: GraphEncoder::new(session, encoder, prev_graph_node_count, previous),
-            anon_node_to_index: ShardedHashMap::with_capacity(
+            anon_node_to_index: ShardedHashMap::with_capacity_and_hasher(
                 // FIXME: The count estimate is off as anon nodes are only a portion of the nodes.
                 new_node_count_estimate / sharded::shards(),
+                FxBuildHasher,
             ),
             anon_id_seed,
             #[cfg(debug_assertions)]
