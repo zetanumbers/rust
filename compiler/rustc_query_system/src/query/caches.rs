@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::OnceLock;
 
-use rustc_data_structures::sharded::ShardedHashMap;
+use rustc_data_structures::sharded::ShardedHashIndex;
 pub use rustc_data_structures::vec_cache::VecCache;
 use rustc_hir::def_id::LOCAL_CRATE;
 use rustc_index::Idx;
@@ -35,7 +35,7 @@ pub trait QueryCache: Sized {
 /// In-memory cache for queries whose keys aren't suitable for any of the
 /// more specialized kinds of cache. Backed by a sharded hashmap.
 pub struct DefaultCache<K, V> {
-    cache: ShardedHashMap<K, (V, DepNodeIndex)>,
+    cache: ShardedHashIndex<K, (V, DepNodeIndex)>,
 }
 
 impl<K, V> Default for DefaultCache<K, V> {
@@ -54,7 +54,7 @@ where
 
     #[inline(always)]
     fn lookup(&self, key: &K) -> Option<(V, DepNodeIndex)> {
-        self.cache.read_sync(key, |_, v| *v)
+        self.cache.peek_with(key, |_, v| *v)
     }
 
     #[inline]

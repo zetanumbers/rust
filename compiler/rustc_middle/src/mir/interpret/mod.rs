@@ -15,7 +15,7 @@ use std::{fmt, io};
 use rustc_abi::{AddressSpace, Align, Endian, HasDataLayout, Size};
 use rustc_ast::{LitKind, Mutability};
 use rustc_data_structures::fx::FxHashMap;
-use rustc_data_structures::sharded::ShardedHashMap;
+use rustc_data_structures::sharded::ShardedHashIndex;
 use rustc_data_structures::sync::{AtomicU64, Lock};
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
@@ -423,7 +423,7 @@ pub(crate) struct AllocMap<'tcx> {
     // least up to 32 cores the one workload tested didn't exhibit much difference between the two.
     //
     // Should be locked *after* locking dedup if locking both to avoid deadlocks.
-    to_alloc: ShardedHashMap<AllocId, GlobalAlloc<'tcx>>,
+    to_alloc: ShardedHashIndex<AllocId, GlobalAlloc<'tcx>>,
 
     /// Used to deduplicate global allocations: functions, vtables, string literals, ...
     ///
@@ -537,7 +537,7 @@ impl<'tcx> TyCtxt<'tcx> {
     /// local dangling pointers and allocations in constants/statics.
     #[inline]
     pub fn try_get_global_alloc(self, id: AllocId) -> Option<GlobalAlloc<'tcx>> {
-        self.alloc_map.to_alloc.read_sync(&id, |_, v| v.clone())
+        self.alloc_map.to_alloc.peek_with(&id, |_, v| v.clone())
     }
 
     #[inline]

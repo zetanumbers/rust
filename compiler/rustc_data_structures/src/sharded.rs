@@ -141,6 +141,7 @@ pub fn shards() -> usize {
 }
 
 pub type ShardedHashMap<K, V> = scc::HashMap<K, V, rustc_hash::FxBuildHasher>;
+pub type ShardedHashIndex<K, V> = scc::HashIndex<K, V, rustc_hash::FxBuildHasher>;
 
 // impl<K: Eq, V> ShardedHashMap<K, V> {
 //     pub fn with_capacity(cap: usize) -> Self {
@@ -204,7 +205,7 @@ pub type ShardedHashMap<K, V> = scc::HashMap<K, V, rustc_hash::FxBuildHasher>;
 // impl<K: Eq + Hash + Copy> ShardedHashMap<K, ()> {
 #[inline]
 pub fn intern_ref<K: Eq + Hash + Copy, Q: ?Sized>(
-    map: &ShardedHashMap<K, ()>,
+    index: &ShardedHashIndex<K, ()>,
     value: &Q,
     make: impl FnOnce() -> K,
 ) -> K
@@ -212,12 +213,12 @@ where
     K: Borrow<Q>,
     Q: Hash + Eq,
 {
-    *map.insert_sync_lazy_ref(value, move || (make(), ())).1.key()
+    *index.insert_sync_lazy_ref(value, move || (make(), ())).1.key()
 }
 
 #[inline]
 pub fn intern<K: Eq + Hash + Copy, Q>(
-    map: &ShardedHashMap<K, ()>,
+    index: &ShardedHashIndex<K, ()>,
     value: Q,
     make: impl FnOnce(Q) -> K,
 ) -> K
@@ -225,7 +226,7 @@ where
     K: Borrow<Q>,
     Q: Hash + Eq,
 {
-    *map.insert_sync_lazy(value, move |v| (make(v), ())).1.key()
+    *index.insert_sync_lazy(value, move |v| (make(v), ())).1.key()
 }
 // }
 
@@ -235,12 +236,12 @@ pub trait IntoPointer {
 }
 
 // impl<> ShardedHashMap<K, ()> {
-pub fn contains_pointer_to<K, T>(map: &ShardedHashMap<K, ()>, value: &T) -> bool
+pub fn contains_pointer_to<K, T>(index: &ShardedHashIndex<K, ()>, value: &T) -> bool
 where
     K: Eq + Hash + Copy + IntoPointer,
     T: Hash + IntoPointer,
 {
-    map.contains_custom_sync(value, |outside: &T, inside: &K| {
+    index.contains_custom(value, |outside: &T, inside: &K| {
         outside.into_pointer() == inside.into_pointer()
     })
 }
