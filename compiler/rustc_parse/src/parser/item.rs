@@ -6,9 +6,7 @@ use rustc_ast::ast::*;
 use rustc_ast::token::{self, Delimiter, InvisibleOrigin, MetaVarKind, TokenKind};
 use rustc_ast::tokenstream::{DelimSpan, TokenStream, TokenTree};
 use rustc_ast::util::case::Case;
-use rustc_ast::{
-    attr, {self as ast},
-};
+use rustc_ast::{self as ast};
 use rustc_ast_pretty::pprust;
 use rustc_errors::codes::*;
 use rustc_errors::{Applicability, PResult, StashKey, inline_fluent, struct_span_code_err};
@@ -286,7 +284,7 @@ impl<'a> Parser<'a> {
             // CONST ITEM
             self.recover_const_mut(const_span);
             self.recover_missing_kw_before_item()?;
-            let (ident, generics, ty, rhs_kind) = self.parse_const_item(false)?;
+            let (ident, generics, ty, rhs_kind) = self.parse_const_item(false, const_span)?;
             ItemKind::Const(Box::new(ConstItem {
                 defaultness: def_(),
                 ident,
@@ -307,7 +305,7 @@ impl<'a> Parser<'a> {
                 // TYPE CONST (mgca)
                 self.recover_const_mut(const_span);
                 self.recover_missing_kw_before_item()?;
-                let (ident, generics, ty, rhs_kind) = self.parse_const_item(true)?;
+                let (ident, generics, ty, rhs_kind) = self.parse_const_item(true, const_span)?;
                 // Make sure this is only allowed if the feature gate is enabled.
                 // #![feature(mgca_type_const_syntax)]
                 self.psess.gated_spans.gate(sym::mgca_type_const_syntax, lo.to(const_span));
@@ -1545,6 +1543,7 @@ impl<'a> Parser<'a> {
     fn parse_const_item(
         &mut self,
         const_arg: bool,
+        const_span: Span,
     ) -> PResult<'a, (Ident, Generics, Box<Ty>, ConstItemRhsKind)> {
         let ident = self.parse_ident_or_underscore()?;
 
@@ -1636,8 +1635,8 @@ impl<'a> Parser<'a> {
 
         generics.where_clause = where_clause;
 
-        if let Some(recovered_rhs) = self.try_recover_const_missing_semi(&rhs) {
-            return Ok((ident, generics, ty, Some(ConstItemRhs::Body(recovered_rhs))));
+        if let Some(rhs) = self.try_recover_const_missing_semi(&rhs, const_span) {
+            return Ok((ident, generics, ty, ConstItemRhsKind::Body { rhs: Some(rhs) }));
         }
         self.expect_semi()?;
 
@@ -3499,17 +3498,23 @@ impl<'a> Parser<'a> {
     /// (e.g., `foo() \n &bar` was parsed as `foo() & bar`).
     ///
     /// Returns a corrected expression if recovery is successful.
-    fn try_recover_const_missing_semi(&mut self, rhs: &Option<ConstItemRhs>) -> Option<Box<Expr>> {
+    fn try_recover_const_missing_semi(
+        &mut self,
+        rhs: &ConstItemRhsKind,
+        const_span: Span,
+    ) -> Option<Box<Expr>> {
         if self.token == TokenKind::Semi {
             return None;
         }
-        let Some(ConstItemRhs::Body(rhs)) = rhs else {
+        let ConstItemRhsKind::Body { rhs: Some(rhs) } = rhs else {
             return None;
         };
         if !self.in_fn_body || !self.may_recover() || rhs.span.from_expansion() {
             return None;
         }
-        if let Some((span, guar)) = self.missing_semi_from_binop("const", rhs) {
+        if let Some((span, guar)) =
+            self.missing_semi_from_binop("const", rhs, Some(const_span.shrink_to_lo()))
+        {
             self.fn_body_missing_semi_guar = Some(guar);
             Some(self.mk_expr(span, ExprKind::Err(guar)))
         } else {

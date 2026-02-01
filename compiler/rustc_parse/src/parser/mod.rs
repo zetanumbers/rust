@@ -34,9 +34,9 @@ use rustc_ast::tokenstream::{
 use rustc_ast::util::case::Case;
 use rustc_ast::util::classify;
 use rustc_ast::{
-    self as ast, AnonConst, AttrArgs, AttrId, BinOpKind, BlockCheckMode, ByRef, Const,
-    CoroutineKind, DUMMY_NODE_ID, DelimArgs, Expr, ExprKind, Extern, HasAttrs, HasTokens,
-    MgcaDisambiguation, Mutability, Recovered, Safety, StrLit, Visibility, VisibilityKind,
+    self as ast, AnonConst, AttrArgs, AttrId, BinOpKind, ByRef, Const, CoroutineKind,
+    DUMMY_NODE_ID, DelimArgs, Expr, ExprKind, Extern, HasAttrs, HasTokens, MgcaDisambiguation,
+    Mutability, Recovered, Safety, StrLit, Visibility, VisibilityKind,
 };
 use rustc_ast_pretty::pprust;
 use rustc_data_structures::debug_assert_matches;
@@ -235,7 +235,7 @@ pub struct Parser<'a> {
     recovery: Recovery = Recovery::Allowed,
     /// Whether we're parsing a function body.
     in_fn_body: bool = false,
-    /// Whether we have detected a missing semicolon in the function body.
+    /// Whether we have detected a missing semicolon in function body.
     pub fn_body_missing_semi_guar: Option<ErrorGuaranteed> = None,
 }
 
@@ -1648,6 +1648,7 @@ impl<'a> Parser<'a> {
         &self,
         kind_desc: &str,
         expr: &Expr,
+        decl_lo: Option<Span>,
     ) -> Option<(Span, ErrorGuaranteed)> {
         if self.token == TokenKind::Semi {
             return None;
@@ -1668,7 +1669,9 @@ impl<'a> Parser<'a> {
                 .struct_span_err(lhs_end_span, format!("expected `;`, found {token_str}"));
             err.span_label(self.token.span, "unexpected token");
 
-            let continuation_span = lhs_end_span.until(rhs.span.shrink_to_hi());
+            // Use the declaration start if provided, otherwise fall back to lhs_end_span.
+            let continuation_start = decl_lo.unwrap_or(lhs_end_span);
+            let continuation_span = continuation_start.until(rhs.span.shrink_to_hi());
             err.span_label(
                 continuation_span,
                 format!(
