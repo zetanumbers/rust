@@ -130,6 +130,7 @@ impl<I: Idx, N, E> LinkedGraph<I, N, E> {
     pub fn add_node(&mut self, idx: I, data: N) {
         let old = self.nodes.insert(idx, Node::new(data));
         debug_assert!(old.is_none());
+        self.link_edges();
     }
 
     pub fn mut_node_data(&mut self, idx: I) -> &mut N {
