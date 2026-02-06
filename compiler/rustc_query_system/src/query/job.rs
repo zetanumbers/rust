@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use parking_lot::{Condvar, Mutex};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_data_structures::tree_node_index::TreeNodeIndex;
 use rustc_errors::{Diag, DiagCtxtHandle};
 use rustc_hir::def::DefKind;
 use rustc_session::Session;
@@ -49,7 +50,7 @@ impl QueryJobId {
         map.get(&self).unwrap().job.span
     }
 
-    fn parent<'a, 'tcx>(self, map: &'a QueryMap<'tcx>) -> Option<QueryJobId> {
+    fn parent<'a, 'tcx>(self, map: &'a QueryMap<'tcx>) -> Option<QueryInclusion> {
         map.get(&self).unwrap().job.parent
     }
 
@@ -73,7 +74,7 @@ pub struct QueryJob<'tcx> {
     pub span: Span,
 
     /// The parent query job which created this job and is implicitly waiting on it.
-    pub parent: Option<QueryJobId>,
+    pub parent: Option<QueryInclusion>,
 
     /// The latch that is used to wait on this job.
     latch: Option<QueryLatch<'tcx>>,
@@ -88,7 +89,7 @@ impl<'tcx> Clone for QueryJob<'tcx> {
 impl<'tcx> QueryJob<'tcx> {
     /// Creates a new query job.
     #[inline]
-    pub fn new(id: QueryJobId, span: Span, parent: Option<QueryJobId>) -> Self {
+    pub fn new(id: QueryJobId, span: Span, parent: Option<QueryInclusion>) -> Self {
         QueryJob { id, span, parent, latch: None }
     }
 
@@ -115,12 +116,11 @@ impl QueryJobId {
     pub(super) fn find_cycle_in_stack<'tcx>(
         &self,
         query_map: QueryMap<'tcx>,
-        current_job: &Option<QueryJobId>,
+        mut current_job: Option<QueryJobId>,
         span: Span,
     ) -> CycleError<QueryStackDeferred<'tcx>> {
         // Find the waitee amongst `current_job` parents
         let mut cycle = Vec::new();
-        let mut current_job = Option::clone(current_job);
 
         while let Some(job) = current_job {
             let info = query_map.get(&job).unwrap();
@@ -139,11 +139,11 @@ impl QueryJobId {
                     .job
                     .parent
                     .as_ref()
-                    .map(|parent| (info.job.span, parent.frame(&query_map)));
+                    .map(|parent| (info.job.span, parent.id.frame(&query_map)));
                 return CycleError { usage, cycle };
             }
 
-            current_job = info.job.parent;
+            current_job = info.job.parent.map(|i| i.id);
         }
 
         panic!("did not find a cycle")
@@ -158,24 +158,30 @@ impl QueryJobId {
         let mut depth = 1;
         let info = query_map.get(&self).unwrap();
         let dep_kind = info.frame.dep_kind;
-        let mut current_id = info.job.parent;
+        let mut current = info.job.parent;
         let mut last_layout = (info.clone(), depth);
 
-        while let Some(id) = current_id {
-            let info = query_map.get(&id).unwrap();
+        while let Some(inclusion) = current {
+            let info = query_map.get(&inclusion.id).unwrap();
             if info.frame.dep_kind == dep_kind {
                 depth += 1;
                 last_layout = (info.clone(), depth);
             }
-            current_id = info.job.parent;
+            current = info.job.parent;
         }
         last_layout
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct QueryInclusion {
+    pub id: QueryJobId,
+    pub branch: TreeNodeIndex,
+}
+
 #[derive(Debug)]
 struct QueryWaiter<'tcx> {
-    query: Option<QueryJobId>,
+    query: Option<QueryInclusion>,
     condvar: Condvar,
     span: Span,
     cycle: Mutex<Option<CycleError<QueryStackDeferred<'tcx>>>>,
@@ -209,7 +215,7 @@ impl<'tcx> QueryLatch<'tcx> {
     pub(super) fn wait_on(
         &self,
         qcx: impl QueryContext<'tcx>,
-        query: Option<QueryJobId>,
+        query: Option<QueryInclusion>,
         span: Span,
     ) -> Result<(), CycleError<QueryStackDeferred<'tcx>>> {
         let waiter =
@@ -292,7 +298,7 @@ where
 {
     // Visit the parent query which is a non-resumable waiter since it's on the same stack
     if let Some(parent) = query.parent(query_map)
-        && let Some(cycle) = visit(query.span(query_map), parent)
+        && let Some(cycle) = visit(query.span(query_map), parent.id)
     {
         return Some(cycle);
     }
@@ -301,7 +307,7 @@ where
     if let Some(latch) = query.latch(query_map) {
         for (i, waiter) in latch.info.lock().waiters.iter().enumerate() {
             if let Some(waiter_query) = waiter.query {
-                if visit(waiter.span, waiter_query).is_some() {
+                if visit(waiter.span, waiter_query.id).is_some() {
                     // Return a value which indicates that this waiter can be resumed
                     return Some(Some((query, i)));
                 }
@@ -649,7 +655,7 @@ pub fn print_query_stack<'tcx, Qcx: QueryContext<'tcx>>(
             );
         }
 
-        current_query = query_info.job.parent;
+        current_query = query_info.job.parent.map(|i| i.id);
         count_total += 1;
     }
 

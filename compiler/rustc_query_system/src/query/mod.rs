@@ -15,8 +15,8 @@ use rustc_span::def_id::DefId;
 pub use self::caches::{DefIdCache, DefaultCache, QueryCache, SingleCache, VecCache};
 pub use self::dispatcher::{HashResult, QueryDispatcher};
 pub use self::job::{
-    QueryInfo, QueryJob, QueryJobId, QueryJobInfo, QueryMap, break_query_cycles, print_query_stack,
-    report_cycle,
+    QueryInclusion, QueryInfo, QueryJob, QueryJobId, QueryJobInfo, QueryMap, break_query_cycles,
+    print_query_stack, report_cycle,
 };
 pub use self::plumbing::*;
 use crate::dep_graph::{DepKind, DepNodeIndex, HasDepContext, SerializedDepNodeIndex};
@@ -164,7 +164,7 @@ pub trait QueryContext<'tcx>: HasDepContext {
     fn next_job_id(self) -> QueryJobId;
 
     /// Get the query information from the TLS context.
-    fn current_query_job(self) -> Option<QueryJobId>;
+    fn current_query_inclusion(self) -> Option<QueryInclusion>;
 
     fn collect_active_jobs_from_all_queries(
         self,

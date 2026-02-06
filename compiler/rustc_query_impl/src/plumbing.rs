@@ -7,6 +7,7 @@ use std::num::NonZero;
 use rustc_data_structures::jobserver::Proxy;
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::sync::{DynSend, DynSync};
+use rustc_data_structures::tree_node_index::TreeNodeIndex;
 use rustc_data_structures::unord::UnordMap;
 use rustc_hashes::Hash64;
 use rustc_hir::def_id::DefId;
@@ -28,8 +29,8 @@ use rustc_middle::ty::{self, TyCtxt};
 use rustc_query_system::dep_graph::{DepNodeKey, FingerprintStyle, HasDepContext};
 use rustc_query_system::ich::StableHashingContext;
 use rustc_query_system::query::{
-    QueryCache, QueryContext, QueryDispatcher, QueryJobId, QueryMap, QuerySideEffect,
-    QueryStackDeferred, QueryStackFrame, QueryStackFrameExtra, force_query,
+    QueryCache, QueryContext, QueryDispatcher, QueryInclusion, QueryJobId, QueryMap,
+    QuerySideEffect, QueryStackDeferred, QueryStackFrame, QueryStackFrameExtra, force_query,
 };
 use rustc_serialize::{Decodable, Encodable};
 use rustc_span::def_id::LOCAL_CRATE;
@@ -97,7 +98,7 @@ impl<'tcx> QueryContext<'tcx> for QueryCtxt<'tcx> {
     }
 
     #[inline]
-    fn current_query_job(self) -> Option<QueryJobId> {
+    fn current_query_inclusion(self) -> Option<QueryInclusion> {
         tls::with_related_context(self.tcx, |icx| icx.query)
     }
 
@@ -169,7 +170,7 @@ impl<'tcx> QueryContext<'tcx> for QueryCtxt<'tcx> {
             // Update the `ImplicitCtxt` to point to our new query job.
             let new_icx = ImplicitCtxt {
                 tcx: self.tcx,
-                query: Some(token),
+                query: Some(QueryInclusion { id: token, branch: TreeNodeIndex::root() }),
                 query_depth: current_icx.query_depth + depth_limit as usize,
                 task_deps: current_icx.task_deps,
             };

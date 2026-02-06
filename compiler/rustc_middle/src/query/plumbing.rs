@@ -5,7 +5,6 @@ use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::hir_id::OwnerId;
 use rustc_macros::HashStable;
 use rustc_query_system::dep_graph::{DepNodeIndex, SerializedDepNodeIndex};
-pub(crate) use rustc_query_system::query::QueryJobId;
 use rustc_query_system::query::{CycleError, CycleErrorHandling, HashResult, QueryCache};
 use rustc_span::{ErrorGuaranteed, Span};
 pub use sealed::IntoQueryParam;

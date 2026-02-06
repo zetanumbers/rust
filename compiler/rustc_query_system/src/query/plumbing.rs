@@ -22,7 +22,9 @@ use crate::dep_graph::{
 };
 use crate::ich::StableHashingContext;
 use crate::query::caches::QueryCache;
-use crate::query::job::{QueryInfo, QueryJob, QueryJobId, QueryJobInfo, QueryLatch, report_cycle};
+use crate::query::job::{
+    QueryInclusion, QueryInfo, QueryJob, QueryJobId, QueryJobInfo, QueryLatch, report_cycle,
+};
 use crate::query::{
     CycleErrorHandling, QueryContext, QueryMap, QueryStackFrame, SerializedDepNodeIndex,
 };
@@ -304,7 +306,11 @@ where
         .ok()
         .expect("failed to collect active queries");
 
-    let error = try_execute.find_cycle_in_stack(query_map, &qcx.current_query_job(), span);
+    let error = try_execute.find_cycle_in_stack(
+        query_map,
+        qcx.current_query_inclusion().map(|i| i.id),
+        span,
+    );
     (mk_cycle(query, qcx, error.lift()), None)
 }
 
@@ -315,7 +321,7 @@ fn wait_for_query<'tcx, Q>(
     span: Span,
     key: Q::Key,
     latch: QueryLatch<'tcx>,
-    current: Option<QueryJobId>,
+    current: Option<QueryInclusion>,
 ) -> (Q::Value, Option<DepNodeIndex>)
 where
     Q: QueryDispatcher<'tcx>,
@@ -385,14 +391,14 @@ where
         }
     }
 
-    let current_job_id = qcx.current_query_job();
+    let current_inclusion = qcx.current_query_inclusion();
 
     match state_lock.entry(key_hash, equivalent_key(&key), |(k, _)| sharded::make_hash(k)) {
         Entry::Vacant(entry) => {
             // Nothing has computed or is computing the query, so we start a new job and insert it in the
             // state map.
             let id = qcx.next_job_id();
-            let job = QueryJob::new(id, span, current_job_id);
+            let job = QueryJob::new(id, span, current_inclusion);
             entry.insert((key, ActiveKeyStatus::Started(job)));
 
             // Drop the lock before we start executing the query
@@ -410,7 +416,7 @@ where
 
                         // Only call `wait_for_query` if we're using a Rayon thread pool
                         // as it will attempt to mark the worker thread as blocked.
-                        return wait_for_query(query, qcx, span, key, latch, current_job_id);
+                        return wait_for_query(query, qcx, span, key, latch, current_inclusion);
                     }
 
                     let id = job.id;
