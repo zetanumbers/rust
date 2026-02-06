@@ -6,7 +6,6 @@ use std::sync::Arc;
 use rustc_data_structures::jobserver::Proxy;
 use rustc_data_structures::sync::{DynSend, DynSync};
 use rustc_errors::DiagInner;
-use rustc_hashes::Hash64;
 use rustc_hir::def::DefKind;
 use rustc_macros::{Decodable, Encodable};
 use rustc_span::Span;
@@ -48,33 +47,17 @@ pub struct QueryStackFrame<I> {
     /// by calling `lift`. This is done so that collecting query does not need to invoke
     /// queries, instead `lift` will call queries in a more appropriate location.
     pub info: I,
-
     pub dep_kind: DepKind,
-    /// This hash is used to deterministically pick
-    /// a query to remove cycles in the parallel compiler.
-    hash: Hash64,
     pub def_id: Option<DefId>,
     /// A def-id that is extracted from a `Ty` in a query key
     pub def_id_for_ty_in_cycle: Option<DefId>,
 }
 
 impl<'tcx> QueryStackFrame<QueryStackDeferred<'tcx>> {
-    #[inline]
-    pub fn new(
-        info: QueryStackDeferred<'tcx>,
-        dep_kind: DepKind,
-        hash: Hash64,
-        def_id: Option<DefId>,
-        def_id_for_ty_in_cycle: Option<DefId>,
-    ) -> Self {
-        Self { info, def_id, dep_kind, hash, def_id_for_ty_in_cycle }
-    }
-
     fn lift(&self) -> QueryStackFrame<QueryStackFrameExtra> {
         QueryStackFrame {
             info: self.info.extract(),
             dep_kind: self.dep_kind,
-            hash: self.hash,
             def_id: self.def_id,
             def_id_for_ty_in_cycle: self.def_id_for_ty_in_cycle,
         }

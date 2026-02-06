@@ -5,11 +5,9 @@
 use std::num::NonZero;
 
 use rustc_data_structures::jobserver::Proxy;
-use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::sync::{DynSend, DynSync};
 use rustc_data_structures::tree_node_index::TreeNodeIndex;
 use rustc_data_structures::unord::UnordMap;
-use rustc_hashes::Hash64;
 use rustc_hir::def_id::DefId;
 use rustc_hir::limit::Limit;
 use rustc_index::Idx;
@@ -27,7 +25,6 @@ use rustc_middle::ty::print::with_reduced_queries;
 use rustc_middle::ty::tls::{self, ImplicitCtxt};
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_query_system::dep_graph::{DepNodeKey, FingerprintStyle, HasDepContext};
-use rustc_query_system::ich::StableHashingContext;
 use rustc_query_system::query::{
     QueryCache, QueryContext, QueryDispatcher, QueryInclusion, QueryJobId, QueryMap,
     QuerySideEffect, QueryStackDeferred, QueryStackFrame, QueryStackFrameExtra, force_query,
@@ -359,22 +356,15 @@ pub(crate) fn create_deferred_query_stack_frame<'tcx, Cache>(
 ) -> QueryStackFrame<QueryStackDeferred<'tcx>>
 where
     Cache: QueryCache,
-    Cache::Key: Key + DynSend + DynSync + for<'a> HashStable<StableHashingContext<'a>> + 'tcx,
+    Cache::Key: Key + DynSend + DynSync,
 {
-    let kind = vtable.dep_kind;
-
-    let hash = tcx.with_stable_hashing_context(|mut hcx| {
-        let mut hasher = StableHasher::new();
-        kind.as_usize().hash_stable(&mut hcx, &mut hasher);
-        key.hash_stable(&mut hcx, &mut hasher);
-        hasher.finish::<Hash64>()
-    });
+    let dep_kind = vtable.dep_kind;
 
     let def_id: Option<DefId> = key.key_as_def_id();
     let def_id_for_ty_in_cycle: Option<DefId> = key.def_id_for_ty_in_cycle();
 
     let info = QueryStackDeferred::new((tcx, vtable, key), mk_query_stack_frame_extra);
-    QueryStackFrame::new(info, kind, hash, def_id, def_id_for_ty_in_cycle)
+    QueryStackFrame { info, def_id, dep_kind, def_id_for_ty_in_cycle }
 }
 
 pub(crate) fn encode_query_results<'a, 'tcx, Q>(
