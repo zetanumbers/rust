@@ -7,8 +7,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_errors::{Diag, DiagCtxtHandle};
 use rustc_hir::def::DefKind;
 use rustc_middle::query::{
-    CycleError, QueryInfo, QueryJob, QueryJobId, QueryLatch, QueryStackDeferred, QueryStackFrame,
-    QueryWaiter,
+    CycleError, QueryInclusion, QueryInfo, QueryJob, QueryJobId, QueryLatch, QueryStackDeferred, QueryStackFrame, QueryWaiter
 };
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
@@ -39,7 +38,7 @@ impl<'tcx> QueryJobMap<'tcx> {
         self.map[&id].job.span
     }
 
-    fn parent_of(&self, id: QueryJobId) -> Option<QueryJobId> {
+    fn parent_of(&self, id: QueryJobId) -> Option<QueryInclusion> {
         self.map[&id].job.parent
     }
 
@@ -57,12 +56,11 @@ pub(crate) struct QueryJobInfo<'tcx> {
 pub(crate) fn find_cycle_in_stack<'tcx>(
     id: QueryJobId,
     job_map: QueryJobMap<'tcx>,
-    current_job: &Option<QueryJobId>,
+    mut current_job: Option<QueryJobId>,
     span: Span,
 ) -> CycleError<QueryStackDeferred<'tcx>> {
     // Find the waitee amongst `current_job` parents
     let mut cycle = Vec::new();
-    let mut current_job = Option::clone(current_job);
 
     while let Some(job) = current_job {
         let info = &job_map.map[&job];
@@ -79,12 +77,12 @@ pub(crate) fn find_cycle_in_stack<'tcx>(
             // Find out why the cycle itself was used
             let usage = try {
                 let parent = info.job.parent?;
-                (info.job.span, job_map.frame_of(parent).clone())
+                (info.job.span, job_map.frame_of(parent.id).clone())
             };
             return CycleError { usage, cycle };
         }
 
-        current_job = info.job.parent;
+        current_job = info.job.parent.map(|i| i.id);
     }
 
     panic!("did not find a cycle")
@@ -99,16 +97,16 @@ pub(crate) fn find_dep_kind_root<'tcx>(
     let mut depth = 1;
     let info = &job_map.map[&id];
     let dep_kind = info.frame.dep_kind;
-    let mut current_id = info.job.parent;
+    let mut current = info.job.parent;
     let mut last_layout = (info.clone(), depth);
 
-    while let Some(id) = current_id {
-        let info = &job_map.map[&id];
+    while let Some(inclusion) = current {
+        let info = &job_map.map[&inclusion.id];
         if info.frame.dep_kind == dep_kind {
             depth += 1;
             last_layout = (info.clone(), depth);
         }
-        current_id = info.job.parent;
+        current = info.job.parent;
     }
     last_layout
 }
@@ -131,7 +129,7 @@ fn visit_waiters<'tcx>(
 ) -> ControlFlow<Option<Waiter>> {
     // Visit the parent query which is a non-resumable waiter since it's on the same stack
     if let Some(parent) = job_map.parent_of(query) {
-        visit(job_map.span_of(query), parent)?;
+        visit(job_map.span_of(query), parent.id)?;
     }
 
     // Visit the explicit waiters which use condvars and are resumable
@@ -139,7 +137,7 @@ fn visit_waiters<'tcx>(
         for (i, waiter) in latch.info.lock().waiters.iter().enumerate() {
             if let Some(waiter_query) = waiter.query {
                 // Return a value which indicates that this waiter can be resumed
-                visit(waiter.span, waiter_query).map_break(|_| Some((query, i)))?;
+                visit(waiter.span, waiter_query.id).map_break(|_| Some((query, i)))?;
             }
         }
     }
@@ -415,7 +413,7 @@ pub fn print_query_stack<'tcx>(
             );
         }
 
-        current_query = query_info.job.parent;
+        current_query = query_info.job.parent.map(|i| i.id);
         count_total += 1;
     }
 
