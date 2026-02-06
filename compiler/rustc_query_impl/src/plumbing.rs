@@ -19,7 +19,8 @@ use rustc_middle::query::on_disk_cache::{
 };
 use rustc_middle::query::plumbing::QueryVTable;
 use rustc_middle::query::{
-    Key, QueryCache, QueryInclusion, QueryJobId, QueryStackDeferred, QueryStackFrame, QueryStackFrameExtra
+    Key, QueryCache, QueryInclusion, QueryJobId, QueryStackDeferred, QueryStackFrame,
+    QueryStackFrameExtra,
 };
 use rustc_middle::ty::codec::TyEncoder;
 use rustc_middle::ty::print::with_reduced_queries;

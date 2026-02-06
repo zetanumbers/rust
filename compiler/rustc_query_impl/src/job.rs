@@ -7,7 +7,8 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_errors::{Diag, DiagCtxtHandle};
 use rustc_hir::def::DefKind;
 use rustc_middle::query::{
-    CycleError, QueryInclusion, QueryInfo, QueryJob, QueryJobId, QueryLatch, QueryStackDeferred, QueryStackFrame, QueryWaiter
+    CycleError, QueryInclusion, QueryInfo, QueryJob, QueryJobId, QueryLatch, QueryStackDeferred,
+    QueryStackFrame, QueryWaiter,
 };
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
