@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 pub use rustc_data_structures::marker::{DynSend, DynSync};
 pub use rustc_data_structures::sync::*;
+use rustc_query_system::query::QueryInclusion;
 
 pub use crate::ty::tls;
 
@@ -25,11 +26,13 @@ macro_rules! parallel {
             parallel!(impl $fblock [$block, $($c,)*] [$($rest),*])
         };
         (impl $fblock:block [$($blocks:expr,)*] []) => {
+            #[allow(unreachable_code)]
+            let n = 1 $(+ 'a: { break 'a 1; let _ = || $blocks; })*;
             $crate::sync::parallel_guard(|guard| {
-                $crate::sync::scope(|s| {
+                $crate::sync::scope(n, |mut s| {
                     $(
                         let block = $crate::sync::FromDyn::from(|| $blocks);
-                        s.spawn(move |_| {
+                        s.spawn(move || {
                             guard.run(move || block.into_inner()());
                         });
                     )*
@@ -52,14 +55,37 @@ macro_rules! parallel {
         };
     }
 
-// This function only works when `mode::is_dyn_thread_safe()`.
-pub fn scope<'scope, OP, R>(op: OP) -> R
+// This function only works when `is_dyn_thread_safe()`.
+pub fn scope<'scope, OP, R>(spawn_limit: u64, op: OP) -> R
 where
-    OP: FnOnce(&rustc_thread_pool::Scope<'scope>) -> R + DynSend,
+    OP: for<'a, 'tcx> FnOnce(Scope<'a, 'scope>) -> R + DynSend,
     R: DynSend,
 {
     let op = FromDyn::from(op);
-    rustc_thread_pool::scope(|s| FromDyn::from(op.into_inner()(s))).into_inner()
+    rustc_thread_pool::scope(|scope| {
+        FromDyn::from(op.into_inner()(Scope { scope, next_branch: 0, branch_limit: spawn_limit }))
+    })
+    .into_inner()
+}
+
+pub struct Scope<'a, 'scope> {
+    scope: &'a rustc_thread_pool::Scope<'scope>,
+    branch_limit: u64,
+    next_branch: u64,
+}
+
+impl<'a, 'scope> Scope<'a, 'scope> {
+    pub fn spawn<F>(&mut self, f: F)
+    where
+        F: FnOnce() + Send + 'scope,
+    {
+        if self.next_branch >= self.branch_limit {
+            panic!("number of spawns exceeded the spawn_limit = {}", self.branch_limit);
+        }
+        let query_branch = self.next_branch;
+        self.next_branch += 1;
+        branch_context(query_branch, self.branch_limit, || self.scope.spawn(|_| f()));
+    }
 }
 
 #[inline]
@@ -72,7 +98,7 @@ where
         let oper_a = FromDyn::from(oper_a);
         let oper_b = FromDyn::from(oper_b);
         let (a, b) = parallel_guard(|guard| {
-            rustc_thread_pool::join(
+            raw_branched_join(
                 move || guard.run(move || FromDyn::from(oper_a.into_inner()())),
                 move || guard.run(move || FromDyn::from(oper_b.into_inner()())),
             )
@@ -106,7 +132,7 @@ fn par_slice<I: DynSend>(
             let (left, right) = items.split_at_mut(items.len() / 2);
             let mut left = state.for_each.derive(left);
             let mut right = state.for_each.derive(right);
-            rustc_thread_pool::join(move || par_rec(*left, state), move || par_rec(*right, state));
+            raw_branched_join(move || par_rec(*left, state), move || par_rec(*right, state));
         }
     }
 
@@ -182,6 +208,33 @@ pub fn par_map<I: DynSend, T: IntoIterator<Item = I>, R: DynSend, C: FromIterato
             items.into_iter().filter_map(|i| i.1).collect()
         } else {
             t.into_iter().filter_map(|i| guard.run(|| map(i))).collect()
+        }
+    })
+}
+
+fn raw_branched_join<A, B, RA: Send, RB: Send>(oper_a: A, oper_b: B) -> (RA, RB)
+where
+    A: FnOnce() -> RA + Send,
+    B: FnOnce() -> RB + Send,
+{
+    rustc_thread_pool::join(|| branch_context(0, 2, oper_a), || branch_context(1, 2, oper_b))
+}
+
+fn branch_context<F, R>(branch_num: u64, branch_space: u64, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    tls::with_context_opt(|icx| {
+        if let Some(icx) = icx
+            && let Some(QueryInclusion { id, branch }) = icx.query
+        {
+            let icx = tls::ImplicitCtxt {
+                query: Some(QueryInclusion { id, branch: branch.branch(branch_num, branch_space) }),
+                ..*icx
+            };
+            tls::enter_context(&icx, f)
+        } else {
+            f()
         }
     })
 }
