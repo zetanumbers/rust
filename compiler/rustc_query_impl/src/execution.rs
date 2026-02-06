@@ -229,7 +229,6 @@ fn cycle_error<'tcx, C: QueryCache>(
 fn wait_for_query<'tcx, C: QueryCache>(
     query: &'tcx QueryVTable<'tcx, C>,
     tcx: TyCtxt<'tcx>,
-    span: Span,
     key: C::Key,
     latch: QueryLatch<'tcx>,
     current: Option<QueryInclusion>,
@@ -241,7 +240,7 @@ fn wait_for_query<'tcx, C: QueryCache>(
 
     // With parallel queries we might just have to wait on some other
     // thread.
-    let result = latch.wait_on(tcx, current, span);
+    let result = latch.wait_on(tcx, current);
 
     match result {
         Ok(()) => {
@@ -321,7 +320,7 @@ fn try_execute_query<'tcx, C: QueryCache, const INCR: bool>(
 
                         // Only call `wait_for_query` if we're using a Rayon thread pool
                         // as it will attempt to mark the worker thread as blocked.
-                        return wait_for_query(query, tcx, span, key, latch, current_inclusion);
+                        return wait_for_query(query, tcx, key, latch, current_inclusion);
                     }
 
                     let id = job.id;
