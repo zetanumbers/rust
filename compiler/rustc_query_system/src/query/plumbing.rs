@@ -318,7 +318,6 @@ where
 fn wait_for_query<'tcx, Q>(
     query: Q,
     qcx: Q::Qcx,
-    span: Span,
     key: Q::Key,
     latch: QueryLatch<'tcx>,
     current: Option<QueryInclusion>,
@@ -333,7 +332,7 @@ where
 
     // With parallel queries we might just have to wait on some other
     // thread.
-    let result = latch.wait_on(qcx, current, span);
+    let result = latch.wait_on(qcx, current);
 
     match result {
         Ok(()) => {
@@ -416,7 +415,7 @@ where
 
                         // Only call `wait_for_query` if we're using a Rayon thread pool
                         // as it will attempt to mark the worker thread as blocked.
-                        return wait_for_query(query, qcx, span, key, latch, current_inclusion);
+                        return wait_for_query(query, qcx, key, latch, current_inclusion);
                     }
 
                     let id = job.id;
