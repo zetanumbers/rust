@@ -214,7 +214,7 @@ impl<'a, 'ra, 'tcx> EffectiveVisibilitiesVisitor<'a, 'ra, 'tcx> {
 
 impl<'a, 'ra, 'tcx> Visitor<'a> for EffectiveVisibilitiesVisitor<'a, 'ra, 'tcx> {
     fn visit_item(&mut self, item: &'a ast::Item) {
-        let def_id = self.r.local_def_id(item.id);
+        let def_id = self.r.owner_def_id(item.id);
         // Update effective visibilities of nested items.
         // If it's a mod, also make the visitor walk all of its items
         match item.kind {
@@ -237,16 +237,16 @@ impl<'a, 'ra, 'tcx> Visitor<'a> for EffectiveVisibilitiesVisitor<'a, 'ra, 'tcx> 
             ast::ItemKind::Enum(_, _, EnumDef { ref variants }) => {
                 self.set_bindings_effective_visibilities(def_id);
                 for variant in variants {
-                    let variant_def_id = self.r.local_def_id(variant.id);
+                    let variant_def_id = self.r.child_def_id(item.id, variant.id);
                     for field in variant.data.fields() {
-                        self.update_field(self.r.local_def_id(field.id), variant_def_id);
+                        self.update_field(self.r.child_def_id(item.id, field.id), variant_def_id);
                     }
                 }
             }
 
             ast::ItemKind::Struct(_, _, ref def) | ast::ItemKind::Union(_, _, ref def) => {
                 for field in def.fields() {
-                    self.update_field(self.r.local_def_id(field.id), def_id);
+                    self.update_field(self.r.child_def_id(item.id, field.id), def_id);
                 }
             }
 

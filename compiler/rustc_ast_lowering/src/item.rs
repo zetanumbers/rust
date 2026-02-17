@@ -98,7 +98,7 @@ impl<'hir> ItemLowerer<'_, 'hir> {
             match node {
                 AstOwner::NonOwner => {}
                 AstOwner::Crate(c) => {
-                    assert_eq!(self.resolver.local_def_id(CRATE_NODE_ID), CRATE_DEF_ID);
+                    assert_eq!(self.resolver.owner_def_id(CRATE_NODE_ID), CRATE_DEF_ID);
                     self.with_lctx(CRATE_NODE_ID, |lctx| {
                         let module = lctx.lower_mod(&c.items, &c.spans);
                         // FIXME(jdonszelman): is dummy span ever a problem here?

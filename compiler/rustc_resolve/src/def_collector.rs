@@ -11,12 +11,15 @@ use rustc_hir::def::DefKind;
 use rustc_hir::def::Namespace::{TypeNS, ValueNS};
 use rustc_hir::def_id::LocalDefId;
 use rustc_middle::span_bug;
-use rustc_middle::ty::TyCtxtFeed;
+use rustc_middle::ty::{PerOwnerResolverData, TyCtxtFeed};
 use rustc_span::{Span, Symbol, sym};
 use tracing::{debug, instrument};
 
 use crate::macros::MacroRulesScopeRef;
-use crate::{ConstArgContext, ImplTraitContext, InvocationParent, ParentScope, Resolver};
+use crate::{
+    ConstArgContext, ImplTraitContext, InvocationParent, ParentScope, Resolver, with_owner,
+    with_owner_tables,
+};
 
 pub(crate) fn collect_definitions<'ra>(
     resolver: &mut Resolver<'ra, '_>,
@@ -25,9 +28,13 @@ pub(crate) fn collect_definitions<'ra>(
 ) -> MacroRulesScopeRef<'ra> {
     let invocation_parent = resolver.invocation_parents[&parent_scope.expansion];
     debug!("new fragment to visit with invocation_parent: {invocation_parent:?}");
-    let mut visitor = DefCollector { r: resolver, invocation_parent, parent_scope };
-    fragment.visit_with(&mut visitor);
-    visitor.parent_scope.macro_rules
+    debug_assert_eq!(resolver.current_owner.id, DUMMY_NODE_ID);
+    with_owner(resolver, invocation_parent.owner, |r| {
+        let mut visitor = DefCollector { r, invocation_parent, parent_scope };
+        fragment.visit_with(&mut visitor);
+
+        visitor.parent_scope.macro_rules
+    })
 }
 
 /// Creates `DefId`s for nodes in the AST.
@@ -64,6 +71,27 @@ impl<'a, 'ra, 'tcx> DefCollector<'a, 'ra, 'tcx> {
         let orig_parent_def = mem::replace(&mut self.invocation_parent.parent_def, parent_def);
         f(self);
         self.invocation_parent.parent_def = orig_parent_def;
+    }
+
+    pub(super) fn with_owner<F: FnOnce(&mut Self)>(&mut self, owner: NodeId, f: F) {
+        debug_assert_ne!(owner, DUMMY_NODE_ID);
+        if owner == CRATE_NODE_ID {
+            // Special case: we always have an invocation parent (set in `collect_definitions`)
+            // of at least the crate root, even for visiting the crate root,
+            // which would then remove the crate root from the tables
+            // list twice and try to insert it twice afterwards.
+            debug_assert_eq!(self.r.current_owner.id, CRATE_NODE_ID);
+            return f(self);
+        }
+        // We only get here if the owner didn't exist yet. After the owner has been created,
+        // future invocations of `collect_definitions` will get the owner out of the `owners`
+        // table.
+        let tables = PerOwnerResolverData::new(owner);
+
+        let orig_invoc_owner = mem::replace(&mut self.invocation_parent.owner, owner);
+        with_owner_tables(self, owner, tables, f);
+        let old = mem::replace(&mut self.invocation_parent.owner, orig_invoc_owner);
+        assert_eq!(old, owner);
     }
 
     fn with_impl_trait<F: FnOnce(&mut Self)>(
@@ -172,9 +200,10 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
             ItemKind::GlobalAsm(..) => DefKind::GlobalAsm,
             ItemKind::Use(_) => {
-                let feed = self.create_def(i.id, None, DefKind::Use, i.span);
-                self.brg_visit_item(i, feed);
-                return;
+                return self.with_owner(i.id, |this| {
+                    let feed = this.create_def(i.id, None, DefKind::Use, i.span);
+                    this.brg_visit_item(i, feed);
+                });
             }
             ItemKind::MacCall(..) => {
                 self.visit_macro_invoc(i.id);
@@ -183,14 +212,19 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
             ItemKind::DelegationMac(..) => unreachable!(),
         };
-        let feed = self.create_def(i.id, i.kind.ident().map(|ident| ident.name), def_kind, i.span);
+        self.with_owner(i.id, |this| {
+            let feed =
+                this.create_def(i.id, i.kind.ident().map(|ident| ident.name), def_kind, i.span);
 
-        if let Some(ext) = opt_syn_ext {
-            self.r.local_macro_map.insert(feed.def_id(), self.r.arenas.alloc_macro(ext));
-        }
+            if let Some(ext) = opt_syn_ext {
+                this.r.local_macro_map.insert(feed.def_id(), self.r.arenas.alloc_macro(ext));
+            }
 
-        self.with_parent(feed.def_id(), |this| {
-            this.with_impl_trait(ImplTraitContext::Existential, |this| this.brg_visit_item(i, feed))
+            this.with_parent(feed.def_id(), |this| {
+                this.with_impl_trait(ImplTraitContext::Existential, |this| {
+                    this.brg_visit_item(i, feed)
+                })
+            });
         });
     }
 
@@ -282,12 +316,14 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
         };
 
-        let def = self.create_def(fi.id, Some(ident.name), def_kind, fi.span);
+        self.with_owner(fi.id, |this| {
+            let def = this.create_def(fi.id, Some(ident.name), def_kind, fi.span);
 
-        self.with_parent(def.def_id(), |this| {
-            this.build_reduced_graph_for_foreign_item(fi, ident, def);
-            visit::walk_item(this, fi)
-        });
+            this.with_parent(def.def_id(), |this| {
+                this.build_reduced_graph_for_foreign_item(fi, ident, def);
+                visit::walk_item(this, fi)
+            });
+        })
     }
 
     fn visit_variant(&mut self, v: &'a Variant) {
@@ -366,8 +402,12 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
         };
 
-        let feed = self.create_def(i.id, Some(ident.name), def_kind, i.span);
-        self.with_parent(feed.def_id(), |this| this.brg_visit_assoc_item(i, ctxt, ident, ns, feed));
+        self.with_owner(i.id, |this| {
+            let feed = this.create_def(i.id, Some(ident.name), def_kind, i.span);
+            this.with_parent(feed.def_id(), |this| {
+                this.brg_visit_assoc_item(i, ctxt, ident, ns, feed)
+            });
+        })
     }
 
     fn visit_pat(&mut self, pat: &'a Pat) {
@@ -564,9 +604,11 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
         } else {
             // Visit attributes after items for backward compatibility.
             // This way they can use `macro_rules` defined later.
-            visit::walk_list!(self, visit_item, &krate.items);
-            visit::walk_list!(self, visit_attribute, &krate.attrs);
-            self.contains_macro_use(&krate.attrs);
+            self.with_owner(CRATE_NODE_ID, |this| {
+                visit::walk_list!(this, visit_item, &krate.items);
+                visit::walk_list!(this, visit_attribute, &krate.attrs);
+                this.contains_macro_use(&krate.attrs);
+            })
         }
     }
 

@@ -42,7 +42,7 @@ use tracing::{debug, instrument, trace};
 use crate::{
     BindingError, BindingKey, Decl, DelegationFnSig, Finalize, IdentKey, LateDecl, LocalModule,
     Module, ModuleOrUniformRoot, ParentScope, PathResult, Res, ResolutionError, Resolver, Segment,
-    Stage, TyCtxt, UseError, Used, errors, path_names_to_string, rustdoc,
+    Stage, TyCtxt, UseError, Used, errors, path_names_to_string, rustdoc, with_owner,
 };
 
 mod diagnostics;
@@ -823,6 +823,17 @@ struct LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
     lifetime_uses: FxHashMap<LocalDefId, LifetimeUseSet>,
 }
 
+impl<'ra, 'tcx> AsRef<Resolver<'ra, 'tcx>> for LateResolutionVisitor<'_, '_, 'ra, 'tcx> {
+    fn as_ref(&self) -> &Resolver<'ra, 'tcx> {
+        &self.r
+    }
+}
+impl<'ra, 'tcx> AsMut<Resolver<'ra, 'tcx>> for LateResolutionVisitor<'_, '_, 'ra, 'tcx> {
+    fn as_mut(&mut self) -> &mut Resolver<'ra, 'tcx> {
+        &mut self.r
+    }
+}
+
 /// Walks the whole crate in DFS order, visiting each item, resolving names as it goes.
 impl<'ast, 'ra, 'tcx> Visitor<'ast> for LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
     fn visit_attribute(&mut self, _: &'ast Attribute) {
@@ -833,7 +844,9 @@ impl<'ast, 'ra, 'tcx> Visitor<'ast> for LateResolutionVisitor<'_, 'ast, 'ra, 'tc
         let prev = replace(&mut self.diag_metadata.current_item, Some(item));
         // Always report errors in items we just entered.
         let old_ignore = replace(&mut self.in_func_body, false);
-        self.with_lifetime_rib(LifetimeRibKind::Item, |this| this.resolve_item(item));
+        with_owner(self, item.id, |this| {
+            this.with_lifetime_rib(LifetimeRibKind::Item, |this| this.resolve_item(item))
+        });
         self.in_func_body = old_ignore;
         self.diag_metadata.current_item = prev;
     }
@@ -1042,36 +1055,38 @@ impl<'ast, 'ra, 'tcx> Visitor<'ast> for LateResolutionVisitor<'_, 'ast, 'ra, 'tc
         );
     }
     fn visit_foreign_item(&mut self, foreign_item: &'ast ForeignItem) {
-        self.resolve_doc_links(&foreign_item.attrs, MaybeExported::Ok(foreign_item.id));
-        let def_kind = self.r.local_def_kind(foreign_item.id);
-        match foreign_item.kind {
-            ForeignItemKind::TyAlias(TyAlias { ref generics, .. }) => {
-                self.with_generic_param_rib(
-                    &generics.params,
-                    RibKind::Item(HasGenericParams::Yes(generics.span), def_kind),
-                    foreign_item.id,
-                    LifetimeBinderKind::Item,
-                    generics.span,
-                    |this| visit::walk_item(this, foreign_item),
-                );
+        with_owner(self, foreign_item.id, |this| {
+            this.resolve_doc_links(&foreign_item.attrs, MaybeExported::Ok(foreign_item.id));
+            let def_kind = this.r.local_def_kind(foreign_item.id);
+            match foreign_item.kind {
+                ForeignItemKind::TyAlias(TyAlias { ref generics, .. }) => {
+                    this.with_generic_param_rib(
+                        &generics.params,
+                        RibKind::Item(HasGenericParams::Yes(generics.span), def_kind),
+                        foreign_item.id,
+                        LifetimeBinderKind::Item,
+                        generics.span,
+                        |this| visit::walk_item(this, foreign_item),
+                    );
+                }
+                ForeignItemKind::Fn(Fn { ref generics, .. }) => {
+                    this.with_generic_param_rib(
+                        &generics.params,
+                        RibKind::Item(HasGenericParams::Yes(generics.span), def_kind),
+                        foreign_item.id,
+                        LifetimeBinderKind::Function,
+                        generics.span,
+                        |this| visit::walk_item(this, foreign_item),
+                    );
+                }
+                ForeignItemKind::Static(..) => {
+                    this.with_static_rib(def_kind, |this| visit::walk_item(this, foreign_item))
+                }
+                ForeignItemKind::MacCall(..) => {
+                    panic!("unexpanded macro in resolve!")
+                }
             }
-            ForeignItemKind::Fn(Fn { ref generics, .. }) => {
-                self.with_generic_param_rib(
-                    &generics.params,
-                    RibKind::Item(HasGenericParams::Yes(generics.span), def_kind),
-                    foreign_item.id,
-                    LifetimeBinderKind::Function,
-                    generics.span,
-                    |this| visit::walk_item(this, foreign_item),
-                );
-            }
-            ForeignItemKind::Static(..) => {
-                self.with_static_rib(def_kind, |this| visit::walk_item(this, foreign_item))
-            }
-            ForeignItemKind::MacCall(..) => {
-                panic!("unexpanded macro in resolve!")
-            }
-        }
+        })
     }
     fn visit_fn(&mut self, fn_kind: FnKind<'ast>, _: &AttrVec, sp: Span, fn_id: NodeId) {
         let previous_value = self.diag_metadata.current_function;
@@ -3322,7 +3337,7 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
             replace(&mut self.diag_metadata.current_trait_assoc_items, Some(trait_items));
 
         for item in trait_items {
-            self.resolve_trait_item(item);
+            with_owner(self, item.id, |this| this.resolve_trait_item(item));
         }
 
         self.diag_metadata.current_trait_assoc_items = trait_assoc_items;
@@ -3528,7 +3543,9 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
                                                 debug!("resolve_implementation with_self_rib_ns(ValueNS, ...)");
                                                 let mut seen_trait_items = Default::default();
                                                 for item in impl_items {
-                                                    this.resolve_impl_item(&**item, &mut seen_trait_items, trait_id, of_trait.is_some());
+                                                    with_owner(this, item.id, |this| {
+                                                        this.resolve_impl_item(&**item, &mut seen_trait_items, trait_id, of_trait.is_some());
+                                                    })
                                                 }
                                             });
                                         });
@@ -5052,7 +5069,7 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
                 && let ItemKind::MacroDef(..) = item.kind
             {
                 num_macro_definition_ribs += 1;
-                let res = self.r.local_def_id(item.id).to_def_id();
+                let res = self.r.owner_def_id(item.id).to_def_id();
                 self.ribs[ValueNS].push(Rib::new(RibKind::MacroDefinition(res)));
                 self.label_ribs.push(Rib::new(RibKind::MacroDefinition(res)));
             }
@@ -5547,7 +5564,7 @@ impl ItemInfoCollector<'_, '_, '_> {
     fn collect_fn_info(&mut self, decl: &FnDecl, id: NodeId) {
         self.r
             .delegation_fn_sigs
-            .insert(self.r.local_def_id(id), DelegationFnSig { has_self: decl.has_self() });
+            .insert(self.r.owner_def_id(id), DelegationFnSig { has_self: decl.has_self() });
     }
 }
 
@@ -5593,7 +5610,7 @@ impl<'ast> Visitor<'ast> for ItemInfoCollector<'_, '_, '_> {
                     self.collect_fn_info(&sig.decl, item.id);
                 }
 
-                let def_id = self.r.local_def_id(item.id);
+                let def_id = self.r.owner_def_id(item.id);
                 let count = generics
                     .params
                     .iter()
@@ -5635,7 +5652,7 @@ impl<'ast> Visitor<'ast> for ItemInfoCollector<'_, '_, '_> {
         }
 
         if let AssocItemKind::Type(ast::TyAlias { generics, .. }) = &item.kind {
-            let def_id = self.r.local_def_id(item.id);
+            let def_id = self.r.owner_def_id(item.id);
             if let Some(suggestion) = required_generic_args_suggestion(generics) {
                 self.r.item_required_generic_args_suggestions.insert(def_id, suggestion);
             }
@@ -5646,18 +5663,21 @@ impl<'ast> Visitor<'ast> for ItemInfoCollector<'_, '_, '_> {
 
 impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     pub(crate) fn late_resolve_crate(&mut self, krate: &Crate) {
-        visit::walk_crate(&mut ItemInfoCollector { r: self }, krate);
-        let mut late_resolution_visitor = LateResolutionVisitor::new(self);
-        late_resolution_visitor.resolve_doc_links(&krate.attrs, MaybeExported::Ok(CRATE_NODE_ID));
-        visit::walk_crate(&mut late_resolution_visitor, krate);
-        for (id, span) in late_resolution_visitor.diag_metadata.unused_labels.iter() {
-            self.lint_buffer.buffer_lint(
-                lint::builtin::UNUSED_LABELS,
-                *id,
-                *span,
-                errors::UnusedLabel,
-            );
-        }
+        with_owner(self, CRATE_NODE_ID, |this| {
+            visit::walk_crate(&mut ItemInfoCollector { r: this }, krate);
+            let mut late_resolution_visitor = LateResolutionVisitor::new(this);
+            late_resolution_visitor
+                .resolve_doc_links(&krate.attrs, MaybeExported::Ok(CRATE_NODE_ID));
+            visit::walk_crate(&mut late_resolution_visitor, krate);
+            for (id, span) in late_resolution_visitor.diag_metadata.unused_labels.iter() {
+                this.lint_buffer.buffer_lint(
+                    lint::builtin::UNUSED_LABELS,
+                    *id,
+                    *span,
+                    errors::UnusedLabel,
+                );
+            }
+        })
     }
 }
 

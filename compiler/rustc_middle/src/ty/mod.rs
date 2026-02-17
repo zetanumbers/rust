@@ -198,6 +198,19 @@ pub struct ResolverGlobalCtxt {
     pub stripped_cfg_items: Vec<StrippedCfgItem>,
 }
 
+#[derive(Debug)]
+pub struct PerOwnerResolverData {
+    pub node_id_to_def_id: NodeMap<LocalDefId>,
+    /// The id of the owner
+    pub id: ast::NodeId,
+}
+
+impl PerOwnerResolverData {
+    pub fn new(id: ast::NodeId) -> PerOwnerResolverData {
+        PerOwnerResolverData { node_id_to_def_id: Default::default(), id }
+    }
+}
+
 /// Resolutions that should only be used for lowering.
 /// This struct is meant to be consumed by lowering.
 #[derive(Debug)]
@@ -215,7 +228,7 @@ pub struct ResolverAstLowering<'tcx> {
 
     pub next_node_id: ast::NodeId,
 
-    pub node_id_to_def_id: NodeMap<LocalDefId>,
+    pub owners: NodeMap<PerOwnerResolverData>,
 
     pub trait_map: NodeMap<&'tcx [hir::TraitCandidate<'tcx>]>,
     /// List functions and methods for which lifetime elision was successful.
