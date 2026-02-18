@@ -1,13 +1,17 @@
 //! Defines the set of legal keys that can be used in queries.
 
 use std::ffi::OsStr;
+use std::fmt::Debug;
+use std::hash::Hash;
 
 use rustc_ast::tokenstream::TokenStream;
+use rustc_data_structures::stable_hasher::HashStable;
 use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE, LocalDefId, LocalModDefId};
 use rustc_hir::hir_id::OwnerId;
 use rustc_span::{DUMMY_SP, Ident, LocalExpnId, Span, Symbol};
 
 use crate::dep_graph::DepNodeIndex;
+use crate::ich::StableHashingContext;
 use crate::infer::canonical::CanonicalQueryInput;
 use crate::mir::mono::CollectionMode;
 use crate::query::{DefIdCache, DefaultCache, SingleCache, VecCache};
@@ -20,8 +24,10 @@ use crate::{mir, traits};
 #[derive(Copy, Clone, Debug)]
 pub struct LocalCrate;
 
+pub trait QueryKeyBounds = Copy + Debug + Eq + Hash + for<'a> HashStable<StableHashingContext<'a>>;
+
 /// Controls what types can legally be used as the key for a query.
-pub trait QueryKey: Sized {
+pub trait QueryKey: Sized + QueryKeyBounds {
     /// The type of in-memory cache to use for queries with this key type.
     ///
     /// In practice the cache type must implement [`QueryCache`], though that
@@ -311,13 +317,13 @@ impl<'tcx> QueryKey for &'tcx OsStr {
 
 /// Canonical query goals correspond to abstract trait operations that
 /// are not tied to any crate in particular.
-impl<'tcx, T> QueryKey for CanonicalQueryInput<'tcx, T> {
+impl<'tcx, T: QueryKeyBounds> QueryKey for CanonicalQueryInput<'tcx, T> {
     fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
 
-impl<'tcx, T> QueryKey for (CanonicalQueryInput<'tcx, T>, bool) {
+impl<'tcx, T: QueryKeyBounds> QueryKey for (CanonicalQueryInput<'tcx, T>, bool) {
     fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
