@@ -550,7 +550,7 @@ macro_rules! define_queries {
             }
 
             pub(crate) fn make_query_vtable<'tcx>(incremental: bool)
-                -> QueryVTable<'tcx, queries::$name::Storage<'tcx>>
+                -> QueryVTable<'tcx, queries::$name::Cache<'tcx>>
             {
                 QueryVTable {
                     name: stringify!($name),
@@ -616,7 +616,7 @@ macro_rules! define_queries {
             pub(crate) enum VTableGetter {}
 
             impl<'tcx> GetQueryVTable<'tcx> for VTableGetter {
-                type Cache = rustc_middle::queries::$name::Storage<'tcx>;
+                type Cache = rustc_middle::queries::$name::Cache<'tcx>;
 
                 #[inline(always)]
                 fn query_vtable(tcx: TyCtxt<'tcx>) -> &'tcx QueryVTable<'tcx, Self::Cache> {
