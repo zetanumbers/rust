@@ -311,13 +311,13 @@ impl<'tcx> QueryKey for &'tcx OsStr {
 
 /// Canonical query goals correspond to abstract trait operations that
 /// are not tied to any crate in particular.
-impl<'tcx, T: Clone> QueryKey for CanonicalQueryInput<'tcx, T> {
+impl<'tcx, T> QueryKey for CanonicalQueryInput<'tcx, T> {
     fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
 
-impl<'tcx, T: Clone> QueryKey for (CanonicalQueryInput<'tcx, T>, bool) {
+impl<'tcx, T> QueryKey for (CanonicalQueryInput<'tcx, T>, bool) {
     fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
