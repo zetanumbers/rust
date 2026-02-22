@@ -1286,6 +1286,9 @@ pub enum AttributeKind {
     /// Represents `#[rustc_as_ptr]` (used by the `dangling_pointers_from_temporaries` lint).
     RustcAsPtr(Span),
 
+    /// Represents `#[rustc_autodiff]`.
+    RustcAutodiff(Option<Box<RustcAutodiff>>),
+
     /// Represents `#[rustc_default_body_unstable]`.
     RustcBodyStability {
         stability: DefaultBodyStability,

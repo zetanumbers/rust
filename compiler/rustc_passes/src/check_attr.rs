@@ -53,7 +53,6 @@ use rustc_span::{BytePos, DUMMY_SP, Ident, Span, Symbol, sym};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::infer::{TyCtxtInferExt, ValuePairs};
 use rustc_trait_selection::traits::ObligationCtxt;
-use tracing::debug;
 
 use crate::errors;
 
@@ -299,6 +298,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcAllocatorZeroed
                     | AttributeKind::RustcAllocatorZeroedVariant { .. }
                     | AttributeKind::RustcAsPtr(..)
+                    | AttributeKind::RustcAutodiff(..)
                     | AttributeKind::RustcBodyStability { .. }
                     | AttributeKind::RustcBuiltinMacro { .. }
                     | AttributeKind::RustcCaptureAnalysis
@@ -390,9 +390,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 Attribute::Unparsed(attr_item) => {
                     style = Some(attr_item.style);
                     match attr.path().as_slice() {
-                        [sym::autodiff_forward, ..] | [sym::autodiff_reverse, ..] => {
-                            self.check_autodiff(hir_id, attr, span, target)
-                        }
                         [
                             // ok
                             sym::allow
@@ -402,8 +399,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::forbid
                             // internal
                             | sym::rustc_on_unimplemented
-                            | sym::rustc_layout
-                            | sym::rustc_autodiff
                             // crate-level attrs, are checked below
                             | sym::feature,
                             ..
@@ -1860,18 +1855,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     export_name_attr,
                 },
             );
-        }
-    }
-
-    /// Checks if `#[autodiff]` is applied to an item other than a function item.
-    fn check_autodiff(&self, _hir_id: HirId, _attr: &Attribute, span: Span, target: Target) {
-        debug!("check_autodiff");
-        match target {
-            Target::Fn => {}
-            _ => {
-                self.dcx().emit_err(errors::AutoDiffAttr { attr_span: span });
-                self.abort.set(true);
-            }
         }
     }
 

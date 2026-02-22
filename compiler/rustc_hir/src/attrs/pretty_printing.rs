@@ -6,6 +6,7 @@ use rustc_abi::Align;
 use rustc_ast::ast::{Path, join_path_idents};
 use rustc_ast::attr::data_structures::CfgEntry;
 use rustc_ast::attr::version::RustcVersion;
+use rustc_ast::expand::autodiff_attrs::{DiffActivity, DiffMode};
 use rustc_ast::token::{CommentKind, DocFragmentKind};
 use rustc_ast::{AttrId, AttrStyle, IntTy, UintTy};
 use rustc_ast_pretty::pp::Printer;
