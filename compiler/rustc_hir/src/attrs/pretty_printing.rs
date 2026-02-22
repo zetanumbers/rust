@@ -191,7 +191,7 @@ macro_rules! print_tup {
 
 print_tup!(A B C D E F G H);
 print_skip!(Span, (), ErrorGuaranteed, AttrId);
-print_disp!(u8, u16, u128, usize, bool, NonZero<u32>, Limit);
+print_disp!(u8, u16, u32, u128, usize, bool, NonZero<u32>, Limit);
 print_debug!(
     Symbol,
     Ident,
@@ -206,4 +206,6 @@ print_debug!(
     DefId,
     RustcVersion,
     CfgEntry,
+    DiffActivity,
+    DiffMode,
 );
