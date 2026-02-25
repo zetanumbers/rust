@@ -510,8 +510,7 @@ macro_rules! define_callbacks {
                         (crate::query::inner::query_ensure)
                     )(
                         self.tcx,
-                        self.tcx.query_system.query_vtables.$name.execute_query_fn,
-                        &self.tcx.query_system.query_vtables.$name.cache,
+                        &self.tcx.query_system.query_vtables.$name,
                         $crate::query::IntoQueryParam::into_query_param(key),
                         $crate::query::EnsureMode::Ok,
                     )
@@ -526,8 +525,7 @@ macro_rules! define_callbacks {
                 pub fn $name(self, key: query_helper_param_ty!($($K)*)) {
                     crate::query::inner::query_ensure(
                         self.tcx,
-                        self.tcx.query_system.query_vtables.$name.execute_query_fn,
-                        &self.tcx.query_system.query_vtables.$name.cache,
+                        &self.tcx.query_system.query_vtables.$name,
                         $crate::query::IntoQueryParam::into_query_param(key),
                         $crate::query::EnsureMode::Done,
                     );
@@ -555,9 +553,8 @@ macro_rules! define_callbacks {
 
                     erase::restore_val::<$V>(inner::query_get_at(
                         self.tcx,
-                        self.tcx.query_system.query_vtables.$name.execute_query_fn,
-                        &self.tcx.query_system.query_vtables.$name.cache,
                         self.span,
+                        &self.tcx.query_system.query_vtables.$name,
                         $crate::query::IntoQueryParam::into_query_param(key),
                     ))
                 }
