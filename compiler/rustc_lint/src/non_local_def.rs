@@ -225,7 +225,7 @@ impl<'tcx> LateLintPass<'tcx> for NonLocalDefinitions {
                         None
                     };
 
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     NON_LOCAL_DEFINITIONS,
                     ms,
                     NonLocalDefinitionsDiag::Impl {
@@ -244,7 +244,7 @@ impl<'tcx> LateLintPass<'tcx> for NonLocalDefinitions {
             ItemKind::Macro(_, _macro, _kinds)
                 if find_attr!(cx.tcx, item.owner_id.def_id, MacroExport { .. }) =>
             {
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     NON_LOCAL_DEFINITIONS,
                     item.span,
                     NonLocalDefinitionsDiag::MacroRules {

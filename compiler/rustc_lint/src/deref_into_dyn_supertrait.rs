@@ -89,7 +89,7 @@ impl<'tcx> LateLintPass<'tcx> for DerefIntoDynSupertrait {
                 )
                 .map(|label| SupertraitAsDerefTargetLabel { label: tcx.def_span(label.def_id) });
             let span = tcx.def_span(item.owner_id.def_id);
-            cx.emit_span_lint(
+            cx.emit_span_diag_lint(
                 DEREF_INTO_DYN_SUPERTRAIT,
                 span,
                 SupertraitAsDerefTarget {

@@ -237,7 +237,7 @@ fn check_struct_for_power_alignment<'tcx>(
             // to be the fields that are misaligned.
             let ty = tcx.type_of(field_def.def_id).instantiate_identity();
             if check_arg_for_power_alignment(cx, ty) {
-                cx.emit_span_lint(USES_POWER_ALIGNMENT, field_def.span, UsesPowerAlignment);
+                cx.emit_span_diag_lint(USES_POWER_ALIGNMENT, field_def.span, UsesPowerAlignment);
             }
         }
     }
@@ -959,7 +959,11 @@ impl<'tcx> ImproperCTypesLint {
         } else {
             None
         };
-        cx.emit_span_lint(lint, sp, ImproperCTypes { ty, desc, label: sp, help, note, span_note });
+        cx.emit_span_diag_lint(
+            lint,
+            sp,
+            ImproperCTypes { ty, desc, label: sp, help, note, span_note },
+        );
     }
 }
 

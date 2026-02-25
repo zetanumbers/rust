@@ -63,7 +63,7 @@ impl<'tcx> LateLintPass<'tcx> for UnitBindings {
             && !matches!(init.kind, hir::ExprKind::Tup([]))
             && !matches!(local.pat.kind, hir::PatKind::Tuple([], ..))
         {
-            cx.emit_span_lint(
+            cx.emit_span_diag_lint(
                 UNIT_BINDINGS,
                 local.span,
                 UnitBindingsDiag { label: local.pat.span },

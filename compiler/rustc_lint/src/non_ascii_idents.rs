@@ -190,7 +190,7 @@ impl EarlyLintPass for NonAsciiIdents {
                 continue;
             }
             has_non_ascii_idents = true;
-            cx.emit_span_lint(NON_ASCII_IDENTS, sp, IdentifierNonAsciiChar);
+            cx.emit_span_diag_lint(NON_ASCII_IDENTS, sp, IdentifierNonAsciiChar);
             if check_uncommon_codepoints
                 && !symbol_str.chars().all(GeneralSecurityProfile::identifier_allowed)
             {
@@ -210,7 +210,7 @@ impl EarlyLintPass for NonAsciiIdents {
                     if codepoints.is_empty() {
                         continue;
                     }
-                    cx.emit_span_lint(
+                    cx.emit_span_diag_lint(
                         UNCOMMON_CODEPOINTS,
                         sp,
                         IdentifierUncommonCodepoints {
@@ -225,7 +225,7 @@ impl EarlyLintPass for NonAsciiIdents {
                     .extract_if(.., |(c, _)| !GeneralSecurityProfile::identifier_allowed(*c))
                     .collect::<Vec<_>>();
                 if !remaining.is_empty() {
-                    cx.emit_span_lint(
+                    cx.emit_span_diag_lint(
                         UNCOMMON_CODEPOINTS,
                         sp,
                         IdentifierUncommonCodepoints {
@@ -262,7 +262,7 @@ impl EarlyLintPass for NonAsciiIdents {
                     .entry(skeleton_sym)
                     .and_modify(|(existing_symbol, existing_span, existing_is_ascii)| {
                         if !*existing_is_ascii || !is_ascii {
-                            cx.emit_span_lint(
+                            cx.emit_span_diag_lint(
                                 CONFUSABLE_IDENTS,
                                 sp,
                                 ConfusableIdentifierPair {
@@ -383,7 +383,7 @@ impl EarlyLintPass for NonAsciiIdents {
                         let char_info = format!("'{}' (U+{:04X})", ch, ch as u32);
                         includes += &char_info;
                     }
-                    cx.emit_span_lint(
+                    cx.emit_span_diag_lint(
                         MIXED_SCRIPT_CONFUSABLES,
                         sp,
                         MixedScriptConfusables { set: script_set.to_string(), includes },

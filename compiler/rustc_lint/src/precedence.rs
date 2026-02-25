@@ -52,7 +52,7 @@ impl EarlyLintPass for Precedence {
             && let ExprKind::Lit(lit) = &arg.kind
             && let LitKind::Integer | LitKind::Float = &lit.kind
         {
-            cx.emit_span_lint(
+            cx.emit_span_diag_lint(
                 AMBIGUOUS_NEGATIVE_LITERALS,
                 expr.span,
                 AmbiguousNegativeLiteralsDiag {

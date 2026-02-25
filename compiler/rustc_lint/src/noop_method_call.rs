@@ -131,7 +131,7 @@ impl<'tcx> LateLintPass<'tcx> for NoopMethodCall {
                 ty::Adt(def, _) => Some(cx.tcx.def_span(def.did()).shrink_to_lo()),
                 _ => None,
             };
-            cx.emit_span_lint(
+            cx.emit_span_diag_lint(
                 NOOP_METHOD_CALL,
                 span,
                 NoopMethodCallDiag {
@@ -147,12 +147,12 @@ impl<'tcx> LateLintPass<'tcx> for NoopMethodCall {
                 // If `type_of(x) == T` and `x.borrow()` is used to get `&T`,
                 // then that should be allowed
                 sym::noop_method_borrow => return,
-                sym::noop_method_clone => cx.emit_span_lint(
+                sym::noop_method_clone => cx.emit_span_diag_lint(
                     SUSPICIOUS_DOUBLE_REF_OP,
                     span,
                     SuspiciousDoubleRefCloneDiag { ty: expr_ty },
                 ),
-                sym::noop_method_deref => cx.emit_span_lint(
+                sym::noop_method_deref => cx.emit_span_diag_lint(
                     SUSPICIOUS_DOUBLE_REF_OP,
                     span,
                     SuspiciousDoubleRefDerefDiag { ty: expr_ty },

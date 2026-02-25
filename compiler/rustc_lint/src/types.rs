@@ -278,7 +278,7 @@ fn lint_nan<'tcx>(
         _ => return,
     };
 
-    cx.emit_span_lint(INVALID_NAN_COMPARISONS, e.span, lint);
+    cx.emit_span_diag_lint(INVALID_NAN_COMPARISONS, e.span, lint);
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -343,7 +343,7 @@ fn lint_wide_pointer<'tcx>(
     let (Some(l_span), Some(r_span)) =
         (l.span.find_ancestor_inside(e.span), r.span.find_ancestor_inside(e.span))
     else {
-        return cx.emit_span_lint(
+        return cx.emit_span_diag_lint(
             AMBIGUOUS_WIDE_POINTER_COMPARISONS,
             e.span,
             AmbiguousWidePointerComparisons::Spanless,
@@ -365,7 +365,7 @@ fn lint_wide_pointer<'tcx>(
     let l_modifiers = &*l_modifiers;
     let r_modifiers = &*r_modifiers;
 
-    cx.emit_span_lint(
+    cx.emit_span_diag_lint(
         AMBIGUOUS_WIDE_POINTER_COMPARISONS,
         e.span,
         if is_eq_ne {
@@ -460,7 +460,7 @@ fn lint_fn_pointer<'tcx>(
         && r_some_arg.expect_ty().is_fn()
     {
         // both operands are `Option<{function ptr}>`
-        return cx.emit_span_lint(
+        return cx.emit_span_diag_lint(
             UNPREDICTABLE_FUNCTION_POINTER_COMPARISONS,
             e.span,
             UnpredictableFunctionPointerComparisons::Warn,
@@ -476,7 +476,7 @@ fn lint_fn_pointer<'tcx>(
 
     if !is_eq_ne {
         // Neither `==` nor `!=`, we can't suggest `ptr::fn_addr_eq`, just show the warning.
-        return cx.emit_span_lint(
+        return cx.emit_span_diag_lint(
             UNPREDICTABLE_FUNCTION_POINTER_COMPARISONS,
             e.span,
             UnpredictableFunctionPointerComparisons::Warn,
@@ -487,7 +487,7 @@ fn lint_fn_pointer<'tcx>(
         (l.span.find_ancestor_inside(e.span), r.span.find_ancestor_inside(e.span))
     else {
         // No appropriate spans for the left and right operands, just show the warning.
-        return cx.emit_span_lint(
+        return cx.emit_span_diag_lint(
             UNPREDICTABLE_FUNCTION_POINTER_COMPARISONS,
             e.span,
             UnpredictableFunctionPointerComparisons::Warn,
@@ -530,7 +530,7 @@ fn lint_fn_pointer<'tcx>(
             }
         };
 
-    cx.emit_span_lint(
+    cx.emit_span_diag_lint(
         UNPREDICTABLE_FUNCTION_POINTER_COMPARISONS,
         e.span,
         UnpredictableFunctionPointerComparisons::Suggestion { sugg },
@@ -558,7 +558,7 @@ impl<'tcx> LateLintPass<'tcx> for TypeLimits {
             hir::ExprKind::Binary(binop, ref l, ref r) => {
                 if is_comparison(binop.node) {
                     if !check_limits(cx, binop.node, l, r) {
-                        cx.emit_span_lint(UNUSED_COMPARISONS, e.span, UnusedComparisons);
+                        cx.emit_span_diag_lint(UNUSED_COMPARISONS, e.span, UnusedComparisons);
                     } else {
                         lint_nan(cx, e, binop.node, l, r);
                         let cmpop = ComparisonOp::BinOp(binop.node);
@@ -975,7 +975,7 @@ impl<'tcx> LateLintPass<'tcx> for VariantSizeDifferences {
             // We only warn if the largest variant is at least thrice as large as
             // the second-largest.
             if largest > slargest * 3 && slargest > 0 {
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     VARIANT_SIZE_DIFFERENCES,
                     enum_definition.variants[largest_index].span,
                     VariantSizeDifferencesDiag { largest },
@@ -1096,9 +1096,17 @@ impl InvalidAtomicOrdering {
             && (ordering == invalid_ordering || ordering == sym::AcqRel)
         {
             if method == sym::load {
-                cx.emit_span_lint(INVALID_ATOMIC_ORDERING, ordering_arg.span, AtomicOrderingLoad);
+                cx.emit_span_diag_lint(
+                    INVALID_ATOMIC_ORDERING,
+                    ordering_arg.span,
+                    AtomicOrderingLoad,
+                );
             } else {
-                cx.emit_span_lint(INVALID_ATOMIC_ORDERING, ordering_arg.span, AtomicOrderingStore);
+                cx.emit_span_diag_lint(
+                    INVALID_ATOMIC_ORDERING,
+                    ordering_arg.span,
+                    AtomicOrderingStore,
+                );
             };
         }
     }
@@ -1110,7 +1118,7 @@ impl InvalidAtomicOrdering {
             && matches!(cx.tcx.get_diagnostic_name(def_id), Some(sym::fence | sym::compiler_fence))
             && Self::match_ordering(cx, &args[0]) == Some(sym::Relaxed)
         {
-            cx.emit_span_lint(INVALID_ATOMIC_ORDERING, args[0].span, AtomicOrderingFence);
+            cx.emit_span_diag_lint(INVALID_ATOMIC_ORDERING, args[0].span, AtomicOrderingFence);
         }
     }
 
@@ -1138,7 +1146,7 @@ impl InvalidAtomicOrdering {
         let Some(fail_ordering) = Self::match_ordering(cx, fail_order_arg) else { return };
 
         if matches!(fail_ordering, sym::Release | sym::AcqRel) {
-            cx.emit_span_lint(
+            cx.emit_span_diag_lint(
                 INVALID_ATOMIC_ORDERING,
                 fail_order_arg.span,
                 InvalidAtomicOrderingDiag { method, fail_order_arg_span: fail_order_arg.span },

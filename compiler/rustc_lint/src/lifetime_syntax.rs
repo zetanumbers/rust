@@ -470,7 +470,7 @@ fn emit_mismatch_diagnostic<'tcx>(
     suggestions.extend(implicit_suggestion);
     suggestions.extend(explicit_anonymous_suggestion);
 
-    cx.emit_span_lint(
+    cx.emit_span_diag_lint(
         MISMATCHED_LIFETIME_SYNTAXES,
         inputs.iter_unnamed().chain(outputs.iter_unnamed()).copied().collect::<Vec<_>>(),
         lints::MismatchedLifetimeSyntaxes { inputs, outputs, suggestions },

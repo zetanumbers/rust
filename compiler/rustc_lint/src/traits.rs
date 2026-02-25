@@ -101,7 +101,7 @@ impl<'tcx> LateLintPass<'tcx> for DropTraitConstraints {
                     continue;
                 }
                 let Some(def_id) = cx.tcx.get_diagnostic_item(sym::needs_drop) else { return };
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     DROP_BOUNDS,
                     span,
                     DropTraitConstraintsDiag { predicate, tcx: cx.tcx, def_id },
@@ -118,7 +118,7 @@ impl<'tcx> LateLintPass<'tcx> for DropTraitConstraints {
             let def_id = bound.trait_ref.trait_def_id();
             if def_id.is_some_and(|def_id| cx.tcx.is_lang_item(def_id, LangItem::Drop)) {
                 let Some(def_id) = cx.tcx.get_diagnostic_item(sym::needs_drop) else { return };
-                cx.emit_span_lint(DYN_DROP, bound.span, DropGlue { tcx: cx.tcx, def_id });
+                cx.emit_span_diag_lint(DYN_DROP, bound.span, DropGlue { tcx: cx.tcx, def_id });
             }
         }
     }

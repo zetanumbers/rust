@@ -26,8 +26,8 @@ impl<'tcx> LateLintPass<'tcx> for DisallowedPassByRef {
                 if cx.tcx.trait_impl_of_assoc(ty.hir_id.owner.to_def_id()).is_some() {
                     return;
                 }
-                if let Some(t) = path_for_rustc_pass_by_value(cx, inner_ty) {
-                    cx.emit_span_lint(
+                if let Some(t) = path_for_pass_by_value(cx, inner_ty) {
+                    cx.emit_span_diag_lint(
                         DISALLOWED_PASS_BY_REF,
                         ty.span,
                         DisallowedPassByRefDiag { ty: t, suggestion: ty.span },

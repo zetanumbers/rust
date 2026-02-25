@@ -143,7 +143,7 @@ impl<'tcx> LateLintPass<'tcx> for PtrNullChecks {
                     )
                     && let Some(diag) = useless_check(cx, arg) =>
             {
-                cx.emit_span_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
+                cx.emit_span_diag_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
             }
 
             // Catching:
@@ -195,7 +195,7 @@ impl<'tcx> LateLintPass<'tcx> for PtrNullChecks {
                             InvalidNullArgumentsDiag::NullPtrThroughBinding { null_span }
                         };
 
-                        cx.emit_span_lint(INVALID_NULL_ARGUMENTS, expr.span, diag)
+                        cx.emit_span_diag_lint(INVALID_NULL_ARGUMENTS, expr.span, diag)
                     }
                 }
             }
@@ -210,7 +210,7 @@ impl<'tcx> LateLintPass<'tcx> for PtrNullChecks {
                     )
                     && let Some(diag) = useless_check(cx, receiver) =>
             {
-                cx.emit_span_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
+                cx.emit_span_diag_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
             }
 
             ExprKind::Binary(op, left, right) if matches!(op.node, BinOpKind::Eq) => {
@@ -234,7 +234,7 @@ impl<'tcx> LateLintPass<'tcx> for PtrNullChecks {
                             && let LitKind::Int(v, _) = spanned.node
                             && v == 0 =>
                     {
-                        cx.emit_span_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
+                        cx.emit_span_diag_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
                     }
 
                     // Catching:
@@ -245,7 +245,7 @@ impl<'tcx> LateLintPass<'tcx> for PtrNullChecks {
                             && let Some(diag_item) = cx.tcx.get_diagnostic_name(def_id)
                             && (diag_item == sym::ptr_null || diag_item == sym::ptr_null_mut) =>
                     {
-                        cx.emit_span_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
+                        cx.emit_span_diag_lint(USELESS_PTR_NULL_CHECKS, expr.span, diag)
                     }
 
                     _ => {}

@@ -48,7 +48,7 @@ impl LateLintPass<'_> for DefaultHashTypes {
             Some(sym::HashSet) => "FxHashSet",
             _ => return,
         };
-        cx.emit_span_lint(
+        cx.emit_span_diag_lint(
             DEFAULT_HASH_TYPES,
             path.span,
             DefaultHashTypesDiag { preferred, used: cx.tcx.item_name(def_id) },
@@ -91,14 +91,14 @@ impl<'tcx> LateLintPass<'tcx> for QueryStability {
         {
             let def_id = instance.def_id();
             if find_attr!(cx.tcx, def_id, RustcLintQueryInstability) {
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     POTENTIAL_QUERY_INSTABILITY,
                     span,
                     QueryInstability { query: cx.tcx.item_name(def_id) },
                 );
             } else if has_unstable_into_iter_predicate(cx, callee_def_id, generic_args) {
                 let call_span = span.with_hi(expr.span.hi());
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     POTENTIAL_QUERY_INSTABILITY,
                     call_span,
                     QueryInstability { query: sym::into_iter },
@@ -106,7 +106,7 @@ impl<'tcx> LateLintPass<'tcx> for QueryStability {
             }
 
             if find_attr!(cx.tcx, def_id, RustcLintUntrackedQueryInformation) {
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     UNTRACKED_QUERY_INFORMATION,
                     span,
                     QueryUntracked { method: cx.tcx.item_name(def_id) },
@@ -214,7 +214,7 @@ impl<'tcx> LateLintPass<'tcx> for TyTyKind {
         {
             let span =
                 path.span.with_hi(segment.args.map_or(segment.ident.span, |a| a.span_ext).hi());
-            cx.emit_span_lint(USAGE_OF_TY_TYKIND, path.span, TykindKind { suggestion: span });
+            cx.emit_span_diag_lint(USAGE_OF_TY_TYKIND, path.span, TykindKind { suggestion: span });
         }
     }
 
@@ -249,19 +249,19 @@ impl<'tcx> LateLintPass<'tcx> for TyTyKind {
 
                     match span {
                         Some(span) => {
-                            cx.emit_span_lint(
+                            cx.emit_span_diag_lint(
                                 USAGE_OF_TY_TYKIND,
                                 path.span,
                                 TykindKind { suggestion: span },
                             );
                         }
-                        None => cx.emit_span_lint(USAGE_OF_TY_TYKIND, path.span, TykindDiag),
+                        None => cx.emit_span_diag_lint(USAGE_OF_TY_TYKIND, path.span, TykindDiag),
                     }
                 } else if !ty.span.from_expansion()
                     && path.segments.len() > 1
                     && let Some(ty) = is_ty_or_ty_ctxt(cx, path)
                 {
-                    cx.emit_span_lint(
+                    cx.emit_span_diag_lint(
                         USAGE_OF_QUALIFIED_TY,
                         path.span,
                         TyQualified { ty, suggestion: path.span },
@@ -385,7 +385,7 @@ impl<'tcx> LateLintPass<'tcx> for TypeIr {
             && (cx.tcx.is_diagnostic_item(sym::type_ir_interner, trait_def_id)
                 | cx.tcx.is_diagnostic_item(sym::type_ir_infer_ctxt_like, trait_def_id))
         {
-            cx.emit_span_lint(USAGE_OF_TYPE_IR_TRAITS, expr.span, TypeIrTraitUsage);
+            cx.emit_span_diag_lint(USAGE_OF_TYPE_IR_TRAITS, expr.span, TypeIrTraitUsage);
         }
     }
 
@@ -399,13 +399,13 @@ impl<'tcx> LateLintPass<'tcx> for TypeIr {
 
         // Path segments except for the final.
         if let Some(seg) = path.segments.iter().find(|seg| is_mod_inherent(seg.res)) {
-            cx.emit_span_lint(USAGE_OF_TYPE_IR_INHERENT, seg.ident.span, TypeIrInherentUsage);
+            cx.emit_span_diag_lint(USAGE_OF_TYPE_IR_INHERENT, seg.ident.span, TypeIrInherentUsage);
         }
         // Final path resolutions, like `use rustc_type_ir::inherent`
         else if let Some(type_ns) = path.res.type_ns
             && is_mod_inherent(type_ns)
         {
-            cx.emit_span_lint(
+            cx.emit_span_diag_lint(
                 USAGE_OF_TYPE_IR_INHERENT,
                 path.segments.last().unwrap().ident.span,
                 TypeIrInherentUsage,
@@ -430,7 +430,7 @@ impl<'tcx> LateLintPass<'tcx> for TypeIr {
             }
             _ => return,
         };
-        cx.emit_span_lint(
+        cx.emit_span_diag_lint(
             NON_GLOB_IMPORT_OF_TYPE_IR_INHERENT,
             path.span,
             NonGlobImportTypeIrInherent { suggestion: lo.eq_ctxt(hi).then(|| lo.to(hi)), snippet },
@@ -448,7 +448,7 @@ impl<'tcx> LateLintPass<'tcx> for TypeIr {
                 .opt_def_id()
                 .is_some_and(|def_id| cx.tcx.is_diagnostic_item(sym::type_ir, def_id))
         }) {
-            cx.emit_span_lint(DIRECT_USE_OF_RUSTC_TYPE_IR, seg.ident.span, TypeIrDirectUse);
+            cx.emit_span_diag_lint(DIRECT_USE_OF_RUSTC_TYPE_IR, seg.ident.span, TypeIrDirectUse);
         }
     }
 }
@@ -475,7 +475,7 @@ impl EarlyLintPass for LintPassImpl {
                 && call_site.ctxt().outer_expn_data().kind
                     != ExpnKind::Macro(MacroKind::Bang, sym::declare_lint_pass)
             {
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     LINT_PASS_IMPL_WITHOUT_MACRO,
                     of_trait.trait_ref.path.span,
                     LintPassByHand,
@@ -510,7 +510,7 @@ impl LateLintPass<'_> for BadOptAccess {
             if field.name == target.name
                 && let Some(lint_message) = find_attr!(cx.tcx, field.did, RustcLintOptDenyFieldAccess { lint_message, } => lint_message)
             {
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     BAD_OPT_ACCESS,
                     expr.span,
                     BadOptAccessDiag { msg: lint_message.as_str() },
@@ -538,7 +538,7 @@ impl<'tcx> LateLintPass<'tcx> for SpanUseEqCtxt {
         ) = expr.kind
         {
             if is_span_ctxt_call(cx, lhs) && is_span_ctxt_call(cx, rhs) {
-                cx.emit_span_lint(SPAN_USE_EQ_CTXT, expr.span, SpanUseEqCtxtDiag);
+                cx.emit_span_diag_lint(SPAN_USE_EQ_CTXT, expr.span, SpanUseEqCtxtDiag);
             }
         }
     }
@@ -576,7 +576,7 @@ impl<'tcx> LateLintPass<'tcx> for SymbolInternStringLiteral {
             && let hir::ExprKind::Lit(kind) = arg.kind
             && let rustc_ast::LitKind::Str(_, _) = kind.node
         {
-            cx.emit_span_lint(
+            cx.emit_span_diag_lint(
                 SYMBOL_INTERN_STRING_LITERAL,
                 kind.span,
                 SymbolInternStringLiteralDiag,
@@ -612,7 +612,7 @@ impl EarlyLintPass for ImplicitSysrootCrateImport {
             let name = original_name.as_ref().unwrap_or(&imported_name.name).as_str();
             let externs = &cx.builder.sess().opts.externs;
             if externs.get(name).is_none() && !is_whitelisted(name) {
-                cx.emit_span_lint(
+                cx.emit_span_diag_lint(
                     IMPLICIT_SYSROOT_CRATE_IMPORT,
                     item.span,
                     ImplicitSysrootCrateImportDiag { name },
@@ -635,10 +635,10 @@ impl EarlyLintPass for BadUseOfFindAttr {
         fn path_contains_attribute_kind(cx: &EarlyContext<'_>, path: &Path) {
             for segment in &path.segments {
                 if segment.ident.as_str() == "AttributeKind" {
-                    cx.emit_span_lint(
+                    cx.emit_span_diag_lint(
                         BAD_USE_OF_FIND_ATTR,
                         segment.span(),
-                        AttributeKindInFindAttr {},
+                        AttributeKindInFindAttr,
                     );
                 }
             }

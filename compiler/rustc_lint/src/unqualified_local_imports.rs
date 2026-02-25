@@ -74,10 +74,10 @@ impl<'tcx> LateLintPass<'tcx> for UnqualifiedLocalImports {
         }
 
         // This `use` qualifies for our lint!
-        cx.emit_span_lint(
+        cx.emit_span_diag_lint(
             UNQUALIFIED_LOCAL_IMPORTS,
             first_seg.ident.span,
-            lints::UnqualifiedLocalImportsDiag {},
+            lints::UnqualifiedLocalImportsDiag,
         );
     }
 }
