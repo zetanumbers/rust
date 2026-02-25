@@ -2554,6 +2554,19 @@ impl<'tcx> TyCtxt<'tcx> {
         }
     }
 
+    /// Emit a lint from a lint struct (some type that implements `Diagnostic`, typically generated
+    /// by `#[derive(Diagnostic)]`).
+    #[track_caller]
+    pub fn emit_node_lint(
+        self,
+        lint: &'static Lint,
+        id: HirId,
+        decorator: impl for<'a> Diagnostic<'a, ()>,
+    ) {
+        let level = self.lint_level_at_node(lint, id);
+        diag_lint_level(self.sess, lint, level, None, decorator);
+    }
+
     /// Emit a lint at the appropriate level for a hir node.
     ///
     /// [`lint_level`]: rustc_middle::lint::lint_level#decorate-signature
