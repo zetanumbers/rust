@@ -158,6 +158,15 @@ pub struct QueryVTable<'tcx, C: QueryCache> {
     /// Used when reporting query cycle errors and similar problems.
     pub description_fn: fn(TyCtxt<'tcx>, C::Key) -> String,
 
+    /// Function pointer that is called by the query methods on [`TyCtxt`] and
+    /// friends[^1], after they have checked the in-memory cache and found no
+    /// existing value for this key.
+    ///
+    /// Transitive responsibilities include trying to load a disk-cached value
+    /// if possible (incremental only), invoking the query provider if necessary,
+    /// and putting the obtained value into the in-memory cache.
+    ///
+    /// [^1]: [`TyCtxt`], [`TyCtxtAt`], [`TyCtxtEnsureOk`], [`TyCtxtEnsureDone`]
     pub execute_query_fn: fn(TyCtxt<'tcx>, Span, C::Key, QueryMode) -> Option<C::Value>,
 }
 
