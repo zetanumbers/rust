@@ -396,11 +396,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::expect
                             | sym::warn
                             | sym::deny
-                            | sym::forbid
-                            // internal
-                            | sym::rustc_on_unimplemented
-                            // crate-level attrs, are checked below
-                            | sym::feature,
+                            | sym::forbid,
                             ..
                         ] => {}
                         [name, rest@..] => {
