@@ -109,7 +109,7 @@ impl<'tcx> LateLintPass<'tcx> for ImplicitAutorefs {
             }
             && method_did.map(|did| find_attr!(cx.tcx, did, RustcNoImplicitAutorefs)).unwrap_or(true)
         {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 DANGEROUS_IMPLICIT_AUTOREFS,
                 expr.span.source_callsite(),
                 ImplicitUnsafeAutorefsDiag {

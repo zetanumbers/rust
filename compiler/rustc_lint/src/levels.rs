@@ -593,7 +593,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                     sub,
                 });
             } else {
-                self.emit_span_diag_lint(
+                self.emit_span_lint(
                     FORBIDDEN_LINT_GROUPS,
                     src.span().into(),
                     OverruledAttributeLint {
@@ -783,7 +783,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                                 Symbol::intern(complete_name)
                             }
                             Some(new_lint_name) => {
-                                self.emit_span_diag_lint(
+                                self.emit_span_lint(
                                     builtin::RENAMED_AND_REMOVED_LINTS,
                                     sp.into(),
                                     DeprecatedLintName {
@@ -822,7 +822,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                                 RenamedLintSuggestion::WithSpan { suggestion: sp, replace };
                             let name =
                                 tool_ident.map(|tool| format!("{tool}::{name}")).unwrap_or(name);
-                            self.emit_span_diag_lint(
+                            self.emit_span_lint(
                                 RENAMED_AND_REMOVED_LINTS,
                                 sp.into(),
                                 RenamedLint { name: name.as_str(), replace, suggestion },
@@ -847,7 +847,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                         if self.lint_added_lints {
                             let name =
                                 tool_ident.map(|tool| format!("{tool}::{name}")).unwrap_or(name);
-                            self.emit_span_diag_lint(
+                            self.emit_span_lint(
                                 RENAMED_AND_REMOVED_LINTS,
                                 sp.into(),
                                 RemovedLint { name: name.as_str(), reason },
@@ -867,7 +867,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                                     from_rustc,
                                 }
                             });
-                            self.emit_span_diag_lint(
+                            self.emit_span_lint(
                                 UNKNOWN_LINTS,
                                 sp.into(),
                                 UnknownLint { name, suggestion },
@@ -921,7 +921,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                     continue;
                 };
 
-                self.emit_span_diag_lint(
+                self.emit_span_lint(
                     UNUSED_ATTRIBUTES,
                     lint_attr_span.into(),
                     IgnoredUnlessCrateSpecified { level: level.as_str(), name: lint_attr_name },
@@ -1001,7 +1001,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
     }
 
     #[track_caller]
-    pub fn emit_span_diag_lint(
+    pub fn emit_span_lint(
         &self,
         lint: &'static Lint,
         span: MultiSpan,

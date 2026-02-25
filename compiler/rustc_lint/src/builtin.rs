@@ -99,7 +99,7 @@ impl EarlyLintPass for WhileTrue {
                 "{}loop",
                 label.map_or_else(String::new, |label| format!("{}: ", label.ident,))
             );
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 WHILE_TRUE,
                 condition_span,
                 BuiltinWhileTrue { suggestion: condition_span, replace },
@@ -172,7 +172,7 @@ impl<'tcx> LateLintPass<'tcx> for NonShorthandFieldPatterns {
                     if cx.tcx.find_field_index(ident, variant)
                         == Some(cx.typeck_results().field_index(fieldpat.hir_id))
                     {
-                        cx.emit_span_diag_lint(
+                        cx.emit_span_lint(
                             NON_SHORTHAND_FIELD_PATTERNS,
                             fieldpat.span,
                             BuiltinNonShorthandFieldPatterns {
@@ -242,7 +242,7 @@ impl UnsafeCode {
             return;
         }
 
-        cx.emit_span_diag_lint(UNSAFE_CODE, span, decorate);
+        cx.emit_span_lint(UNSAFE_CODE, span, decorate);
     }
 }
 
@@ -423,7 +423,7 @@ impl MissingDoc {
         let attrs = cx.tcx.hir_attrs(cx.tcx.local_def_id_to_hir_id(def_id));
         let has_doc = attrs.iter().any(has_doc);
         if !has_doc {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 MISSING_DOCS,
                 cx.tcx.def_span(def_id),
                 BuiltinMissingDoc { article, desc },
@@ -624,7 +624,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingCopyImplementations {
         )
         .is_ok()
         {
-            cx.emit_span_diag_lint(MISSING_COPY_IMPLEMENTATIONS, item.span, BuiltinMissingCopyImpl);
+            cx.emit_span_lint(MISSING_COPY_IMPLEMENTATIONS, item.span, BuiltinMissingCopyImpl);
         }
     }
 }
@@ -711,7 +711,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingDebugImplementations {
             .next()
             .is_some();
         if !has_impl {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 MISSING_DEBUG_IMPLEMENTATIONS,
                 item.span,
                 BuiltinMissingDebugImpl { tcx: cx.tcx, def_id: debug },
@@ -788,7 +788,7 @@ impl EarlyLintPass for AnonymousParameters {
                     } else {
                         ("<type>", Applicability::HasPlaceholders)
                     };
-                    cx.emit_span_diag_lint(
+                    cx.emit_span_lint(
                         ANONYMOUS_PARAMETERS,
                         arg.pat.span,
                         BuiltinAnonymousParams { suggestion: (arg.pat.span, appl), ty_snip },
@@ -833,7 +833,7 @@ fn warn_if_doc(cx: &EarlyContext<'_>, node_span: Span, node_kind: &str, attrs: &
                     BuiltinUnusedDocCommentSub::BlockHelp
                 }
             };
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 UNUSED_DOC_COMMENTS,
                 span,
                 BuiltinUnusedDocComment { kind: node_kind, label: node_span, sub },
@@ -965,7 +965,7 @@ impl InvalidNoMangleItems {
     ) {
         let generics = cx.tcx.generics_of(def_id);
         if generics.requires_monomorphization(cx.tcx) {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 NO_MANGLE_GENERIC_ITEMS,
                 cx.tcx.def_span(def_id),
                 BuiltinNoMangleGeneric { suggestion: attr_span },
@@ -997,7 +997,7 @@ impl<'tcx> LateLintPass<'tcx> for InvalidNoMangleItems {
 
                     // Const items do not refer to a particular location in memory, and therefore
                     // don't have anything to attach a symbol to
-                    cx.emit_span_diag_lint(
+                    cx.emit_span_lint(
                         NO_MANGLE_CONST_ITEMS,
                         it.span,
                         BuiltinConstNoMangle { suggestion },
@@ -1058,7 +1058,7 @@ impl<'tcx> LateLintPass<'tcx> for MutableTransmutes {
             get_transmute_from_to(cx, expr).map(|(ty1, ty2)| (ty1.kind(), ty2.kind()))
         {
             if from_mutbl < to_mutbl {
-                cx.emit_span_diag_lint(MUTABLE_TRANSMUTES, expr.span, BuiltinMutablesTransmutes);
+                cx.emit_span_lint(MUTABLE_TRANSMUTES, expr.span, BuiltinMutablesTransmutes);
             }
         }
 
@@ -1122,7 +1122,7 @@ impl<'tcx> LateLintPass<'tcx> for UnstableFeatures {
     fn check_attributes(&mut self, cx: &LateContext<'_>, attrs: &[hir::Attribute]) {
         if let Some(features) = find_attr!(attrs, Feature(features, _) => features) {
             for feature in features {
-                cx.emit_span_diag_lint(UNSTABLE_FEATURES, feature.span, BuiltinUnstableFeatures);
+                cx.emit_span_lint(UNSTABLE_FEATURES, feature.span, BuiltinUnstableFeatures);
             }
         }
     }
@@ -1175,7 +1175,7 @@ impl<'tcx> LateLintPass<'tcx> for UngatedAsyncFnTrackCaller {
             // Now, check if the function has the `#[track_caller]` attribute
             && let Some(attr_span) = find_attr!(cx.tcx, def_id, TrackCaller(span) => *span)
         {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 UNGATED_ASYNC_FN_TRACK_CALLER,
                 attr_span,
                 BuiltinUngatedAsyncFnTrackCaller { label: span, session: &cx.tcx.sess },
@@ -1260,7 +1260,7 @@ impl UnreachablePub {
                 applicability = Applicability::MaybeIncorrect;
             }
             let def_span = cx.tcx.def_span(def_id);
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 UNREACHABLE_PUB,
                 def_span,
                 BuiltinUnreachablePub {
@@ -1412,7 +1412,7 @@ impl<'tcx> LateLintPass<'tcx> for TypeAliasBounds {
         let enable_feat_help = cx.tcx.sess.is_nightly_build();
 
         if let [.., label_sp] = *where_spans {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 TYPE_ALIAS_BOUNDS,
                 where_spans,
                 BuiltinTypeAliasBounds {
@@ -1426,7 +1426,7 @@ impl<'tcx> LateLintPass<'tcx> for TypeAliasBounds {
             );
         }
         if let [.., label_sp] = *inline_spans {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 TYPE_ALIAS_BOUNDS,
                 inline_spans,
                 BuiltinTypeAliasBounds {
@@ -1526,7 +1526,7 @@ impl<'tcx> LateLintPass<'tcx> for TrivialConstraints {
                     | ty::ClauseKind::HostEffect(..) => continue,
                 };
                 if predicate.is_global() {
-                    cx.emit_span_diag_lint(
+                    cx.emit_span_lint(
                         TRIVIAL_BOUNDS,
                         span,
                         BuiltinTrivialBounds { predicate_kind_name, predicate },
@@ -1581,7 +1581,7 @@ impl EarlyLintPass for DoubleNegations {
             // Don't lint if this jumps macro expansion boundary (Issue #143980)
             && expr.span.eq_ctxt(inner.span)
         {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 DOUBLE_NEGATIONS,
                 expr.span,
                 BuiltinDoubleNegations {
@@ -1702,7 +1702,7 @@ impl EarlyLintPass for EllipsisInclusiveRangePatterns {
                         replace,
                     });
                 } else {
-                    cx.emit_span_diag_lint(
+                    cx.emit_span_lint(
                         ELLIPSIS_INCLUSIVE_RANGE_PATTERNS,
                         pat.span,
                         BuiltinEllipsisInclusiveRangePatternsLint::Parenthesise {
@@ -1720,7 +1720,7 @@ impl EarlyLintPass for EllipsisInclusiveRangePatterns {
                         replace: replace.to_string(),
                     });
                 } else {
-                    cx.emit_span_diag_lint(
+                    cx.emit_span_lint(
                         ELLIPSIS_INCLUSIVE_RANGE_PATTERNS,
                         join,
                         BuiltinEllipsisInclusiveRangePatternsLint::NonParenthesise {
@@ -1902,7 +1902,7 @@ impl KeywordIdents {
             return;
         }
 
-        cx.emit_span_diag_lint(
+        cx.emit_span_lint(
             lint,
             ident.span,
             BuiltinKeywordIdents { kw: ident, next: edition, suggestion: ident.span, prefix },
@@ -2238,7 +2238,7 @@ impl<'tcx> LateLintPass<'tcx> for ExplicitOutlivesRequirements {
                 lint_spans.sort_unstable();
                 lint_spans.dedup();
 
-                cx.emit_span_diag_lint(
+                cx.emit_span_lint(
                     EXPLICIT_OUTLIVES_REQUIREMENTS,
                     lint_spans.clone(),
                     BuiltinExplicitOutlives {
@@ -2323,17 +2323,13 @@ impl EarlyLintPass for IncompleteInternalFeatures {
                     let help =
                         HAS_MIN_FEATURES.contains(&name).then_some(BuiltinIncompleteFeaturesHelp);
 
-                    cx.emit_span_diag_lint(
+                    cx.emit_span_lint(
                         INCOMPLETE_FEATURES,
                         span,
                         BuiltinIncompleteFeatures { name, note, help },
                     );
                 } else {
-                    cx.emit_span_diag_lint(
-                        INTERNAL_FEATURES,
-                        span,
-                        BuiltinInternalFeatures { name },
-                    );
+                    cx.emit_span_lint(INTERNAL_FEATURES, span, BuiltinInternalFeatures { name });
                 }
             });
     }
@@ -2659,7 +2655,7 @@ impl<'tcx> LateLintPass<'tcx> for InvalidValue {
                     }
                 };
                 let sub = BuiltinUnpermittedTypeInitSub { err };
-                cx.emit_span_diag_lint(
+                cx.emit_span_lint(
                     INVALID_VALUE,
                     expr.span,
                     BuiltinUnpermittedTypeInit {
@@ -2765,7 +2761,7 @@ impl<'tcx> LateLintPass<'tcx> for DerefNullPtr {
             {
                 // `&raw *NULL` is ok.
             } else {
-                cx.emit_span_diag_lint(
+                cx.emit_span_lint(
                     DEREF_NULLPTR,
                     expr.span,
                     BuiltinDerefNullptr { label: expr.span },
@@ -3074,14 +3070,14 @@ impl<'tcx> LateLintPass<'tcx> for AsmLabels {
                     let span = span.unwrap_or(*template_span);
                     match label_kind {
                         AsmLabelKind::Named => {
-                            cx.emit_span_diag_lint(
+                            cx.emit_span_lint(
                                 NAMED_ASM_LABELS,
                                 span,
                                 InvalidAsmLabel::Named { missing_precise_span },
                             );
                         }
                         AsmLabelKind::FormatArg => {
-                            cx.emit_span_diag_lint(
+                            cx.emit_span_lint(
                                 NAMED_ASM_LABELS,
                                 span,
                                 InvalidAsmLabel::FormatArg { missing_precise_span },
@@ -3095,7 +3091,7 @@ impl<'tcx> LateLintPass<'tcx> for AsmLabels {
                                     Some(InlineAsmArch::X86 | InlineAsmArch::X86_64) | None
                                 ) =>
                         {
-                            cx.emit_span_diag_lint(
+                            cx.emit_span_lint(
                                 BINARY_ASM_LABELS,
                                 span,
                                 InvalidAsmLabel::Binary { missing_precise_span, span },
@@ -3171,12 +3167,12 @@ impl EarlyLintPass for SpecialModuleName {
                 }
 
                 match ident.name.as_str() {
-                    "lib" => cx.emit_span_diag_lint(
+                    "lib" => cx.emit_span_lint(
                         SPECIAL_MODULE_NAME,
                         item.span,
                         BuiltinSpecialModuleNameUsed::Lib,
                     ),
-                    "main" => cx.emit_span_diag_lint(
+                    "main" => cx.emit_span_lint(
                         SPECIAL_MODULE_NAME,
                         item.span,
                         BuiltinSpecialModuleNameUsed::Main,

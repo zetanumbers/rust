@@ -67,7 +67,7 @@ impl<'tcx> LateLintPass<'tcx> for MapUnitFn {
         if !(ret_ty.is_unit() || ret_ty.is_never()) {
             return;
         }
-        cx.emit_span_diag_lint(
+        cx.emit_span_lint(
             MAP_UNIT_FN,
             span,
             MappingToUnit {

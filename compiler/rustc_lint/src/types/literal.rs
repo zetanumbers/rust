@@ -87,7 +87,7 @@ fn lint_overflowing_range_endpoint<'tcx>(
         }
     };
 
-    cx.emit_span_diag_lint(
+    cx.emit_span_lint(
         OVERFLOWING_LITERALS,
         range_span,
         RangeEndpointOutOfRange { ty, sub: sub_sugg },
@@ -201,7 +201,7 @@ fn report_bin_hex_error(
         })
         .flatten();
 
-    cx.emit_span_diag_lint(
+    cx.emit_span_lint(
         OVERFLOWING_LITERALS,
         span,
         OverflowingBinHex {
@@ -297,7 +297,7 @@ fn lint_int_literal<'tcx>(
         let help = get_type_suggestion(cx.typeck_results().node_type(hir_id), v, negative)
             .map(|suggestion_ty| OverflowingIntHelp { suggestion_ty });
 
-        cx.emit_span_diag_lint(
+        cx.emit_span_lint(
             OVERFLOWING_LITERALS,
             span,
             OverflowingInt { ty: t.name_str(), lit, min, max, help },
@@ -327,19 +327,19 @@ fn lint_uint_literal<'tcx>(
                 hir::ExprKind::Cast(..) => {
                     if let ty::Char = cx.typeck_results().expr_ty(par_e).kind() {
                         if lit_val > 0x10FFFF {
-                            cx.emit_span_diag_lint(
+                            cx.emit_span_lint(
                                 OVERFLOWING_LITERALS,
                                 par_e.span,
                                 TooLargeCharCast { literal: lit_val },
                             );
                         } else if (0xD800..=0xDFFF).contains(&lit_val) {
-                            cx.emit_span_diag_lint(
+                            cx.emit_span_lint(
                                 OVERFLOWING_LITERALS,
                                 par_e.span,
                                 SurrogateCharCast { literal: lit_val },
                             );
                         } else {
-                            cx.emit_span_diag_lint(
+                            cx.emit_span_lint(
                                 OVERFLOWING_LITERALS,
                                 par_e.span,
                                 OnlyCastu8ToChar { span: par_e.span, literal: lit_val },
@@ -368,7 +368,7 @@ fn lint_uint_literal<'tcx>(
             );
             return;
         }
-        cx.emit_span_diag_lint(
+        cx.emit_span_lint(
             OVERFLOWING_LITERALS,
             span,
             OverflowingUInt {
@@ -426,7 +426,7 @@ pub(crate) fn lint_literal<'tcx>(
             };
 
             if is_infinite == Some(true) {
-                cx.emit_span_diag_lint(
+                cx.emit_span_lint(
                     OVERFLOWING_LITERALS,
                     span,
                     OverflowingLiteral {

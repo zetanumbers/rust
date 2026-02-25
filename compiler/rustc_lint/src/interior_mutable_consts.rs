@@ -113,7 +113,7 @@ impl<'tcx> LateLintPass<'tcx> for InteriorMutableConsts {
                 None
             };
 
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 CONST_ITEM_INTERIOR_MUTATIONS,
                 expr.span,
                 ConstItemInteriorMutationsDiag {

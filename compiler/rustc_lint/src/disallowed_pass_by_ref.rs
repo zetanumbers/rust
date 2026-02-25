@@ -27,7 +27,7 @@ impl<'tcx> LateLintPass<'tcx> for DisallowedPassByRef {
                     return;
                 }
                 if let Some(t) = path_for_pass_by_value(cx, inner_ty) {
-                    cx.emit_span_diag_lint(
+                    cx.emit_span_lint(
                         DISALLOWED_PASS_BY_REF,
                         ty.span,
                         DisallowedPassByRefDiag { ty: t, suggestion: ty.span },

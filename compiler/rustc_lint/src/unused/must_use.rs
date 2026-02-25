@@ -400,7 +400,7 @@ impl<'tcx> LateLintPass<'tcx> for UnusedResults {
         let op_warned = match must_use_op {
             Some(must_use_op) => {
                 let span = expr.span.find_ancestor_not_from_macro().unwrap_or(expr.span);
-                cx.emit_span_diag_lint(
+                cx.emit_span_lint(
                     UNUSED_MUST_USE,
                     expr.span,
                     UnusedOp {
@@ -423,7 +423,7 @@ impl<'tcx> LateLintPass<'tcx> for UnusedResults {
 
         // Only emit unused results lint if we haven't emitted any of the more specific lints and the expression type is non trivial.
         if !(type_lint_emitted_or_trivial || fn_warned || op_warned) {
-            cx.emit_span_diag_lint(UNUSED_RESULTS, s.span, UnusedResult { ty });
+            cx.emit_span_lint(UNUSED_RESULTS, s.span, UnusedResult { ty });
         }
     }
 }
@@ -598,14 +598,14 @@ fn emit_must_use_untranslated(
             );
         }
         MustUsePath::Closure(span) => {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 UNUSED_MUST_USE,
                 *span,
                 UnusedClosure { count: plural_len, pre: descr_pre, post: descr_post },
             );
         }
         MustUsePath::Coroutine(span) => {
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 UNUSED_MUST_USE,
                 *span,
                 UnusedCoroutine { count: plural_len, pre: descr_pre, post: descr_post },
@@ -621,7 +621,7 @@ fn emit_must_use_untranslated(
                 .map(|prev| prev.trim_end().ends_with("let _ ="))
                 .unwrap_or(false);
             let suggestion_span = if is_redundant_let_ignore { *span } else { ancenstor_span };
-            cx.emit_span_diag_lint(
+            cx.emit_span_lint(
                 UNUSED_MUST_USE,
                 ancenstor_span,
                 UnusedDef {
