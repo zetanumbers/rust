@@ -163,8 +163,8 @@ pub fn break_query_cycles<'tcx>(
     // a() -> b() -> c() -> b()
     // ```
     //
-    // In order for this statement to be false, both occurences of `b()` only be query executions.
-    // Only a single query executes a subquery, so parents of these occurences of `b()` have to be
+    // In order for this statement to be false, both occurrences of `b()` only be query executions.
+    // Only a single query executes a subquery, so parents of these occurrences of `b()` have to be
     // the same query, aka `a()` and `c()` are equal.
     // However that means `b()` is not the first duplicate query in the stack,
     // so the original statement must be true.
@@ -198,7 +198,7 @@ pub fn break_query_cycles<'tcx>(
         cycle,
     };
 
-    // Per statement above we should have wait at either of two occurences of the duplicate query
+    // Per statement above we should have wait at either of two occurrences of the duplicate query
     if last_waiter_idx == usize::MAX {
         last_waiter_idx = visited.get(&current).unwrap().1;
     }
