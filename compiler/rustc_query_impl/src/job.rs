@@ -100,10 +100,11 @@ pub(crate) fn find_dep_kind_root<'tcx>(
 
 /// Breaks cycle on some query.
 ///
-/// This function uses ordered depth-first search from a single root query down to the first
-/// duplicate query.
-/// It doesn't distinguish between a query wait and a query execution, so both are just query calls.
+/// This function  doesn't distinguish between a query wait and a query execution, so both are just
+/// query calls.
 /// As such some queries may have two or more parent query calls too.
+/// It uses depth-first search from a single root query down to the first duplicate query,
+/// establishing a cycle.
 #[allow(rustc::potential_query_instability)]
 pub fn break_query_cycles<'tcx>(
     query_map: QueryJobMap<'tcx>,
@@ -118,12 +119,20 @@ pub fn break_query_cycles<'tcx>(
     }
     let root_query = root_query.expect("no root query was found");
 
-    let mut subqueries = FxHashMap::<_, Vec<_>>::default();
+    // We are allowed to keep track of just one subquery since each query has at least one subquery.
+    //
+    // If we would assume the opposite then thread of query with no subqueries cannot wait on any
+    // subquery. That thread neither can wait on a running parallel task in functions like
+    // `par_join`, `par_slice` as the thread executing this parallel task must be blocked too since
+    // we are in a deadlock. Rustc only tracks these two cases of blocking code to trigger a
+    // deadlock so our assumption has to be false.
+    let mut subqueries = FxHashMap::default();
     for query in query_map.map.values() {
         let Some(parent) = query.job.parent else {
             continue;
         };
-        subqueries.entry(parent).or_default().push((query.job.id, usize::MAX));
+        // We are safe to only track a single subquery due to the statement above
+        subqueries.entry(parent).or_insert((query.job.id, usize::MAX));
     }
 
     for query in query_map.map.values() {
@@ -135,10 +144,30 @@ pub fn break_query_cycles<'tcx>(
         assert!(!lock.complete);
         for (waiter_idx, waiter) in lock.waiters.iter().enumerate() {
             let waited_on_query = waiter.query.expect("cannot wait on a root query");
-            subqueries.entry(waited_on_query).or_default().push((query.job.id, waiter_idx));
+            // We are safe to only track a single subquery due to the statement above
+            subqueries.entry(waited_on_query).or_insert((query.job.id, waiter_idx));
         }
     }
 
+    // Debug check the statement above
+    if cfg!(debug_assertions) {
+        for query in query_map.map.values() {
+            assert!(subqueries.contains_key(&query.job.id));
+        }
+    }
+
+    // At least one thread waits on the first duplicate query in depth-first search stack.
+    // Consider this stack of subqueries:
+    //
+    // ```text
+    // a() -> b() -> c() -> b()
+    // ```
+    //
+    // In order for this statement to be false, both occurences of `b()` only be query executions.
+    // Only a single query executes a subquery, so parents of these occurences of `b()` have to be
+    // the same query, aka `a()` and `c()` are equal.
+    // However that means `b()` is not the first duplicate query in the stack,
+    // so the original statement must be true.
     let mut visited = IndexMap::new();
     let mut last_usage = None;
     let mut last_waiter_idx = usize::MAX;
@@ -146,13 +175,7 @@ pub fn break_query_cycles<'tcx>(
     while let indexmap::map::Entry::Vacant(entry) = visited.entry(current) {
         entry.insert((last_usage, last_waiter_idx));
         last_usage = Some(current);
-        (current, last_waiter_idx) = subqueries.get(&current).unwrap_or_else(|| {
-            panic!(
-                "deadlock detected as we're unable to find a query cycle to break\n\
-                current query map:\n{:#?}",
-                query_map
-            )
-        })[0];
+        (current, last_waiter_idx) = subqueries[&current];
     }
     let usage = visited[&current].0;
     let mut iter = visited.keys().rev();
@@ -175,17 +198,18 @@ pub fn break_query_cycles<'tcx>(
         cycle,
     };
 
-    let (waited_on, waiter_idx) = if last_waiter_idx != usize::MAX {
-        (current, last_waiter_idx)
-    } else {
-        let (&waited_on, &(_, waiter_idx)) =
-            visited.iter().rev().find(|(_, (_, waiter_idx))| *waiter_idx != usize::MAX).unwrap();
-        (waited_on, waiter_idx)
-    };
-    let waited_on = &query_map.map[&waited_on];
+    // Per statement above we should have wait at either of two occurences of the duplicate query
+    if last_waiter_idx == usize::MAX {
+        last_waiter_idx = visited.get(&current).unwrap().1;
+    }
+
+    let waited_on = &query_map.map[&current];
     let latch = waited_on.job.latch.as_ref().unwrap();
     let mut latch_info_lock = latch.info.try_lock().unwrap();
-    let waiter = latch_info_lock.waiters.remove(waiter_idx);
+
+    // And so this `Vec::remove` shouldn't cause a panic
+    let waiter = latch_info_lock.waiters.remove(last_waiter_idx);
+
     let mut cycle_lock = waiter.cycle.try_lock().unwrap();
     assert!(cycle_lock.is_none());
     *cycle_lock = Some(cycle_error);
