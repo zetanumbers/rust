@@ -73,6 +73,7 @@ impl<'tcx> QueryJob<'tcx> {
 pub struct QueryWaiter<'tcx> {
     pub query: Option<QueryJobId>,
     pub condvar: Condvar,
+    pub span: Span,
     pub cycle: Mutex<Option<CycleError<QueryStackDeferred<'tcx>>>>,
 }
 
@@ -99,9 +100,10 @@ impl<'tcx> QueryLatch<'tcx> {
         &self,
         tcx: TyCtxt<'tcx>,
         query: Option<QueryJobId>,
+        span: Span,
     ) -> Result<(), CycleError<QueryStackDeferred<'tcx>>> {
         let waiter =
-            Arc::new(QueryWaiter { query, cycle: Mutex::new(None), condvar: Condvar::new() });
+            Arc::new(QueryWaiter { query, span, cycle: Mutex::new(None), condvar: Condvar::new() });
         self.wait_on_inner(tcx, &waiter);
         // FIXME: Get rid of this lock. We have ownership of the QueryWaiter
         // although another thread may still have a Arc reference so we cannot
