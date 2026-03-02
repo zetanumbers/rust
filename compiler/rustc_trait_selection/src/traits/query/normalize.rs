@@ -253,6 +253,7 @@ impl<'a, 'tcx> FallibleTypeFolder<TyCtxt<'tcx>> for QueryNormalizer<'a, 'tcx> {
                         self.anon_depth -= 1;
                         folded_ty?
                     }
+                    TypingMode::ErasedNotCoherence => todo!(),
                 }
             }
 

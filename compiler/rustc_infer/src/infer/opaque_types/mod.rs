@@ -284,6 +284,7 @@ impl<'tcx> InferCtxt<'tcx> {
             mode @ (ty::TypingMode::PostBorrowckAnalysis { .. } | ty::TypingMode::PostAnalysis) => {
                 bug!("insert hidden type in {mode:?}")
             }
+            ty::TypingMode::ErasedNotCoherence => todo!(),
         }
 
         Ok(())

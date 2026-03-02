@@ -74,15 +74,14 @@ where
         // of reservation impl to ambiguous during coherence.
         let impl_polarity = cx.impl_polarity(impl_def_id);
         let maximal_certainty = match (impl_polarity, goal.predicate.polarity) {
-            // In intercrate mode, this is ambiguous. But outside of intercrate,
-            // it's not a real impl.
-            (ty::ImplPolarity::Reservation, _) => match ecx.typing_mode() {
-                TypingMode::Coherence => Certainty::AMBIGUOUS,
-                TypingMode::Analysis { .. }
-                | TypingMode::Borrowck { .. }
-                | TypingMode::PostBorrowckAnalysis { .. }
-                | TypingMode::PostAnalysis => return Err(NoSolution),
-            },
+            // In coherence mode, this is ambiguous. But outside of coherence, it's not a real impl.
+            (ty::ImplPolarity::Reservation, _) => {
+                if ecx.typing_mode().is_coherence() {
+                    Certainty::AMBIGUOUS
+                } else {
+                    return Err(NoSolution);
+                }
+            }
 
             // Impl matches polarity
             (ty::ImplPolarity::Positive, ty::PredicatePolarity::Positive)
@@ -1397,6 +1396,7 @@ where
             | TypingMode::Borrowck { .. }
             | TypingMode::PostBorrowckAnalysis { .. }
             | TypingMode::PostAnalysis => {}
+            TypingMode::ErasedNotCoherence => todo!(),
         }
 
         if candidates
@@ -1575,6 +1575,7 @@ where
                 | TypingMode::PostAnalysis
                 | TypingMode::Borrowck { defining_opaque_types: _ }
                 | TypingMode::PostBorrowckAnalysis { defined_opaque_types: _ } => {}
+                TypingMode::ErasedNotCoherence => todo!(),
             }
         }
 
