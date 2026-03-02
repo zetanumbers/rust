@@ -31,7 +31,7 @@ pub struct NoSolution;
 
 #[derive_where(Copy, Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
 #[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub enum AccessedState<I: Interner> {
     Known1([I::LocalDefId; 1]),
     Known2([I::LocalDefId; 2]),
@@ -41,7 +41,7 @@ pub enum AccessedState<I: Interner> {
 
 #[derive_where(Copy, Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
 #[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub struct AccessedOpaquesInfo<I: Interner> {
     #[type_visitable(ignore)]
     #[type_foldable(identity)]
@@ -82,7 +82,7 @@ impl<I: Interner> AccessedOpaquesInfo<I> {
 
 #[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
 #[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub enum AccessedOpaques<I: Interner> {
     Yes(AccessedOpaquesInfo<I>),
     No,

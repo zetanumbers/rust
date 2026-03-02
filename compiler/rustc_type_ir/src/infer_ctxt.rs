@@ -25,7 +25,7 @@ pub enum CantBeErased {}
 #[derive(Clone, Copy, Hash, Debug)]
 #[cfg_attr(
     feature = "nightly",
-    derive(Encodable_NoContext, Decodable_NoContext, HashStable_NoContext)
+    derive(Encodable_NoContext, Decodable_NoContext, StableHash_NoContext)
 )]
 pub struct MayBeErased;
 
