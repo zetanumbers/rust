@@ -69,8 +69,10 @@ where
                 TypingMode::Analysis { .. }
                 | TypingMode::Borrowck { .. }
                 | TypingMode::PostBorrowckAnalysis { .. }
-                | TypingMode::PostAnalysis => (Err(NoSolution), AccessedOpaques::default()),
-                TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
+                | TypingMode::PostAnalysis
+                | TypingMode::ErasedNotCoherence(MayBeErased) => {
+                    (Err(NoSolution), AccessedOpaques::default())
+                }
             },
         }
     }
@@ -156,6 +158,6 @@ fn response_no_constraints<I: Interner>(
             input.canonical.var_kinds,
             certainty,
         )),
-        AccessedOpaques::No,
+        AccessedOpaques::default(),
     )
 }

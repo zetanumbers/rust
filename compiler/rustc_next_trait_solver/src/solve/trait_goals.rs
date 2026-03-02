@@ -12,7 +12,7 @@ use rustc_type_ir::{
     self as ty, FieldInfo, Interner, MayBeErased, Movability, PredicatePolarity, TraitPredicate,
     TraitRef, TypeVisitableExt as _, TypingMode, Unnormalized, Upcast as _, elaborate,
 };
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::assembly::structural_traits::{self, AsyncCallableRelevantTypes};
@@ -236,6 +236,11 @@ where
         if let ty::Alias(ty::AliasTy { kind: ty::Opaque { def_id }, .. }) =
             goal.predicate.self_ty().kind()
         {
+            if ecx.opaque_accesses.might_rerun() {
+                ecx.opaque_accesses.rerun_always("auto trait leakage");
+                return Err(NoSolution);
+            }
+
             debug_assert!(ecx.opaque_type_is_rigid(def_id));
             for item_bound in cx.item_self_bounds(def_id).skip_binder() {
                 if item_bound
@@ -1390,13 +1395,8 @@ where
     /// normalization. This means the only case where this special-case results in exploitable
     /// unsoundness should be lifetime dependent user-written impls.
     pub(super) fn unsound_prefer_builtin_dyn_impl(&mut self, candidates: &mut Vec<Candidate<I>>) {
-        match self.typing_mode() {
-            TypingMode::Coherence => return,
-            TypingMode::Analysis { .. }
-            | TypingMode::Borrowck { .. }
-            | TypingMode::PostBorrowckAnalysis { .. }
-            | TypingMode::PostAnalysis => {}
-            TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
+        if self.typing_mode().is_coherence() {
+            return;
         }
 
         if candidates
@@ -1550,7 +1550,7 @@ where
         goal: Goal<I, TraitPredicate<I>>,
     ) -> Result<(CanonicalResponse<I>, Option<TraitGoalProvenVia>), NoSolution> {
         let (candidates, failed_candidate_info) =
-            self.assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::All);
+            self.assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::All)?;
         let candidate_preference_mode =
             CandidatePreferenceMode::compute(self.cx(), goal.predicate.def_id());
         self.merge_trait_candidates(candidate_preference_mode, candidates, failed_candidate_info)
@@ -1571,11 +1571,15 @@ where
                         }));
                     }
                 }
+                TypingMode::ErasedNotCoherence(MayBeErased) => {
+                    // Trying to continue here isn't worth it.
+                    self.opaque_accesses.rerun_always("try stall coroutine");
+                    return Some(Err(NoSolution));
+                }
                 TypingMode::Coherence
                 | TypingMode::PostAnalysis
                 | TypingMode::Borrowck { defining_opaque_types: _ }
                 | TypingMode::PostBorrowckAnalysis { defined_opaque_types: _ } => {}
-                TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
             }
         }
 

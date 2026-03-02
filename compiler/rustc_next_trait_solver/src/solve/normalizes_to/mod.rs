@@ -304,7 +304,8 @@ where
                         ty::TypingMode::Analysis { .. }
                         | ty::TypingMode::Borrowck { .. }
                         | ty::TypingMode::PostBorrowckAnalysis { .. }
-                        | ty::TypingMode::PostAnalysis => {
+                        | ty::TypingMode::PostAnalysis
+                        | ty::TypingMode::ErasedNotCoherence(MayBeErased) => {
                             ecx.structurally_instantiate_normalizes_to_term(
                                 goal,
                                 goal.predicate.alias,
@@ -312,7 +313,6 @@ where
                             return ecx
                                 .evaluate_added_goals_and_make_canonical_response(Certainty::Yes);
                         }
-                        ty::TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
                     };
                 }
                 Err(guar) => return error_response(ecx, guar),
@@ -325,7 +325,7 @@ where
                 // delay a bug because we can have trivially false where clauses, so we
                 // treat it as rigid.
                 if cx.impl_self_is_guaranteed_unsized(impl_def_id) {
-                    match ecx.typing_mode() {
+                    if ecx.typing_mode().is_coherence() {
                         // Trying to normalize such associated items is always ambiguous
                         // during coherence to avoid cyclic reasoning. See the example in
                         // tests/ui/traits/trivial-unsized-projection-in-coherence.rs.
@@ -336,21 +336,11 @@ where
                         // would be relevant if any of the nested goals refer to the `term`.
                         // This is not the case here and we only prefer adding an ambiguous
                         // nested goal for consistency.
-                        ty::TypingMode::Coherence => {
-                            ecx.add_goal(GoalSource::Misc, goal.with(cx, PredicateKind::Ambiguous));
-                            return then(ecx, Certainty::Yes);
-                        }
-                        ty::TypingMode::Analysis { .. }
-                        | ty::TypingMode::Borrowck { .. }
-                        | ty::TypingMode::PostBorrowckAnalysis { .. }
-                        | ty::TypingMode::PostAnalysis => {
-                            ecx.structurally_instantiate_normalizes_to_term(
-                                goal,
-                                goal.predicate.alias,
-                            );
-                            return then(ecx, Certainty::Yes);
-                        }
-                        ty::TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
+                        ecx.add_goal(GoalSource::Misc, goal.with(cx, PredicateKind::Ambiguous));
+                        return then(ecx, Certainty::Yes);
+                    } else {
+                        ecx.structurally_instantiate_normalizes_to_term(goal, goal.predicate.alias);
+                        return then(ecx, Certainty::Yes);
                     }
                 } else {
                     return error_response(ecx, cx.delay_bug("missing item"));

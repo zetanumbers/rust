@@ -1075,20 +1075,20 @@ impl<'tcx> TypingEnv<'tcx> {
     /// opaque types in the `param_env`.
     pub fn with_post_analysis_normalized(self, tcx: TyCtxt<'tcx>) -> TypingEnv<'tcx> {
         let TypingEnv { typing_mode, param_env } = self;
-        match typing_mode.0 {
-            TypingMode::Coherence
-            | TypingMode::Analysis { .. }
-            | TypingMode::Borrowck { .. }
-            | TypingMode::PostBorrowckAnalysis { .. } => {}
-            TypingMode::PostAnalysis => return self,
-            TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
-        }
 
         // No need to reveal opaques with the new solver enabled,
         // since we have lazy norm.
         let param_env = if tcx.next_trait_solver_globally() {
             param_env
         } else {
+            match typing_mode.0.assert_not_erased() {
+                TypingMode::Coherence
+                | TypingMode::Analysis { .. }
+                | TypingMode::Borrowck { .. }
+                | TypingMode::PostBorrowckAnalysis { .. } => {}
+                TypingMode::PostAnalysis => return self,
+            }
+
             ParamEnv::new(tcx.reveal_opaque_types_in_bounds(param_env.caller_bounds()))
         };
         TypingEnv { typing_mode: TypingModeEqWrapper(TypingMode::PostAnalysis), param_env }
