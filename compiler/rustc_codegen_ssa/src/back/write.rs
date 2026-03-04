@@ -34,7 +34,7 @@ use rustc_span::{FileName, InnerSpan, Span, SpanData};
 use rustc_target::spec::{MergeFunctions, SanitizerSet};
 use tracing::debug;
 
-use crate::back::link::{self, ensure_removed};
+use crate::back::link::ensure_removed;
 use crate::back::lto::{self, SerializedModule, check_lto_allowed};
 use crate::errors::ErrorCreatingRemarkDir;
 use crate::traits::*;
@@ -389,18 +389,8 @@ fn generate_thin_lto_work<B: WriteBackendMethods>(
 
 enum MaybeLtoModules<B: WriteBackendMethods> {
     NoLto(CompiledModules),
-    FatLto {
-        cgcx: CodegenContext,
-        exported_symbols_for_lto: Arc<Vec<String>>,
-        each_linked_rlib_file_for_lto: Vec<PathBuf>,
-        needs_fat_lto: Vec<FatLtoInput<B>>,
-    },
-    ThinLto {
-        cgcx: CodegenContext,
-        exported_symbols_for_lto: Arc<Vec<String>>,
-        each_linked_rlib_file_for_lto: Vec<PathBuf>,
-        needs_thin_lto: Vec<ThinLtoInput<B>>,
-    },
+    FatLto { cgcx: CodegenContext, needs_fat_lto: Vec<FatLtoInput<B>> },
+    ThinLto { cgcx: CodegenContext, needs_thin_lto: Vec<ThinLtoInput<B>> },
 }
 
 fn need_bitcode_in_object(tcx: TyCtxt<'_>) -> bool {
@@ -424,7 +414,6 @@ fn need_pre_lto_bitcode_for_incr_comp(sess: &Session) -> bool {
 pub(crate) fn start_async_codegen<B: ExtraBackendMethods>(
     backend: B,
     tcx: TyCtxt<'_>,
-    crate_info: &CrateInfo,
     allocator_module: Option<ModuleCodegen<B::Module>>,
 ) -> OngoingCodegen<B> {
     let (coordinator_send, coordinator_receive) = channel();
@@ -440,7 +429,6 @@ pub(crate) fn start_async_codegen<B: ExtraBackendMethods>(
     let coordinator_thread = start_executing_work(
         backend.clone(),
         tcx,
-        crate_info,
         shared_emitter,
         codegen_worker_send,
         coordinator_receive,
@@ -992,8 +980,8 @@ fn do_thin_lto<B: WriteBackendMethods>(
     prof: &SelfProfilerRef,
     shared_emitter: SharedEmitter,
     tm_factory: TargetMachineFactoryFn<B>,
-    exported_symbols_for_lto: Arc<Vec<String>>,
-    each_linked_rlib_for_lto: Vec<PathBuf>,
+    exported_symbols_for_lto: &[String],
+    each_linked_rlib_for_lto: &[PathBuf],
     needs_thin_lto: Vec<ThinLtoInput<B>>,
 ) -> Vec<CompiledModule> {
     let _timer = prof.verbose_generic_activity("LLVM_thinlto");
@@ -1231,7 +1219,6 @@ enum MainThreadState {
 fn start_executing_work<B: ExtraBackendMethods>(
     backend: B,
     tcx: TyCtxt<'_>,
-    crate_info: &CrateInfo,
     shared_emitter: SharedEmitter,
     codegen_worker_send: Sender<CguMessage>,
     coordinator_receive: Receiver<Message<B>>,
@@ -1243,22 +1230,9 @@ fn start_executing_work<B: ExtraBackendMethods>(
     let sess = tcx.sess;
     let prof = sess.prof.clone();
 
-    let mut each_linked_rlib_for_lto = Vec::new();
-    let mut each_linked_rlib_file_for_lto = Vec::new();
-    if sess.lto() != Lto::No && sess.lto() != Lto::ThinLocal {
-        drop(link::each_linked_rlib(crate_info, None, &mut |cnum, path| {
-            if link::ignored_for_lto(sess, crate_info, cnum) {
-                return;
-            }
-
-            each_linked_rlib_for_lto.push(cnum);
-            each_linked_rlib_file_for_lto.push(path.to_path_buf());
-        }));
-    }
-
-    // Compute the set of symbols we need to retain when doing LTO (if we need to)
+    // Compute the set of symbols we need to retain when doing thin local LTO (if we need to)
     let exported_symbols_for_lto =
-        Arc::new(lto::exported_symbols_for_lto(tcx, &each_linked_rlib_for_lto));
+        if sess.lto() == Lto::ThinLocal { lto::exported_symbols_for_lto(tcx, &[]) } else { vec![] };
 
     // First up, convert our jobserver into a helper thread so we can use normal
     // mpsc channels to manage our messages and such.
@@ -1757,12 +1731,7 @@ fn start_executing_work<B: ExtraBackendMethods>(
                 needs_fat_lto.push(FatLtoInput::Serialized { name: wp.cgu_name, bitcode_path })
             }
 
-            return Ok(MaybeLtoModules::FatLto {
-                cgcx,
-                exported_symbols_for_lto,
-                each_linked_rlib_file_for_lto,
-                needs_fat_lto,
-            });
+            return Ok(MaybeLtoModules::FatLto { cgcx, needs_fat_lto });
         } else if !needs_thin_lto.is_empty() || !lto_import_only_modules.is_empty() {
             assert!(compiled_modules.is_empty());
             assert!(needs_fat_lto.is_empty());
@@ -1777,8 +1746,8 @@ fn start_executing_work<B: ExtraBackendMethods>(
                     &prof,
                     shared_emitter.clone(),
                     tm_factory,
-                    exported_symbols_for_lto,
-                    each_linked_rlib_file_for_lto,
+                    &exported_symbols_for_lto,
+                    &[],
                     needs_thin_lto,
                 ));
             } else {
@@ -1790,12 +1759,7 @@ fn start_executing_work<B: ExtraBackendMethods>(
                     });
                 }
 
-                return Ok(MaybeLtoModules::ThinLto {
-                    cgcx,
-                    exported_symbols_for_lto,
-                    each_linked_rlib_file_for_lto,
-                    needs_thin_lto,
-                });
+                return Ok(MaybeLtoModules::ThinLto { cgcx, needs_thin_lto });
             }
         }
 
@@ -2139,7 +2103,11 @@ pub struct OngoingCodegen<B: WriteBackendMethods> {
 }
 
 impl<B: WriteBackendMethods> OngoingCodegen<B> {
-    pub fn join(self, sess: &Session) -> (CompiledModules, FxIndexMap<WorkProductId, WorkProduct>) {
+    pub fn join(
+        self,
+        sess: &Session,
+        crate_info: &CrateInfo,
+    ) -> (CompiledModules, FxIndexMap<WorkProductId, WorkProduct>) {
         self.shared_emitter_main.check(sess, true);
 
         let maybe_lto_modules = sess.time("join_worker_thread", || match self.coordinator.join() {
@@ -2163,12 +2131,7 @@ impl<B: WriteBackendMethods> OngoingCodegen<B> {
                 drop(shared_emitter);
                 compiled_modules
             }
-            MaybeLtoModules::FatLto {
-                cgcx,
-                exported_symbols_for_lto,
-                each_linked_rlib_file_for_lto,
-                needs_fat_lto,
-            } => {
+            MaybeLtoModules::FatLto { cgcx, needs_fat_lto } => {
                 let tm_factory = self.backend.target_machine_factory(
                     sess,
                     cgcx.opt_level,
@@ -2181,19 +2144,14 @@ impl<B: WriteBackendMethods> OngoingCodegen<B> {
                         &cgcx,
                         shared_emitter,
                         tm_factory,
-                        &exported_symbols_for_lto,
-                        &each_linked_rlib_file_for_lto,
+                        &crate_info.exported_symbols_for_lto,
+                        &crate_info.each_linked_rlib_file_for_lto,
                         needs_fat_lto,
                     )],
                     allocator_module: None,
                 }
             }
-            MaybeLtoModules::ThinLto {
-                cgcx,
-                exported_symbols_for_lto,
-                each_linked_rlib_file_for_lto,
-                needs_thin_lto,
-            } => {
+            MaybeLtoModules::ThinLto { cgcx, needs_thin_lto } => {
                 let tm_factory = self.backend.target_machine_factory(
                     sess,
                     cgcx.opt_level,
@@ -2206,8 +2164,8 @@ impl<B: WriteBackendMethods> OngoingCodegen<B> {
                         &sess.prof,
                         shared_emitter,
                         tm_factory,
-                        exported_symbols_for_lto,
-                        each_linked_rlib_file_for_lto,
+                        &crate_info.exported_symbols_for_lto,
+                        &crate_info.each_linked_rlib_file_for_lto,
                         needs_thin_lto,
                     ),
                     allocator_module: None,
