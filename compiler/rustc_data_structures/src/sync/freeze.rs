@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::sync::{DynSend, DynSync, ReadGuard, RwLock, WriteGuard};
+use crate::sync::{CacheAligned, DynSend, DynSync, ReadGuard, RwLock, WriteGuard};
 
 /// A type which allows mutation using a lock until
 /// the value is frozen and can be accessed lock-free.
@@ -14,8 +14,12 @@ use crate::sync::{DynSend, DynSync, ReadGuard, RwLock, WriteGuard};
 #[derive(Default)]
 pub struct FreezeLock<T> {
     data: UnsafeCell<T>,
-    frozen: AtomicBool,
+    raw: CacheAligned<RawFreezeLock>,
+}
 
+#[derive(Default)]
+struct RawFreezeLock {
+    frozen: AtomicBool,
     /// This lock protects writes to the `data` and `frozen` fields.
     lock: RwLock<()>,
 }
@@ -37,8 +41,10 @@ impl<T> FreezeLock<T> {
     pub fn with(value: T, frozen: bool) -> Self {
         Self {
             data: UnsafeCell::new(value),
-            frozen: AtomicBool::new(frozen),
-            lock: RwLock::new(()),
+            raw: CacheAligned(RawFreezeLock {
+                frozen: AtomicBool::new(frozen),
+                lock: RwLock::new(()),
+            }),
         }
     }
 
@@ -54,13 +60,13 @@ impl<T> FreezeLock<T> {
 
     #[inline]
     pub fn is_frozen(&self) -> bool {
-        self.frozen.load(Ordering::Acquire)
+        self.raw.0.frozen.load(Ordering::Acquire)
     }
 
     /// Get the inner value if frozen.
     #[inline]
     pub fn get(&self) -> Option<&T> {
-        if self.frozen.load(Ordering::Acquire) {
+        if self.raw.0.frozen.load(Ordering::Acquire) {
             // SAFETY: This is frozen so the data cannot be modified.
             unsafe { Some(&*self.data.get()) }
         } else {
@@ -72,10 +78,10 @@ impl<T> FreezeLock<T> {
     #[inline]
     pub fn read(&self) -> FreezeReadGuard<'_, T> {
         FreezeReadGuard {
-            _lock_guard: if self.frozen.load(Ordering::Acquire) {
+            _lock_guard: if self.raw.0.frozen.load(Ordering::Acquire) {
                 None
             } else {
-                Some(self.lock.read())
+                Some(self.raw.0.lock.read())
             },
             data: unsafe { NonNull::new_unchecked(self.data.get()) },
         }
@@ -94,15 +100,15 @@ impl<T> FreezeLock<T> {
 
     #[inline]
     pub fn try_write(&self) -> Option<FreezeWriteGuard<'_, T>> {
-        let _lock_guard = self.lock.write();
+        let _lock_guard = self.raw.0.lock.write();
         // Use relaxed ordering since we're in the write lock.
-        if self.frozen.load(Ordering::Relaxed) {
+        if self.raw.0.frozen.load(Ordering::Relaxed) {
             None
         } else {
             Some(FreezeWriteGuard {
                 _lock_guard,
                 data: unsafe { NonNull::new_unchecked(self.data.get()) },
-                frozen: &self.frozen,
+                frozen: &self.raw.0.frozen,
                 marker: PhantomData,
             })
         }
@@ -110,10 +116,10 @@ impl<T> FreezeLock<T> {
 
     #[inline]
     pub fn freeze(&self) -> &T {
-        if !self.frozen.load(Ordering::Acquire) {
+        if !self.raw.0.frozen.load(Ordering::Acquire) {
             // Get the lock to ensure no concurrent writes and that we release the latest write.
-            let _lock = self.lock.write();
-            self.frozen.store(true, Ordering::Release);
+            let _lock = self.raw.0.lock.write();
+            self.raw.0.frozen.store(true, Ordering::Release);
         }
 
         // SAFETY: This is frozen so the data cannot be modified and shared access is sound.
