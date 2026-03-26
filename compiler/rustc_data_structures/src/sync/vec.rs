@@ -2,25 +2,27 @@ use std::marker::PhantomData;
 
 use rustc_index::Idx;
 
+use crate::sync::CacheAligned;
+
 #[derive(Default)]
 pub struct AppendOnlyIndexVec<I: Idx, T: Copy> {
-    vec: elsa::sync::LockFreeFrozenVec<T>,
+    vec: CacheAligned<elsa::sync::LockFreeFrozenVec<T>>,
     _marker: PhantomData<fn(&I)>,
 }
 
 impl<I: Idx, T: Copy> AppendOnlyIndexVec<I, T> {
     pub fn new() -> Self {
-        Self { vec: elsa::sync::LockFreeFrozenVec::new(), _marker: PhantomData }
+        Self { vec: CacheAligned(elsa::sync::LockFreeFrozenVec::new()), _marker: PhantomData }
     }
 
     pub fn push(&self, val: T) -> I {
-        let i = self.vec.push(val);
+        let i = self.vec.0.push(val);
         I::new(i)
     }
 
     pub fn get(&self, i: I) -> Option<T> {
         let i = i.index();
-        self.vec.get(i)
+        self.vec.0.get(i)
     }
 }
 
