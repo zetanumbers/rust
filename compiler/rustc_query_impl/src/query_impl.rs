@@ -1,6 +1,6 @@
 use rustc_middle::queries::TaggedQueryKey;
 use rustc_middle::query::erase::{self, Erased};
-use rustc_middle::query::{AsLocalQueryKey, QueryMode, QueryVTable};
+use rustc_middle::query::{QueryKey, QueryMode, QueryVTable};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::Span;
 

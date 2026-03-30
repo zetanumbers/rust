@@ -325,7 +325,7 @@ macro_rules! define_callbacks {
                 /// This query has the `separate_provide_extern` modifier.
                 #[cfg($separate_provide_extern)]
                 pub type LocalKey<'tcx> =
-                    <Key<'tcx> as $crate::query::AsLocalQueryKey>::LocalQueryKey;
+                    <Key<'tcx> as $crate::query::QueryKey>::LocalQueryKey;
                 /// Key type used by provider functions in `local_providers`.
                 #[cfg(not($separate_provide_extern))]
                 pub type LocalKey<'tcx> = Key<'tcx>;
