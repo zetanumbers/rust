@@ -331,16 +331,15 @@ impl DepGraphData {
             format!("forcing query with already existing `DepNode`: {dep_node:?}")
         });
 
-        let with_deps = |task_deps| with_deps(task_deps, op);
         let (result, edges) = if tcx.is_eval_always(dep_node.kind) {
-            (with_deps(TaskDepsRef::EvalAlways), EdgesVec::new())
+            (with_deps(TaskDepsRef::EvalAlways, op), EdgesVec::new())
         } else {
             let task_deps = Lock::new(TaskDeps::new(
                 #[cfg(debug_assertions)]
                 Some(dep_node),
                 0,
             ));
-            (with_deps(TaskDepsRef::Allow(&task_deps)), task_deps.into_inner().reads)
+            (with_deps(TaskDepsRef::Allow(&task_deps), op), task_deps.into_inner().reads)
         };
 
         let dep_node_index =
