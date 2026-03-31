@@ -395,10 +395,10 @@ impl DepGraphData {
             }
             _ => {
                 // The dep node indices are hashed here instead of hashing the dep nodes of the
-                // dependencies. These indices may refer to different nodes per session, but this isn't
-                // a problem here because we that ensure the final dep node hash is per session only by
-                // combining it with the per session random number `anon_id_seed`. This hash only need
-                // to map the dependencies to a single value on a per session basis.
+                // dependencies. These indices may refer to different nodes per session, but this
+                // isn't a problem here because we that ensure the final dep node hash is per
+                // session only by combining it with the per session `anon_id_seed`. This hash only
+                // need to map the dependencies to a single value on a per session basis.
                 let mut hasher = StableHasher::new();
                 reads.hash(&mut hasher);
 
