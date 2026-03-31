@@ -1222,13 +1222,14 @@ pub struct TaskDeps {
     #[cfg(debug_assertions)]
     node: Option<DepNode>,
 
-    /// A vector of `DepNodeIndex`, basically.
+    /// A vector of `DepNodeIndex`, basically. Contains no duplicates.
     reads: EdgesVec,
 
-    /// When adding new edges to `reads` in `DepGraph::read_index` we need to determine if the edge
-    /// has been seen before. If the number of elements in `reads` is small, we just do a linear
-    /// scan. If the number is higher, a hashset has better perf. This field is that hashset. It's
-    /// only used if the number of elements in `reads` exceeds `LINEAR_SCAN_MAX`.
+    /// When adding a new edge to `reads` in `DepGraph::read_index` we must determine if the edge
+    /// has been seen before. We just do a linear scan of `reads` if its length is less than or
+    /// equal to `LINEAR_SCAN_MAX`. Otherwise, we use this hashset for better performance. Note:
+    /// `reads` is always the canonical edges representation; this field is just to speed up the
+    /// seen-before test.
     read_set: FxHashSet<DepNodeIndex>,
 }
 
