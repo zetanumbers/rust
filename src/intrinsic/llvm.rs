@@ -123,7 +123,7 @@ pub fn adjust_intrinsic_arguments<'a, 'b, 'gcc, 'tcx>(
     mut args: Cow<'b, [RValue<'gcc>]>,
     func_name: &str,
 ) -> Cow<'b, [RValue<'gcc>]> {
-    // TODO: this might not be a good way to workaround the missing tile builtins.
+    // FIXME: this might not be a good way to workaround the missing tile builtins.
     if func_name == "__builtin_trap" {
         return vec![].into();
     }
@@ -1578,7 +1578,7 @@ pub fn intrinsic<'gcc, 'tcx>(name: &str, cx: &CodegenCx<'gcc, 'tcx>) -> Function
         "llvm.x86.avx512.uitofp.round.v8f32.v8i64" => "__builtin_ia32_cvtuqq2ps512_mask",
         "llvm.x86.avx512.uitofp.round.v4f32.v4i64" => "__builtin_ia32_cvtuqq2ps256_mask",
 
-        // TODO: support the tile builtins:
+        // FIXME: support the tile builtins:
         "llvm.x86.ldtilecfg" => "__builtin_trap",
         "llvm.x86.sttilecfg" => "__builtin_trap",
         "llvm.x86.tileloadd64" => "__builtin_trap",
@@ -1589,6 +1589,7 @@ pub fn intrinsic<'gcc, 'tcx>(name: &str, cx: &CodegenCx<'gcc, 'tcx>) -> Function
         "llvm.x86.tileloaddrst164" => "__builtin_trap",
         "llvm.x86.tilezero" => "__builtin_trap",
         "llvm.x86.tilemovrow" => "__builtin_trap",
+        "llvm.x86.tilemovrowi" => "__builtin_trap",
         "llvm.x86.tdpbhf8ps" => "__builtin_trap",
         "llvm.x86.tdphbf8ps" => "__builtin_trap",
         "llvm.x86.tdpbf8ps" => "__builtin_trap",
@@ -1603,6 +1604,9 @@ pub fn intrinsic<'gcc, 'tcx>(name: &str, cx: &CodegenCx<'gcc, 'tcx>) -> Function
         "llvm.x86.tcvtrowps2phh" => "__builtin_trap",
         "llvm.x86.tcvtrowps2phl" => "__builtin_trap",
         "llvm.x86.tcvtrowd2ps" => "__builtin_trap",
+        "llvm.x86.tcvtrowd2psi" => "__builtin_trap",
+        "llvm.x86.tcvtrowps2phhi" => "__builtin_trap",
+        "llvm.x86.tcvtrowps2phli" => "__builtin_trap",
         "llvm.x86.tcmmimfp16ps" => "__builtin_trap",
         "llvm.x86.tcmmrlfp16ps" => "__builtin_trap",
 
