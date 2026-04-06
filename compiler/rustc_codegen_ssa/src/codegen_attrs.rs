@@ -556,7 +556,7 @@ fn handle_lang_items(
 /// - apply overrides, like minimum requirements for alignment and other settings that don't rely directly the built-in attrs on the item.
 ///   overrides come after applying built-in attributes since they may only apply when certain attributes were already set in the stage before.
 /// - check that the result is valid. There's various ways in which this may not be the case, such as certain combinations of attrs.
-fn codegen_fn_attrs(tcx: TyCtxt<'_>, did: LocalDefId) -> CodegenFnAttrs {
+fn codegen_fn_attrs(tcx: TyCtxt<'_>, did: LocalDefId) -> &CodegenFnAttrs {
     if cfg!(debug_assertions) {
         let def_kind = tcx.def_kind(did);
         assert!(
@@ -573,7 +573,7 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, did: LocalDefId) -> CodegenFnAttrs {
     apply_overrides(tcx, did, &mut codegen_fn_attrs);
     check_result(tcx, did, interesting_spans, &codegen_fn_attrs);
 
-    codegen_fn_attrs
+    tcx.arena.alloc(codegen_fn_attrs)
 }
 
 fn sanitizer_settings_for(tcx: TyCtxt<'_>, did: LocalDefId) -> SanitizerFnAttrs {

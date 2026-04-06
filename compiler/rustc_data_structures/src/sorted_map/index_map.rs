@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 
 use rustc_index::{Idx, IndexVec};
 use rustc_macros::HashStable_NoContext;
+use rustc_serialize::{Decodable, Decoder};
 
 /// An indexed multi-map that preserves insertion order while permitting both *O*(log *n*) lookup of
 /// an item by key and *O*(1) lookup by index.
@@ -133,6 +134,21 @@ impl<I: Idx, K: Ord, V> FromIterator<(K, V)> for SortedIndexMultiMap<I, K, V> {
         J: IntoIterator<Item = (K, V)>,
     {
         let items = IndexVec::<I, _>::from_iter(iter);
+        let mut idx_sorted_by_item_key: Vec<_> = items.indices().collect();
+
+        // `sort_by_key` is stable, so insertion order is preserved for duplicate items.
+        idx_sorted_by_item_key.sort_by_key(|&idx| &items[idx].0);
+
+        SortedIndexMultiMap { items, idx_sorted_by_item_key }
+    }
+}
+
+impl<I: Idx, K: Ord, V, D: Decoder> Decodable<D> for SortedIndexMultiMap<I, K, V>
+where
+    IndexVec<I, (K, V)>: Decodable<D>,
+{
+    fn decode(d: &mut D) -> Self {
+        let items = IndexVec::<I, (K, V)>::decode(d);
         let mut idx_sorted_by_item_key: Vec<_> = items.indices().collect();
 
         // `sort_by_key` is stable, so insertion order is preserved for duplicate items.

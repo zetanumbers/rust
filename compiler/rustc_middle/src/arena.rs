@@ -27,6 +27,11 @@ macro_rules! arena_types {
                     rustc_middle::mir::Body<'tcx>
                 >,
             [decode] typeck_results: rustc_middle::ty::TypeckResults<'tcx>,
+            [decode] generics: rustc_middle::ty::Generics,
+            [decode] assoc_items: rustc_middle::ty::AssocItems,
+            [decode] shallow_lint_level_map: rustc_middle::lint::ShallowLintLevelMap,
+            [decode] resolve_bound_vars: rustc_middle::middle::resolve_bound_vars::ResolveBoundVars<'tcx>,
+            [decode] codegene_fn_attrs: rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs,
             [decode] borrowck_result: rustc_data_structures::fx::FxIndexMap<
                 rustc_hir::def_id::LocalDefId,
                 rustc_middle::ty::DefinitionSiteHiddenType<'tcx>,

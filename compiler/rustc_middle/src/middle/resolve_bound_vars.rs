@@ -47,7 +47,7 @@ pub enum ObjectLifetimeDefault {
 
 /// Maps the id of each bound variable reference to the variable decl
 /// that it corresponds to.
-#[derive(Debug, Default, HashStable)]
+#[derive(Debug, Default, HashStable, TyDecodable)]
 pub struct ResolveBoundVars<'tcx> {
     // Maps from every use of a named (not anonymous) bound var to a
     // `ResolvedArg` describing how that variable is bound.

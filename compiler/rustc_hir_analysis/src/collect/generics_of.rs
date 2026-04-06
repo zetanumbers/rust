@@ -15,7 +15,7 @@ use tracing::{debug, instrument};
 use crate::middle::resolve_bound_vars as rbv;
 
 #[instrument(level = "debug", skip(tcx), ret)]
-pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
+pub(super) fn generics_of<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> &'tcx ty::Generics {
     use rustc_hir::*;
 
     struct GenericParametersForbiddenHere {
@@ -56,14 +56,14 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         let param_def_id_to_index =
             own_params.iter().map(|param| (param.def_id, param.index)).collect();
 
-        return ty::Generics {
+        return tcx.arena.alloc(ty::Generics {
             parent: Some(trait_def_id),
             parent_count,
             own_params,
             param_def_id_to_index,
             has_self: opaque_ty_generics.has_self,
             has_late_bound_regions: opaque_ty_generics.has_late_bound_regions,
-        };
+        });
     }
 
     let hir_id = tcx.local_def_id_to_hir_id(def_id);
@@ -149,7 +149,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                     let param_def_id_to_index =
                         own_params.iter().map(|param| (param.def_id, param.index)).collect();
 
-                    return ty::Generics {
+                    return tcx.arena.alloc(ty::Generics {
                         // we set the parent of these generics to be our parent's parent so that we
                         // dont end up with args: [N, M, N] for the const default on a struct like this:
                         // struct Foo<const N: usize, const M: usize = { ... }>;
@@ -159,7 +159,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                         param_def_id_to_index,
                         has_self: generics.has_self,
                         has_late_bound_regions: generics.has_late_bound_regions,
-                    };
+                    });
                 }
                 ty::AnonConstKind::GCE => Some(parent_did),
 
@@ -379,14 +379,14 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
     let param_def_id_to_index =
         own_params.iter().map(|param| (param.def_id, param.index)).collect();
 
-    ty::Generics {
+    tcx.arena.alloc(ty::Generics {
         parent: parent_def_id.map(LocalDefId::to_def_id),
         parent_count,
         own_params,
         param_def_id_to_index,
         has_self: has_self || parent_has_self,
         has_late_bound_regions: has_late_bound_regions(tcx, node),
-    }
+    })
 }
 
 #[derive(Clone, Copy)]

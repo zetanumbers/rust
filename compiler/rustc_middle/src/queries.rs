@@ -426,7 +426,6 @@ rustc_queries! {
     /// Returns the *generics* of the definition given by `DefId`.
     query generics_of(key: DefId) -> &'tcx ty::Generics {
         desc { "computing generics of `{}`", tcx.def_path_str(key) }
-        arena_cache
         cache_on_disk
         separate_provide_extern
         feedable
@@ -551,7 +550,6 @@ rustc_queries! {
     }
 
     query shallow_lint_levels_on(key: hir::OwnerId) -> &'tcx rustc_middle::lint::ShallowLintLevelMap {
-        arena_cache
         desc { "looking up lint levels for `{}`", tcx.def_path_str(key) }
     }
 
@@ -1068,7 +1066,6 @@ rustc_queries! {
 
     /// Collects the associated items defined on a trait or impl.
     query associated_items(key: DefId) -> &'tcx ty::AssocItems {
-        arena_cache
         desc { "collecting associated items of `{}`", tcx.def_path_str(key) }
     }
 
@@ -1531,7 +1528,6 @@ rustc_queries! {
     /// kind at the call site.
     query codegen_fn_attrs(def_id: DefId) -> &'tcx CodegenFnAttrs {
         desc { "computing codegen attributes of `{}`", tcx.def_path_str(def_id) }
-        arena_cache
         cache_on_disk
         separate_provide_extern
         feedable
@@ -2094,7 +2090,6 @@ rustc_queries! {
     /// lifetimes directly on things like trait methods, because of trait params.
     /// See `rustc_resolve::late::lifetimes` for details.
     query resolve_bound_vars(owner_id: hir::OwnerId) -> &'tcx ResolveBoundVars<'tcx> {
-        arena_cache
         desc { "resolving lifetimes for `{}`", tcx.def_path_str(owner_id) }
     }
     query named_variable_map(owner_id: hir::OwnerId) -> &'tcx SortedMap<ItemLocalId, ResolvedArg> {

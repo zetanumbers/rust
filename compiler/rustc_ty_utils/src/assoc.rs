@@ -51,13 +51,13 @@ fn associated_item_def_ids(tcx: TyCtxt<'_>, def_id: LocalDefId) -> &[DefId] {
     }
 }
 
-fn associated_items(tcx: TyCtxt<'_>, def_id: DefId) -> ty::AssocItems {
-    if tcx.is_trait_alias(def_id) {
+fn associated_items<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> &'tcx ty::AssocItems {
+    tcx.arena.alloc(if tcx.is_trait_alias(def_id) {
         ty::AssocItems::new(Vec::new())
     } else {
         let items = tcx.associated_item_def_ids(def_id).iter().map(|did| tcx.associated_item(*did));
         ty::AssocItems::new(items)
-    }
+    })
 }
 
 fn impl_item_implementor_ids(tcx: TyCtxt<'_>, impl_id: DefId) -> DefIdMap<DefId> {
@@ -352,14 +352,14 @@ fn associated_type_for_impl_trait_in_impl(
         let param_def_id_to_index =
             own_params.iter().map(|param| (param.def_id, param.index)).collect();
 
-        ty::Generics {
+        tcx.arena.alloc(ty::Generics {
             parent: Some(impl_local_def_id.to_def_id()),
             parent_count,
             own_params,
             param_def_id_to_index,
             has_self: false,
             has_late_bound_regions: trait_assoc_generics.has_late_bound_regions,
-        }
+        })
     });
 
     // There are no inferred outlives for the synthesized associated type.

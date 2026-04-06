@@ -253,7 +253,7 @@ pub(crate) fn provide(providers: &mut Providers) {
 /// You should not read the result of this query directly, but rather use
 /// `named_variable_map`, `late_bound_vars_map`, etc.
 #[instrument(level = "debug", skip(tcx))]
-fn resolve_bound_vars(tcx: TyCtxt<'_>, local_def_id: hir::OwnerId) -> ResolveBoundVars<'_> {
+fn resolve_bound_vars(tcx: TyCtxt<'_>, local_def_id: hir::OwnerId) -> &ResolveBoundVars<'_> {
     let mut rbv = ResolveBoundVars::default();
     let mut visitor = BoundVarContext {
         tcx,
@@ -284,7 +284,7 @@ fn resolve_bound_vars(tcx: TyCtxt<'_>, local_def_id: hir::OwnerId) -> ResolveBou
     debug!(?rbv.defs);
     debug!(?rbv.late_bound_vars);
     debug!(?rbv.opaque_captured_lifetimes);
-    rbv
+    tcx.arena.alloc(rbv)
 }
 
 fn late_arg_as_bound_arg<'tcx>(param: &GenericParam<'tcx>) -> ty::BoundVariableKind<'tcx> {

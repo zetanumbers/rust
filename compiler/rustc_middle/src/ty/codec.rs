@@ -19,10 +19,12 @@ use rustc_span::{Span, SpanDecoder, SpanEncoder, Spanned};
 
 use crate::arena::ArenaAllocatable;
 use crate::infer::canonical::{CanonicalVarKind, CanonicalVarKinds};
+use crate::middle::codegen_fn_attrs::CodegenFnAttrs;
+use crate::middle::resolve_bound_vars::ResolveBoundVars;
 use crate::mir::interpret::{AllocId, ConstAllocation, CtfeProvenance};
 use crate::mir::mono::MonoItem;
 use crate::ty::{self, AdtDef, GenericArgsRef, Ty, TyCtxt};
-use crate::{mir, traits};
+use crate::{lint, mir, traits};
 
 /// The shorthand encoding uses an enum's variant index `usize`
 /// and is offset by this value so it never matches a real variant.
@@ -490,6 +492,11 @@ impl<'tcx, D: TyDecoder<'tcx>> Decodable<D> for &'tcx ty::List<LocalDefId> {
 
 impl_decodable_via_ref! {
     &'tcx ty::TypeckResults<'tcx>,
+    &'tcx ty::Generics,
+    &'tcx ty::AssocItems,
+    &'tcx lint::ShallowLintLevelMap,
+    &'tcx ResolveBoundVars<'tcx>,
+    &'tcx CodegenFnAttrs,
     &'tcx ty::List<Ty<'tcx>>,
     &'tcx ty::List<ty::PolyExistentialPredicate<'tcx>>,
     &'tcx traits::ImplSource<'tcx, ()>,

@@ -242,7 +242,7 @@ impl AssocTag {
 /// When doing lookup by name, we try to postpone hygienic comparison for as long as possible since
 /// it is relatively expensive. Instead, items are indexed by `Symbol` and hygienic comparison is
 /// done only on items with the same name.
-#[derive(Debug, Clone, PartialEq, HashStable)]
+#[derive(Debug, Clone, PartialEq, HashStable, Decodable)]
 pub struct AssocItems {
     items: SortedIndexMultiMap<u32, Option<Symbol>, ty::AssocItem>,
 }

@@ -6,6 +6,7 @@ use rustc_errors::{Diag, DiagLocation, Diagnostic, MultiSpan};
 use rustc_hir::{HirId, ItemLocalId};
 use rustc_lint_defs::EditionFcw;
 use rustc_macros::{Decodable, Encodable, HashStable};
+use rustc_serialize::{Decodable, Decoder};
 use rustc_session::Session;
 use rustc_session::lint::builtin::{self, FORBIDDEN_LINT_GROUPS};
 use rustc_session::lint::{FutureIncompatibilityReason, Level, Lint, LintExpectationId, LintId};
@@ -68,6 +69,12 @@ pub struct LevelAndSource {
 pub struct ShallowLintLevelMap {
     pub expectations: Vec<(LintExpectationId, LintExpectation)>,
     pub specs: SortedMap<ItemLocalId, FxIndexMap<LintId, LevelAndSource>>,
+}
+
+impl<D: Decoder> Decodable<D> for ShallowLintLevelMap {
+    fn decode(_: &mut D) -> Self {
+        unimplemented!()
+    }
 }
 
 /// From an initial level and source, verify the effect of special annotations:
