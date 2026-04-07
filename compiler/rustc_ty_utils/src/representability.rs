@@ -89,11 +89,7 @@ fn params_in_repr(tcx: TyCtxt<'_>, def_id: LocalDefId) -> &DenseBitSet<u32> {
     let params_in_repr = tcx.arena.alloc(DenseBitSet::new_empty(generics.own_params.len()));
     for variant in adt_def.variants() {
         for field in variant.fields.iter() {
-            params_in_repr_ty(
-                tcx,
-                tcx.type_of(field.did).instantiate_identity(),
-                params_in_repr,
-            );
+            params_in_repr_ty(tcx, tcx.type_of(field.did).instantiate_identity(), params_in_repr);
         }
     }
     params_in_repr

@@ -535,7 +535,9 @@ pub(in crate::rmeta) fn provide(providers: &mut Providers) {
             visible_parent_map
         },
 
-        dependency_formats: |tcx, ()| tcx.arena.alloc(Arc::new(crate::dependency_format::calculate(tcx))),
+        dependency_formats: |tcx, ()| {
+            tcx.arena.alloc(Arc::new(crate::dependency_format::calculate(tcx)))
+        },
         has_global_allocator: |tcx, LocalCrate| CStore::from_tcx(tcx).has_global_allocator(),
         has_alloc_error_handler: |tcx, LocalCrate| CStore::from_tcx(tcx).has_alloc_error_handler(),
         postorder_cnums: |tcx, ()| {

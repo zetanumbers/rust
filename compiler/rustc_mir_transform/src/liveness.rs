@@ -50,7 +50,10 @@ struct Access {
 }
 
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
-pub(crate) fn check_liveness<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> &'tcx DenseBitSet<FieldIdx> {
+pub(crate) fn check_liveness<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def_id: LocalDefId,
+) -> &'tcx DenseBitSet<FieldIdx> {
     static EMPTY_FIELD_BIT_SET: DenseBitSet<FieldIdx> = DenseBitSet::EMPTY;
 
     // Don't run on synthetic MIR, as that will ICE trying to access HIR.
