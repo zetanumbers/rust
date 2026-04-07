@@ -9,6 +9,7 @@ macro_rules! arena_types {
             [] attribute: rustc_hir::Attribute,
             [] owner_info: rustc_hir::OwnerInfo<'tcx>,
             [] macro_def: rustc_ast::MacroDef,
+            [] map_string_stability: rustc_data_structures::unord::UnordMap<String, rustc_target::target_features::Stability>,
         ]);
     )
 }

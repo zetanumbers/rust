@@ -388,7 +388,7 @@ provide! { tcx, def_id, other, cdata,
     }
     lib_features => { cdata.get_lib_features(tcx) }
     stability_implications => {
-        cdata.get_stability_implications(tcx).iter().copied().collect()
+        tcx.arena.alloc(cdata.get_stability_implications(tcx).iter().copied().collect())
     }
     stripped_cfg_items => { cdata.get_stripped_cfg_items(tcx, cdata.cnum) }
     intrinsic_raw => { cdata.get_intrinsic(tcx, def_id.index) }

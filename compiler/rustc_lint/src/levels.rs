@@ -127,7 +127,7 @@ impl LintLevelSets {
     }
 }
 
-fn lints_that_dont_need_to_run(tcx: TyCtxt<'_>, (): ()) -> UnordSet<LintId> {
+fn lints_that_dont_need_to_run(tcx: TyCtxt<'_>, (): ()) -> &UnordSet<LintId> {
     let store = unerased_lint_store(&tcx.sess);
     let root_map = tcx.shallow_lint_levels_on(hir::CRATE_OWNER_ID);
 
@@ -164,7 +164,7 @@ fn lints_that_dont_need_to_run(tcx: TyCtxt<'_>, (): ()) -> UnordSet<LintId> {
         }
     }
 
-    dont_need_to_run.into()
+    tcx.arena.alloc(UnordSet::from(dont_need_to_run))
 }
 
 #[instrument(level = "trace", skip(tcx), ret)]

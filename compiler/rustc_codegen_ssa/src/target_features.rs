@@ -464,7 +464,7 @@ pub(crate) fn provide(providers: &mut Providers) {
     *providers = Providers {
         rust_target_features: |tcx, cnum| {
             assert_eq!(cnum, LOCAL_CRATE);
-            if tcx.sess.opts.actually_rustdoc {
+            tcx.arena.alloc(if tcx.sess.opts.actually_rustdoc {
                 // HACK: rustdoc would like to pretend that we have all the target features, so we
                 // have to merge all the lists into one. To ensure an unstable target never prevents
                 // a stable one from working, we merge the stability info of all instances of the
@@ -505,7 +505,7 @@ pub(crate) fn provide(providers: &mut Providers) {
                     .iter()
                     .map(|(a, b, _)| (a.to_string(), *b))
                     .collect()
-            }
+            })
         },
         implied_target_features: |tcx, feature: Symbol| {
             let feature = feature.as_str();

@@ -261,7 +261,7 @@ fn lookup_const_stability(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<ConstSt
     None
 }
 
-fn stability_implications(tcx: TyCtxt<'_>, LocalCrate: LocalCrate) -> UnordMap<Symbol, Symbol> {
+fn stability_implications(tcx: TyCtxt<'_>, LocalCrate: LocalCrate) -> &UnordMap<Symbol, Symbol> {
     let mut implications = UnordMap::default();
 
     let mut register_implication = |def_id| {
@@ -305,7 +305,7 @@ fn stability_implications(tcx: TyCtxt<'_>, LocalCrate: LocalCrate) -> UnordMap<S
         }
     }
 
-    implications
+    tcx.arena.alloc(implications)
 }
 
 struct MissingStabilityAnnotations<'tcx> {

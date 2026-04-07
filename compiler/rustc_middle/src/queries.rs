@@ -556,7 +556,6 @@ rustc_queries! {
     }
 
     query lints_that_dont_need_to_run(_: ()) -> &'tcx UnordSet<LintId> {
-        arena_cache
         desc { "Computing all lints that are explicitly enabled or with a default level greater than Allow" }
     }
 
@@ -1284,8 +1283,7 @@ rustc_queries! {
 
     /// Return the set of (transitive) callees that may result in a recursive call to `key`,
     /// if we were able to walk all callees.
-    query mir_callgraph_cyclic(key: LocalDefId) -> &'tcx Option<UnordSet<LocalDefId>> {
-        arena_cache
+    query mir_callgraph_cyclic(key: LocalDefId) -> Option<&'tcx LocalDefIdSet> {
         desc {
             "computing (transitive) callees of `{}` that may recurse",
             tcx.def_path_str(key),
@@ -1401,7 +1399,6 @@ rustc_queries! {
     }
 
     query reachable_set(_: ()) -> &'tcx LocalDefIdSet {
-        arena_cache
         desc { "reachability" }
         cache_on_disk
     }
@@ -2201,7 +2198,6 @@ rustc_queries! {
     /// attribute had an `implies` meta item, then a map would be necessary when avoiding a "use of
     /// unstable feature" error for a feature that was implied.
     query stability_implications(_: CrateNum) -> &'tcx UnordMap<Symbol, Symbol> {
-        arena_cache
         desc { "calculating the implications between `#[unstable]` features defined in a crate" }
         separate_provide_extern
     }
@@ -2569,7 +2565,6 @@ rustc_queries! {
 
     /// Returns the Rust target features for the current target. These are not always the same as LLVM target features!
     query rust_target_features(_: CrateNum) -> &'tcx UnordMap<String, rustc_target::target_features::Stability> {
-        arena_cache
         eval_always
         desc { "looking up Rust target features" }
     }

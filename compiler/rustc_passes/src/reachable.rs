@@ -447,7 +447,7 @@ fn has_custom_linkage(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
 }
 
 /// See module-level doc comment above.
-fn reachable_set(tcx: TyCtxt<'_>, (): ()) -> LocalDefIdSet {
+fn reachable_set(tcx: TyCtxt<'_>, (): ()) -> &LocalDefIdSet {
     let effective_visibilities = &tcx.effective_visibilities(());
 
     let any_library = tcx.crate_types().iter().any(|ty| {
@@ -511,7 +511,7 @@ fn reachable_set(tcx: TyCtxt<'_>, (): ()) -> LocalDefIdSet {
     debug!("Inline reachability shows: {:?}", reachable_context.reachable_symbols);
 
     // Return the set of reachable symbols.
-    reachable_context.reachable_symbols
+    tcx.arena.alloc(reachable_context.reachable_symbols)
 }
 
 pub(crate) fn provide(providers: &mut Providers) {
