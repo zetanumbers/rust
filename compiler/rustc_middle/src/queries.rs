@@ -1540,7 +1540,6 @@ rustc_queries! {
     /// Gets the rendered value of the specified constant or associated constant.
     /// Used by rustdoc.
     query rendered_const(def_id: DefId) -> &'tcx String {
-        arena_cache
         desc { "rendering constant initializer of `{}`", tcx.def_path_str(def_id) }
         separate_provide_extern
     }
@@ -2041,7 +2040,6 @@ rustc_queries! {
     /// Gets the extra data to put in each output filename for a crate.
     /// For example, compiling the `foo` crate with `extra-filename=-a` creates a `libfoo-b.rlib` file.
     query extra_filename(_: CrateNum) -> &'tcx String {
-        arena_cache
         eval_always
         desc { "looking up the extra filename for a crate" }
         separate_provide_extern

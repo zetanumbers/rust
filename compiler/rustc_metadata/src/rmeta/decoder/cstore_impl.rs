@@ -375,7 +375,7 @@ provide! { tcx, def_id, other, cdata,
     crate_name => { cdata.root.header.name }
     num_extern_def_ids => { cdata.num_def_ids() }
 
-    extra_filename => { cdata.root.extra_filename.clone() }
+    extra_filename => { tcx.arena.alloc(cdata.root.extra_filename.clone()) }
 
     traits => { tcx.arena.alloc_from_iter(cdata.get_traits(tcx)) }
     trait_impls_in_crate => { tcx.arena.alloc_from_iter(cdata.get_trait_impls(tcx)) }
