@@ -1016,7 +1016,7 @@ pub fn create_and_enter_global_ctxt<T, F: for<'tcx> FnOnce(TyCtxt<'tcx>) -> T>(
                 crate_name,
             )));
             feed.crate_for_resolver(tcx.arena.alloc(Steal::new((krate, pre_configured_attrs))));
-            feed.output_filenames(Arc::new(outputs));
+            feed.output_filenames(tcx.arena.alloc(Arc::new(outputs)));
 
             let res = f(tcx);
             // FIXME maybe run finish even when a fatal error occurred? or at least

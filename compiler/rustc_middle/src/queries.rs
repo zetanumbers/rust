@@ -1808,7 +1808,6 @@ rustc_queries! {
     }
 
     query dependency_formats(_: ()) -> &'tcx Arc<crate::middle::dependency_format::Dependencies> {
-        arena_cache
         desc { "getting the linkage format of all dependencies" }
     }
 
@@ -2265,7 +2264,6 @@ rustc_queries! {
         separate_provide_extern
     }
     query used_crate_source(_: CrateNum) -> &'tcx Arc<CrateSource> {
-        arena_cache
         eval_always
         desc { "looking at the source for a crate" }
         separate_provide_extern
@@ -2403,7 +2401,6 @@ rustc_queries! {
     query output_filenames(_: ()) -> &'tcx Arc<OutputFilenames> {
         feedable
         desc { "getting output filenames" }
-        arena_cache
     }
 
     /// <div class="warning">
