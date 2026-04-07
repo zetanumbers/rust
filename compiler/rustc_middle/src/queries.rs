@@ -388,7 +388,6 @@ rustc_queries! {
 
     query unsizing_params_for_adt(key: DefId) -> &'tcx rustc_index::bit_set::DenseBitSet<u32>
     {
-        arena_cache
         desc {
             "determining what parameters of `{}` can participate in unsizing",
             tcx.def_path_str(key),
@@ -543,8 +542,7 @@ rustc_queries! {
     /// These are assembled from the following places:
     /// - `extern` blocks (depending on their `link` attributes)
     /// - the `libs` (`-l`) option
-    query native_libraries(_: CrateNum) -> &'tcx Vec<NativeLib> {
-        arena_cache
+    query native_libraries(_: CrateNum) -> &'tcx [NativeLib] {
         desc { "looking up the native libraries of a linked crate" }
         separate_provide_extern
     }
@@ -553,8 +551,7 @@ rustc_queries! {
         desc { "looking up lint levels for `{}`", tcx.def_path_str(key) }
     }
 
-    query lint_expectations(_: ()) -> &'tcx Vec<(LintExpectationId, LintExpectation)> {
-        arena_cache
+    query lint_expectations(_: ()) -> &'tcx [(LintExpectationId, LintExpectation)] {
         desc { "computing `#[expect]`ed lints in this crate" }
     }
 
@@ -599,7 +596,6 @@ rustc_queries! {
     /// Set of param indexes for type params that are in the type's representation
     query params_in_repr(key: DefId) -> &'tcx rustc_index::bit_set::DenseBitSet<u32> {
         desc { "finding type parameters in the representation" }
-        arena_cache
         no_hash
         separate_provide_extern
     }
@@ -1192,7 +1188,6 @@ rustc_queries! {
     }
 
     query check_liveness(key: LocalDefId) -> &'tcx rustc_index::bit_set::DenseBitSet<abi::FieldIdx> {
-        arena_cache
         desc { "checking liveness of variables in `{}`", tcx.def_path_str(key.to_def_id()) }
     }
 
@@ -2054,8 +2049,7 @@ rustc_queries! {
     }
 
     /// Gets the paths where the crate came from in the file system.
-    query crate_extern_paths(_: CrateNum) -> &'tcx Vec<PathBuf> {
-        arena_cache
+    query crate_extern_paths(_: CrateNum) -> &'tcx [PathBuf] {
         eval_always
         desc { "looking up the paths for extern crates" }
         separate_provide_extern
@@ -2281,8 +2275,7 @@ rustc_queries! {
     /// NOTE: This query has to be marked `eval_always` because it reads data
     ///       directly from disk that is not tracked anywhere else. I.e. it
     ///       represents a genuine input to the query system.
-    query debugger_visualizers(_: CrateNum) -> &'tcx Vec<DebuggerVisualizerFile> {
-        arena_cache
+    query debugger_visualizers(_: CrateNum) -> &'tcx [DebuggerVisualizerFile] {
         desc { "looking up the debugger visualizers for this crate" }
         separate_provide_extern
         eval_always
@@ -2586,8 +2579,7 @@ rustc_queries! {
         desc { "looking up Rust target features" }
     }
 
-    query implied_target_features(feature: Symbol) -> &'tcx Vec<Symbol> {
-        arena_cache
+    query implied_target_features(feature: Symbol) -> &'tcx [Symbol] {
         eval_always
         desc { "looking up implied target features" }
     }
@@ -2645,8 +2637,7 @@ rustc_queries! {
 
     /// The list of backend features computed from CLI flags (`-Ctarget-cpu`, `-Ctarget-feature`,
     /// `--target` and similar).
-    query global_backend_features(_: ()) -> &'tcx Vec<String> {
-        arena_cache
+    query global_backend_features(_: ()) -> &'tcx [String] {
         eval_always
         desc { "computing the backend features for CLI flags" }
     }

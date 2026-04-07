@@ -297,7 +297,7 @@ fn asyncness(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Asyncness {
     })
 }
 
-fn unsizing_params_for_adt<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> DenseBitSet<u32> {
+fn unsizing_params_for_adt<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> &'tcx DenseBitSet<u32> {
     let def = tcx.adt_def(def_id);
     let num_params = tcx.generics_of(def_id).count();
 
@@ -316,12 +316,13 @@ fn unsizing_params_for_adt<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> DenseBitSe
         },
     };
 
+    let unsizing_params = tcx.arena.alloc(DenseBitSet::new_empty(num_params));
+
     // The last field of the structure has to exist and contain type/const parameters.
     let Some((tail_field, prefix_fields)) = def.non_enum_variant().fields.raw.split_last() else {
-        return DenseBitSet::new_empty(num_params);
+        return unsizing_params;
     };
 
-    let mut unsizing_params = DenseBitSet::new_empty(num_params);
     for arg in tcx.type_of(tail_field.did).instantiate_identity().walk() {
         if let Some(i) = maybe_unsizing_param_idx(arg) {
             unsizing_params.insert(i);

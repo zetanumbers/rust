@@ -32,6 +32,13 @@ macro_rules! arena_types {
             [decode] shallow_lint_level_map: rustc_middle::lint::ShallowLintLevelMap,
             [decode] resolve_bound_vars: rustc_middle::middle::resolve_bound_vars::ResolveBoundVars<'tcx>,
             [decode] codegene_fn_attrs: rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs,
+            [decode] field_bit_set: rustc_index::bit_set::DenseBitSet<rustc_abi::FieldIdx>,
+            [decode] u32_bit_set: rustc_index::bit_set::DenseBitSet<u32>,
+            [decode] native_lib: rustc_session::cstore::NativeLib,
+            [decode] pathbuf: std::path::PathBuf,
+            [decode] string: std::string::String,
+            [decode] lint_expectations: (rustc_lint_defs::LintExpectationId, rustc_middle::lint::LintExpectation),
+            [decode] debugger_visualizer_file: rustc_middle::middle::debugger_visualizer::DebuggerVisualizerFile,
             [decode] borrowck_result: rustc_data_structures::fx::FxIndexMap<
                 rustc_hir::def_id::LocalDefId,
                 rustc_middle::ty::DefinitionSiteHiddenType<'tcx>,

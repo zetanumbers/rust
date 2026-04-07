@@ -244,7 +244,7 @@ impl CodegenBackend for LlvmCodegenBackend {
 
     fn provide(&self, providers: &mut Providers) {
         providers.queries.global_backend_features =
-            |tcx, ()| llvm_util::global_llvm_features(tcx.sess, false)
+            |tcx, ()| tcx.arena.alloc_from_iter(llvm_util::global_llvm_features(tcx.sess, false))
     }
 
     fn print(&self, req: &PrintRequest, out: &mut String, sess: &Session) {

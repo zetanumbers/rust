@@ -184,7 +184,7 @@ fn find_bundled_library(
     None
 }
 
-pub(crate) fn collect(tcx: TyCtxt<'_>, LocalCrate: LocalCrate) -> Vec<NativeLib> {
+pub(crate) fn collect(tcx: TyCtxt<'_>, LocalCrate: LocalCrate) -> &[NativeLib] {
     let mut collector = Collector { tcx, libs: Vec::new() };
     if tcx.sess.opts.unstable_opts.link_directives {
         for module in tcx.foreign_modules(LOCAL_CRATE).values() {
@@ -192,7 +192,7 @@ pub(crate) fn collect(tcx: TyCtxt<'_>, LocalCrate: LocalCrate) -> Vec<NativeLib>
         }
     }
     collector.process_command_line();
-    collector.libs
+    tcx.arena.alloc_from_iter(collector.libs)
 }
 
 pub(crate) fn relevant_lib(sess: &Session, lib: &NativeLib) -> bool {

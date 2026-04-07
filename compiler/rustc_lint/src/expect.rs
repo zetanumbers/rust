@@ -12,12 +12,10 @@ pub(crate) fn provide(providers: &mut Providers) {
     *providers = Providers { lint_expectations, check_expectations, ..*providers };
 }
 
-fn lint_expectations(tcx: TyCtxt<'_>, (): ()) -> Vec<(LintExpectationId, LintExpectation)> {
+fn lint_expectations(tcx: TyCtxt<'_>, (): ()) -> &[(LintExpectationId, LintExpectation)] {
     let krate = tcx.hir_crate_items(());
 
-    let mut expectations = Vec::new();
-
-    for owner in krate.owners() {
+    tcx.arena.alloc_from_iter(krate.owners().flat_map(|owner| {
         // Deduplicate expectations
         let mut inner_expectations = Vec::new();
         let lints = tcx.shallow_lint_levels_on(owner);
@@ -27,10 +25,8 @@ fn lint_expectations(tcx: TyCtxt<'_>, (): ()) -> Vec<(LintExpectationId, LintExp
                 inner_expectations.push(expectation.clone());
             }
         }
-        expectations.extend(inner_expectations);
-    }
-
-    expectations
+        inner_expectations
+    }))
 }
 
 fn canonicalize_id(expect_id: &LintExpectationId) -> (rustc_span::AttrId, u16) {

@@ -50,20 +50,22 @@ struct Access {
 }
 
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
-pub(crate) fn check_liveness<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> DenseBitSet<FieldIdx> {
+pub(crate) fn check_liveness<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> &'tcx DenseBitSet<FieldIdx> {
+    static EMPTY_FIELD_BIT_SET: DenseBitSet<FieldIdx> = DenseBitSet::EMPTY;
+
     // Don't run on synthetic MIR, as that will ICE trying to access HIR.
     if tcx.is_synthetic_mir(def_id) {
-        return DenseBitSet::new_empty(0);
+        return &EMPTY_FIELD_BIT_SET;
     }
 
     // Don't run unused pass for intrinsics
     if tcx.intrinsic(def_id.to_def_id()).is_some() {
-        return DenseBitSet::new_empty(0);
+        return &EMPTY_FIELD_BIT_SET;
     }
 
     // Don't run unused pass for #[naked]
     if find_attr!(tcx, def_id.to_def_id(), Naked(..)) {
-        return DenseBitSet::new_empty(0);
+        return &EMPTY_FIELD_BIT_SET;
     }
 
     // Don't run unused pass for #[derive]
@@ -71,7 +73,7 @@ pub(crate) fn check_liveness<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> Den
     if let DefKind::Impl { of_trait: true } = tcx.def_kind(parent)
         && find_attr!(tcx, parent, AutomaticallyDerived(..))
     {
-        return DenseBitSet::new_empty(0);
+        return &EMPTY_FIELD_BIT_SET;
     }
 
     let mut body = &*tcx.mir_promoted(def_id).0.borrow();
@@ -79,7 +81,7 @@ pub(crate) fn check_liveness<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> Den
 
     // Don't run if there are errors.
     if body.tainted_by_errors.is_some() {
-        return DenseBitSet::new_empty(0);
+        return &EMPTY_FIELD_BIT_SET;
     }
 
     let mut checked_places = PlaceSet::default();
@@ -152,7 +154,7 @@ pub(crate) fn check_liveness<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> Den
     assignments.report_fully_unused();
     assignments.report_unused_assignments();
 
-    dead_captures
+    tcx.arena.alloc(dead_captures)
 }
 
 /// Small helper to make semantics easier to read.

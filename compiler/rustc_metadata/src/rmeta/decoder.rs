@@ -1181,8 +1181,8 @@ impl<'a> CrateMetadataRef<'a> {
             .decode((self, tcx))
     }
 
-    fn get_debugger_visualizers(self, tcx: TyCtxt<'_>) -> Vec<DebuggerVisualizerFile> {
-        self.root.debugger_visualizers.decode((self, tcx)).collect::<Vec<_>>()
+    fn get_debugger_visualizers<'tcx>(self, tcx: TyCtxt<'tcx>) -> &'tcx [DebuggerVisualizerFile] {
+        tcx.arena.alloc_from_iter(self.root.debugger_visualizers.decode((self, tcx)))
     }
 
     /// Iterates over all the stability attributes in the given crate.

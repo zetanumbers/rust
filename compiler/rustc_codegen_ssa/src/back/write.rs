@@ -1278,7 +1278,7 @@ fn start_executing_work<B: ExtraBackendMethods>(
         .expect("failed to spawn helper thread");
 
     let opt_level = tcx.backend_optimization_level(());
-    let backend_features = tcx.global_backend_features(()).clone();
+    let backend_features = tcx.global_backend_features(()).to_vec();
     let tm_factory = backend.target_machine_factory(tcx.sess, opt_level, &backend_features);
 
     let remark_dir = if let Some(ref dir) = sess.opts.unstable_opts.remark_dir {

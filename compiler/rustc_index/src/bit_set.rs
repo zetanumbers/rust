@@ -8,6 +8,8 @@ use std::{fmt, iter, slice};
 use Chunk::*;
 #[cfg(feature = "nightly")]
 use rustc_macros::{Decodable_NoContext, Encodable_NoContext};
+#[cfg(feature = "nightly")]
+use rustc_serialize::{Decodable, Decoder};
 
 use crate::{Idx, IndexVec};
 
@@ -121,6 +123,13 @@ pub struct DenseBitSet<T> {
     marker: PhantomData<T>,
 }
 
+#[cfg(feature = "nightly")]
+impl<T, D: Decoder> Decodable<D> for &DenseBitSet<T> {
+    fn decode(_: &mut D) -> Self {
+        unimplemented!()
+    }
+}
+
 impl<T> DenseBitSet<T> {
     /// Gets the domain size.
     pub fn domain_size(&self) -> usize {
@@ -129,6 +138,8 @@ impl<T> DenseBitSet<T> {
 }
 
 impl<T: Idx> DenseBitSet<T> {
+    pub const EMPTY: Self = DenseBitSet { domain_size: 0, words: Vec::new(), marker: PhantomData };
+
     /// Creates a new, empty bitset with a given `domain_size`.
     #[inline]
     pub fn new_empty(domain_size: usize) -> DenseBitSet<T> {
@@ -1309,7 +1320,7 @@ impl<T: Idx> GrowableBitSet<T> {
     }
 
     pub fn new_empty() -> GrowableBitSet<T> {
-        GrowableBitSet { bit_set: DenseBitSet::new_empty(0) }
+        GrowableBitSet { bit_set: DenseBitSet::EMPTY }
     }
 
     pub fn with_capacity(capacity: usize) -> GrowableBitSet<T> {

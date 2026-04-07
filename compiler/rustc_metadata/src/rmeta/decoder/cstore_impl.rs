@@ -368,7 +368,7 @@ provide! { tcx, def_id, other, cdata,
 
         reachable_non_generics
     }
-    native_libraries => { cdata.get_native_libraries(tcx).collect() }
+    native_libraries => { tcx.arena.alloc_from_iter(cdata.get_native_libraries(tcx)) }
     foreign_modules => { cdata.get_foreign_modules(tcx).map(|m| (m.def_id, m)).collect() }
     crate_hash => { cdata.root.header.hash }
     crate_host_hash => { cdata.host_hash }
@@ -408,7 +408,7 @@ provide! { tcx, def_id, other, cdata,
     exported_non_generic_symbols => { cdata.exported_non_generic_symbols(tcx) }
     exported_generic_symbols => { cdata.exported_generic_symbols(tcx) }
 
-    crate_extern_paths => { cdata.source().paths().cloned().collect() }
+    crate_extern_paths => { tcx.arena.alloc_from_iter(cdata.source().paths().cloned()) }
     expn_that_defined => { cdata.get_expn_that_defined(tcx, def_id.index) }
     default_field => { cdata.get_default_field(tcx, def_id.index) }
     is_doc_hidden => { cdata.get_attr_flags(tcx,def_id.index).contains(AttrFlags::IS_DOC_HIDDEN) }

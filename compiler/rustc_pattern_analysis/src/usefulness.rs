@@ -1146,7 +1146,7 @@ impl<'p, Cx: PatCx> MatrixRow<'p, Cx> {
             parent_row: arm_id,
             is_under_guard: arm.has_guard,
             useful: false,
-            intersects_at_least: DenseBitSet::new_empty(0), // Initialized in `Matrix::push`.
+            intersects_at_least: DenseBitSet::EMPTY, // Initialized in `Matrix::push`.
             // This pattern is a branch because it comes from a match arm.
             head_is_branch: true,
         }
@@ -1172,7 +1172,7 @@ impl<'p, Cx: PatCx> MatrixRow<'p, Cx> {
             parent_row,
             is_under_guard: self.is_under_guard,
             useful: false,
-            intersects_at_least: DenseBitSet::new_empty(0), // Initialized in `Matrix::push`.
+            intersects_at_least: DenseBitSet::EMPTY, // Initialized in `Matrix::push`.
             head_is_branch: is_or_pat,
         })
     }
@@ -1192,7 +1192,7 @@ impl<'p, Cx: PatCx> MatrixRow<'p, Cx> {
             parent_row,
             is_under_guard: self.is_under_guard,
             useful: false,
-            intersects_at_least: DenseBitSet::new_empty(0), // Initialized in `Matrix::push`.
+            intersects_at_least: DenseBitSet::EMPTY, // Initialized in `Matrix::push`.
             head_is_branch: false,
         })
     }
