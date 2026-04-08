@@ -128,7 +128,7 @@ fn get_simple_intrinsic<'gcc, 'tcx>(
                 "powf128",
                 false,
             ));
-        },
+        }
         sym::truncf32 => "truncf",
         sym::truncf64 => "trunc",
         // We match the LLVM backend and lower this to `rint`.
