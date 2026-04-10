@@ -32,6 +32,7 @@ use rustc_span::def_id::DefId;
 use rustc_target::callconv::FnAbi;
 use rustc_target::spec::{HasTargetSpec, HasX86AbiOpt, Target, X86Abi};
 
+use crate::abi::FnAbiGccExt;
 use crate::common::{SignType, TypeReflection, type_is_pointer};
 use crate::context::CodegenCx;
 use crate::errors;
@@ -212,6 +213,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         _typ: &str,
         func_ptr: RValue<'gcc>,
         args: &'b [RValue<'gcc>],
+        on_stack_param_indices: &FxHashSet<usize>,
     ) -> Cow<'b, [RValue<'gcc>]> {
         let mut all_args_match = true;
         let mut param_types = vec![];
@@ -222,11 +224,6 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 all_args_match = false;
             }
             param_types.push(param);
-        }
-
-        let mut on_stack_param_indices = FxHashSet::default();
-        if let Some(indices) = self.on_stack_params.borrow().get(&gcc_func) {
-            on_stack_param_indices.clone_from(indices);
         }
 
         if all_args_match {
@@ -350,6 +347,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
     fn function_ptr_call(
         &mut self,
         typ: Type<'gcc>,
+        fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         mut func_ptr: RValue<'gcc>,
         args: &[RValue<'gcc>],
         _funclet: Option<&Funclet>,
@@ -364,6 +362,11 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             }
         };
         let gcc_func = func_ptr_type.dyncast_function_ptr_type().expect("function ptr");
+        let on_stack_param_indices = if let Some(fn_abi) = fn_abi {
+            fn_abi.gcc_type(self.cx).on_stack_param_indices
+        } else {
+            self.on_stack_params.borrow().get(&gcc_func).cloned().unwrap_or_default()
+        };
         let func_name = format!("{:?}", func_ptr);
         let previous_arg_count = args.len();
         let orig_args = args;
@@ -372,7 +375,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             llvm::adjust_intrinsic_arguments(self, gcc_func, args.into(), &func_name)
         };
         let args_adjusted = args.len() != previous_arg_count;
-        let args = self.check_ptr_call("call", func_ptr, &args);
+        let args = self.check_ptr_call("call", func_ptr, &args, &on_stack_param_indices);
 
         // gccjit requires to use the result of functions, even when it's not used.
         // That's why we assign the result to a local or call add_eval().
@@ -1777,7 +1780,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
             self.function_call(func, args, funclet)
         } else {
             // If it's a not function that was defined, it's a function pointer.
-            self.function_ptr_call(typ, func, args, funclet)
+            self.function_ptr_call(typ, fn_abi, func, args, funclet)
         };
         if let Some(_fn_abi) = fn_abi {
             // FIXME(bjorn3): Apply function attributes
