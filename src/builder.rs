@@ -354,14 +354,12 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         args: &[RValue<'gcc>],
         _funclet: Option<&Funclet>,
     ) -> RValue<'gcc> {
-        let gcc_func = match func_ptr.get_type().dyncast_function_ptr_type() {
-            Some(func) => func,
-            None => {
-                // NOTE: due to opaque pointers now being used, we need to cast here.
-                let new_func_type = typ.dyncast_function_ptr_type().expect("function ptr");
-                func_ptr = self.context.new_cast(self.location, func_ptr, typ);
-                new_func_type
-            }
+        let gcc_func = if func_ptr.get_type() != typ {
+            let new_func_type = typ.dyncast_function_ptr_type().expect("function ptr");
+            func_ptr = self.context.new_cast(self.location, func_ptr, typ);
+            new_func_type
+        } else {
+            func_ptr.get_type().dyncast_function_ptr_type().expect("function ptr")
         };
         let func_name = format!("{:?}", func_ptr);
         let previous_arg_count = args.len();
