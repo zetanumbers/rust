@@ -17,7 +17,7 @@ use rustc_type_ir::inherent::*;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::{
     self as ty, Canonical, CanonicalVarKind, CanonicalVarValues, InferCtxtLike, Interner,
-    TypeFoldable, TypingMode, TypingModeEqWrapper,
+    MayBeErased, TypeFoldable, TypingMode, TypingModeEqWrapper,
 };
 use tracing::instrument;
 
@@ -65,16 +65,16 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    let (opaque_types, typing_mode) = match (erase_opaque_types, delegate.typing_mode()) {
+    let (opaque_types, typing_mode) = match (erase_opaque_types, delegate.typing_mode_raw()) {
         // In `TypingMode::Coherence` there should not be any opaques, and we also don't change typing mode.
         (_, TypingMode::Coherence) => {
             assert!(opaque_types.is_empty());
             (&[][..], TypingMode::Coherence)
         }
         // Make sure we're not recursively in `ErasedNotCoherence`.
-        (_, TypingMode::ErasedNotCoherence) => {
+        (_, TypingMode::ErasedNotCoherence(MayBeErased)) => {
             assert!(opaque_types.is_empty());
-            (&[][..], TypingMode::ErasedNotCoherence)
+            (&[][..], TypingMode::ErasedNotCoherence(MayBeErased))
         }
         // If we're supposed to erase opaque types, and we're in any typing mode other than coherence,
         // do the erasing and change typing mode.
@@ -84,7 +84,7 @@ where
             | TypingMode::Borrowck { .. }
             | TypingMode::PostBorrowckAnalysis { .. }
             | TypingMode::PostAnalysis,
-        ) => (&[][..], TypingMode::ErasedNotCoherence),
+        ) => (&[][..], TypingMode::ErasedNotCoherence(MayBeErased)),
         (EraseOpaqueTypes::No, typing_mode) => (opaque_types, typing_mode),
     };
 

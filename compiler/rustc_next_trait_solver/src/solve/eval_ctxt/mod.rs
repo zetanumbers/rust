@@ -8,13 +8,13 @@ use rustc_type_ir::inherent::*;
 use rustc_type_ir::relate::Relate;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::search_graph::{CandidateHeadUsages, PathKind};
-use rustc_type_ir::solve::{AccessedOpaques, AccessedOpaquesInfo, MaybeInfo, OpaqueTypesJank};
+use rustc_type_ir::solve::{AccessedOpaques, MaybeInfo, OpaqueTypesJank};
 use rustc_type_ir::{
     self as ty, CanonicalVarValues, InferCtxtLike, Interner, TypeFoldable, TypeFolder,
     TypeSuperFoldable, TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
     TypingMode,
 };
-use tracing::{Level, debug, instrument, trace, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use super::has_only_region_constraints;
 use crate::canonical::{
@@ -272,7 +272,7 @@ where
     I: Interner,
 {
     pub(super) fn typing_mode(&self) -> TypingMode<I> {
-        self.delegate.typing_mode()
+        self.delegate.typing_mode_raw()
     }
 
     /// Computes the `PathKind` for the step from the current goal to the

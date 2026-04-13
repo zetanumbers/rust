@@ -13,7 +13,7 @@ use rustc_infer::traits::solve::Goal;
 use rustc_middle::traits::query::NoSolution;
 use rustc_middle::traits::solve::Certainty;
 use rustc_middle::ty::{
-    self, Ty, TyCtxt, TypeFlags, TypeFoldable, TypeVisitableExt as _, TypingMode,
+    self, MayBeErased, Ty, TyCtxt, TypeFlags, TypeFoldable, TypeVisitableExt as _, TypingMode,
 };
 use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span};
 
@@ -288,7 +288,7 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
             // and the obligation is monomorphic, otherwise passes such as
             // transmute checking and polymorphic MIR optimizations could
             // get a result which isn't correct for all monomorphizations.
-            match self.typing_mode() {
+            match self.typing_mode_raw() {
                 TypingMode::Coherence
                 | TypingMode::Analysis { .. }
                 | TypingMode::Borrowck { .. }
@@ -297,7 +297,7 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
                     let poly_trait_ref = self.resolve_vars_if_possible(goal_trait_ref);
                     !poly_trait_ref.still_further_specializable()
                 }
-                TypingMode::ErasedNotCoherence => todo!(),
+                TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
             }
         };
 

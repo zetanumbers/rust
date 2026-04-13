@@ -11,9 +11,9 @@ use rustc_type_ir::lang_items::SolverTraitLangItem;
 use rustc_type_ir::search_graph::CandidateHeadUsages;
 use rustc_type_ir::solve::{AliasBoundKind, MaybeInfo, SizedTraitKind, StalledOnCoroutines};
 use rustc_type_ir::{
-    self as ty, AliasTy, Interner, TypeFlags, TypeFoldable, TypeFolder, TypeSuperFoldable,
-    TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor, TypingMode, Unnormalized,
-    Upcast, elaborate,
+    self as ty, AliasTy, Interner, MayBeErased, TypeFlags, TypeFoldable, TypeFolder,
+    TypeSuperFoldable, TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
+    TypingMode, Unnormalized, Upcast, elaborate,
 };
 use tracing::{debug, instrument};
 
@@ -478,7 +478,7 @@ where
                                 | CandidateSource::AliasBound(_)
                         ) && has_no_inference_or_external_constraints(c.result)
                     }),
-                    TypingMode::ErasedNotCoherence => todo!(),
+                    TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
                 };
                 if assemble_impls {
                     self.assemble_impl_candidates(goal, &mut candidates);
@@ -970,7 +970,7 @@ where
             | TypingMode::Borrowck { .. }
             | TypingMode::PostBorrowckAnalysis { .. }
             | TypingMode::PostAnalysis => {}
-            TypingMode::ErasedNotCoherence => todo!(),
+            TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
         }
 
         let mut i = 0;
@@ -1034,7 +1034,7 @@ where
             | TypingMode::Borrowck { .. }
             | TypingMode::PostBorrowckAnalysis { .. }
             | TypingMode::PostAnalysis => vec![],
-            TypingMode::ErasedNotCoherence => todo!(),
+            TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
         };
 
         if opaque_types.is_empty() {

@@ -26,8 +26,8 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.disable_trait_solver_fast_paths()
     }
 
-    fn typing_mode(&self) -> ty::TypingMode<'tcx> {
-        self.typing_mode()
+    fn typing_mode_raw(&self) -> ty::TypingMode<'tcx> {
+        self.typing_mode_raw()
     }
 
     fn universe(&self) -> ty::UniverseIndex {

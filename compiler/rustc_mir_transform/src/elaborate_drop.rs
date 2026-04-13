@@ -7,7 +7,7 @@ use rustc_index::Idx;
 use rustc_middle::mir::*;
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::util::IntTypeExt;
-use rustc_middle::ty::{self, GenericArg, GenericArgsRef, Ty, TyCtxt, Unnormalized};
+use rustc_middle::ty::{self, GenericArg, GenericArgsRef, MayBeErased, Ty, TyCtxt, Unnormalized};
 use rustc_middle::{bug, span_bug, traits};
 use rustc_span::{DUMMY_SP, Spanned, dummy_spanned};
 use tracing::{debug, instrument};
@@ -555,7 +555,7 @@ where
                     | ty::TypingMode::PostBorrowckAnalysis { .. } => {
                         bug!()
                     }
-                    ty::TypingMode::ErasedNotCoherence => todo!(),
+                    ty::TypingMode::ErasedNotCoherence(MayBeErased) => unreachable!(),
                 }
 
                 let field_ty = field.ty(tcx, args);

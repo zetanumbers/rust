@@ -7,7 +7,8 @@ use rustc_type_ir::fast_reject::DeepRejectCtxt;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::{SolverAdtLangItem, SolverLangItem, SolverTraitLangItem};
 use rustc_type_ir::{
-    self as ty, FieldInfo, Interner, NormalizesTo, PredicateKind, Unnormalized, Upcast as _,
+    self as ty, FieldInfo, Interner, MayBeErased, NormalizesTo, PredicateKind, Unnormalized,
+    Upcast as _,
 };
 use tracing::instrument;
 
@@ -311,7 +312,7 @@ where
                             return ecx
                                 .evaluate_added_goals_and_make_canonical_response(Certainty::Yes);
                         }
-                        ty::TypingMode::ErasedNotCoherence => todo!(),
+                        ty::TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
                     };
                 }
                 Err(guar) => return error_response(ecx, guar),
@@ -349,7 +350,7 @@ where
                             );
                             return then(ecx, Certainty::Yes);
                         }
-                        ty::TypingMode::ErasedNotCoherence => todo!(),
+                        ty::TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
                     }
                 } else {
                     return error_response(ecx, cx.delay_bug("missing item"));

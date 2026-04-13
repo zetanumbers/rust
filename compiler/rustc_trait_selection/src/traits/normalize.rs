@@ -12,8 +12,8 @@ use rustc_macros::extension;
 use rustc_middle::span_bug;
 use rustc_middle::traits::{ObligationCause, ObligationCauseCode};
 use rustc_middle::ty::{
-    self, AliasTerm, Term, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitable,
-    TypeVisitableExt, TypingMode, Unnormalized,
+    self, AliasTerm, MayBeErased, Term, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
+    TypeVisitable, TypeVisitableExt, TypingMode, Unnormalized,
 };
 use tracing::{debug, instrument};
 
@@ -138,14 +138,14 @@ pub(super) fn needs_normalization<'tcx, T: TypeVisitable<TyCtxt<'tcx>>>(
 
     // Opaques are treated as rigid outside of `TypingMode::PostAnalysis`,
     // so we can ignore those.
-    match infcx.typing_mode() {
+    match infcx.typing_mode_raw() {
         // FIXME(#132279): We likely want to reveal opaques during post borrowck analysis
         TypingMode::Coherence
         | TypingMode::Analysis { .. }
         | TypingMode::Borrowck { .. }
         | TypingMode::PostBorrowckAnalysis { .. } => flags.remove(ty::TypeFlags::HAS_TY_OPAQUE),
         TypingMode::PostAnalysis => {}
-        TypingMode::ErasedNotCoherence => todo!(),
+        TypingMode::ErasedNotCoherence(MayBeErased) => unreachable!(),
     }
 
     value.has_type_flags(flags)
@@ -411,7 +411,7 @@ impl<'a, 'b, 'tcx> TypeFolder<TyCtxt<'tcx>> for AssocTypeNormalizer<'a, 'b, 'tcx
         match data.kind {
             ty::Opaque { def_id } => {
                 // Only normalize `impl Trait` outside of type inference, usually in codegen.
-                match self.selcx.infcx.typing_mode() {
+                match self.selcx.typing_mode() {
                     // FIXME(#132279): We likely want to reveal opaques during post borrowck analysis
                     TypingMode::Coherence
                     | TypingMode::Analysis { .. }
@@ -436,7 +436,6 @@ impl<'a, 'b, 'tcx> TypeFolder<TyCtxt<'tcx>> for AssocTypeNormalizer<'a, 'b, 'tcx
                         self.depth -= 1;
                         folded_ty
                     }
-                    TypingMode::ErasedNotCoherence => todo!(),
                 }
             }
 

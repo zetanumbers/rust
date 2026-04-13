@@ -6,7 +6,7 @@ use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::SolverTraitLangItem;
 use rustc_type_ir::solve::inspect::ProbeKind;
 use rustc_type_ir::solve::{AliasBoundKind, SizedTraitKind};
-use rustc_type_ir::{self as ty, Interner, TypingMode, Unnormalized, elaborate};
+use rustc_type_ir::{self as ty, Interner, Unnormalized, elaborate};
 use tracing::instrument;
 
 use super::assembly::{Candidate, structural_traits};

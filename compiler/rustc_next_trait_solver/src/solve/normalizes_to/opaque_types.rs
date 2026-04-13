@@ -3,7 +3,7 @@
 
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::solve::GoalSource;
-use rustc_type_ir::{self as ty, Interner, TypingMode, fold_regions};
+use rustc_type_ir::{self as ty, Interner, MayBeErased, TypingMode, fold_regions};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::{Certainty, EvalCtxt, Goal, QueryResult};
@@ -97,7 +97,7 @@ where
                         TypingMode::Coherence
                         | TypingMode::PostBorrowckAnalysis { .. }
                         | TypingMode::PostAnalysis => unreachable!(),
-                        TypingMode::ErasedNotCoherence => todo!(),
+                        TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
                     }
                 }
 
@@ -138,7 +138,7 @@ where
                 self.eq(goal.param_env, expected, actual)?;
                 self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
             }
-            TypingMode::ErasedNotCoherence => todo!(),
+            TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
         }
     }
 }
