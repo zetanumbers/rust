@@ -1255,7 +1255,7 @@ impl<'tcx> TyCtxt<'tcx> {
             *self
                 .untracked()
                 .stable_crate_ids
-                .read()
+                .freeze()
                 .get(&stable_crate_id)
                 .unwrap_or_else(|| bug!("uninterned StableCrateId: {stable_crate_id:?}"))
         }

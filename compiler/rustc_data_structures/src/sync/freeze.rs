@@ -111,13 +111,18 @@ impl<T> FreezeLock<T> {
     #[inline]
     pub fn freeze(&self) -> &T {
         if !self.frozen.load(Ordering::Acquire) {
-            // Get the lock to ensure no concurrent writes and that we release the latest write.
-            let _lock = self.lock.write();
-            self.frozen.store(true, Ordering::Release);
+            self.freeze_unfrozen();
         }
 
         // SAFETY: This is frozen so the data cannot be modified and shared access is sound.
         unsafe { &*self.data.get() }
+    }
+
+    #[cold]
+    fn freeze_unfrozen(&self) {
+        // Get the lock to ensure no concurrent writes and that we release the latest write.
+        let _lock = self.lock.write();
+        self.frozen.store(true, Ordering::Release);
     }
 }
 

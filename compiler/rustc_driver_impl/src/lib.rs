@@ -304,6 +304,8 @@ pub fn run_compiler(at_args: &[String], callbacks: &mut (dyn Callbacks + Send)) 
             // Make sure name resolution and macro expansion is run.
             let _ = tcx.resolver_for_lowering();
 
+            tcx.untracked().stable_crate_ids.freeze();
+
             if callbacks.after_expansion(compiler, tcx) == Compilation::Stop {
                 return early_exit();
             }
