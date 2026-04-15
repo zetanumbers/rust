@@ -91,23 +91,26 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                         fx.bcx.ins().icmp(IntCC::SignedGreaterThanOrEqual, x_lane, y_lane)
                     }
 
+                    // FIXME(bytecodealliance/wasmtime#8312): Replace with Cranelift
+                    // `fcmp` once `f16`/`f128` backend lowerings have been added to
+                    // Cranelift.
                     (ty::Float(_), sym::simd_eq) => {
-                        fx.bcx.ins().fcmp(FloatCC::Equal, x_lane, y_lane)
+                        codegen_f16_f128::fcmp(fx, FloatCC::Equal, x_lane, y_lane)
                     }
                     (ty::Float(_), sym::simd_ne) => {
-                        fx.bcx.ins().fcmp(FloatCC::NotEqual, x_lane, y_lane)
+                        codegen_f16_f128::fcmp(fx, FloatCC::NotEqual, x_lane, y_lane)
                     }
                     (ty::Float(_), sym::simd_lt) => {
-                        fx.bcx.ins().fcmp(FloatCC::LessThan, x_lane, y_lane)
+                        codegen_f16_f128::fcmp(fx, FloatCC::LessThan, x_lane, y_lane)
                     }
                     (ty::Float(_), sym::simd_le) => {
-                        fx.bcx.ins().fcmp(FloatCC::LessThanOrEqual, x_lane, y_lane)
+                        codegen_f16_f128::fcmp(fx, FloatCC::LessThanOrEqual, x_lane, y_lane)
                     }
                     (ty::Float(_), sym::simd_gt) => {
-                        fx.bcx.ins().fcmp(FloatCC::GreaterThan, x_lane, y_lane)
+                        codegen_f16_f128::fcmp(fx, FloatCC::GreaterThan, x_lane, y_lane)
                     }
                     (ty::Float(_), sym::simd_ge) => {
-                        fx.bcx.ins().fcmp(FloatCC::GreaterThanOrEqual, x_lane, y_lane)
+                        codegen_f16_f128::fcmp(fx, FloatCC::GreaterThanOrEqual, x_lane, y_lane)
                     }
 
                     _ => unreachable!(),
@@ -391,6 +394,7 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                 intrinsic,
             ) {
                 (ty::Int(_), sym::simd_neg) => fx.bcx.ins().ineg(lane),
+                (ty::Float(FloatTy::F16), sym::simd_neg) => codegen_f16_f128::neg_f16(fx, lane),
                 (ty::Float(_), sym::simd_neg) => fx.bcx.ins().fneg(lane),
 
                 (ty::Uint(ty::UintTy::U8) | ty::Int(ty::IntTy::I8), sym::simd_bswap) => lane,
@@ -418,7 +422,18 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
 
             // FIXME use vector instructions when possible
             simd_pair_for_each_lane(fx, x, y, ret, &|fx, lane_ty, _ret_lane_ty, x_lane, y_lane| {
-                match (lane_ty.kind(), intrinsic) {
+                // FIXME(bytecodealliance/wasmtime#8312): Remove once backend lowerings have
+                // been added to Cranelift.
+                let (x_lane, y_lane) = if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                    (
+                        codegen_f16_f128::f16_to_f32(fx, x_lane),
+                        codegen_f16_f128::f16_to_f32(fx, y_lane),
+                    )
+                } else {
+                    (x_lane, y_lane)
+                };
+
+                let res = match (lane_ty.kind(), intrinsic) {
                     (ty::Uint(_), sym::simd_add) => fx.bcx.ins().iadd(x_lane, y_lane),
                     (ty::Uint(_), sym::simd_sub) => fx.bcx.ins().isub(x_lane, y_lane),
                     (ty::Uint(_), sym::simd_mul) => fx.bcx.ins().imul(x_lane, y_lane),
@@ -435,6 +450,16 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                     (ty::Float(_), sym::simd_sub) => fx.bcx.ins().fsub(x_lane, y_lane),
                     (ty::Float(_), sym::simd_mul) => fx.bcx.ins().fmul(x_lane, y_lane),
                     (ty::Float(_), sym::simd_div) => fx.bcx.ins().fdiv(x_lane, y_lane),
+                    (ty::Float(FloatTy::F16), sym::simd_rem) => fx.lib_call(
+                        "fmodf",
+                        vec![AbiParam::new(types::F32), AbiParam::new(types::F32)],
+                        vec![AbiParam::new(types::F32)],
+                        // FIXME(bytecodealliance/wasmtime#8312): Already converted
+                        // by the FIXME above.
+                        // fx.bcx.ins().fpromote(types::F32, lhs),
+                        // fx.bcx.ins().fpromote(types::F32, rhs),
+                        &[x_lane, y_lane],
+                    )[0],
                     (ty::Float(FloatTy::F32), sym::simd_rem) => fx.lib_call(
                         "fmodf",
                         vec![AbiParam::new(types::F32), AbiParam::new(types::F32)],
@@ -461,6 +486,15 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                     (ty::Int(_), sym::simd_xor) => fx.bcx.ins().bxor(x_lane, y_lane),
 
                     _ => unreachable!(),
+                };
+
+                if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                    // FIXME(bytecodealliance/wasmtime#8312): Use native Cranelift
+                    // operation once Cranelift backend lowerings have been
+                    // implemented.
+                    codegen_f16_f128::f32_to_f16(fx, res)
+                } else {
+                    res
                 }
             });
         }
@@ -486,7 +520,11 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                 let b_lane = b.value_lane(fx, lane).load_scalar(fx);
                 let c_lane = c.value_lane(fx, lane).load_scalar(fx);
 
-                let res_lane = fx.bcx.ins().fma(a_lane, b_lane, c_lane);
+                let res_lane = if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                    codegen_f16_f128::fma_f16(fx, a_lane, b_lane, c_lane)
+                } else {
+                    fx.bcx.ins().fma(a_lane, b_lane, c_lane)
+                };
                 let res_lane = CValue::by_val(res_lane, res_lane_layout);
 
                 ret.place_lane(fx, lane).write_cvalue(fx, res_lane);
@@ -584,13 +622,28 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                     ty::Float(_) => {}
                     _ => unreachable!("{:?}", lane_ty),
                 }
-                match intrinsic {
+                // FIXME(bytecodealliance/wasmtime#8312): Remove once backend lowerings have
+                // been added to Cranelift.
+                let lane = if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                    codegen_f16_f128::f16_to_f32(fx, lane)
+                } else {
+                    lane
+                };
+                let res = match intrinsic {
                     sym::simd_fabs => fx.bcx.ins().fabs(lane),
                     sym::simd_fsqrt => fx.bcx.ins().sqrt(lane),
                     sym::simd_ceil => fx.bcx.ins().ceil(lane),
                     sym::simd_floor => fx.bcx.ins().floor(lane),
                     sym::simd_trunc => fx.bcx.ins().trunc(lane),
                     _ => unreachable!(),
+                };
+                if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                    // FIXME(bytecodealliance/wasmtime#8312): Use native Cranelift
+                    // operation once Cranelift backend lowerings have been
+                    // implemented.
+                    codegen_f16_f128::f32_to_f16(fx, res)
+                } else {
+                    res
                 }
             });
         }
@@ -607,7 +660,22 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
 
             simd_reduce(fx, v, Some(acc), ret, &|fx, lane_ty, a, b| {
                 if lane_ty.is_floating_point() {
-                    fx.bcx.ins().fadd(a, b)
+                    // FIXME(bytecodealliance/wasmtime#8312): Remove once backend lowerings have
+                    // been added to Cranelift.
+                    let (a, b) = if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        (codegen_f16_f128::f16_to_f32(fx, a), codegen_f16_f128::f16_to_f32(fx, b))
+                    } else {
+                        (a, b)
+                    };
+                    let res = fx.bcx.ins().fadd(a, b);
+                    if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        // FIXME(bytecodealliance/wasmtime#8312): Use native Cranelift
+                        // operation once Cranelift backend lowerings have been
+                        // implemented.
+                        codegen_f16_f128::f32_to_f16(fx, res)
+                    } else {
+                        res
+                    }
                 } else {
                     fx.bcx.ins().iadd(a, b)
                 }
@@ -625,7 +693,22 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
 
             simd_reduce(fx, v, None, ret, &|fx, lane_ty, a, b| {
                 if lane_ty.is_floating_point() {
-                    fx.bcx.ins().fadd(a, b)
+                    // FIXME(bytecodealliance/wasmtime#8312): Remove once backend lowerings have
+                    // been added to Cranelift.
+                    let (a, b) = if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        (codegen_f16_f128::f16_to_f32(fx, a), codegen_f16_f128::f16_to_f32(fx, b))
+                    } else {
+                        (a, b)
+                    };
+                    let res = fx.bcx.ins().fadd(a, b);
+                    if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        // FIXME(bytecodealliance/wasmtime#8312): Use native Cranelift
+                        // operation once Cranelift backend lowerings have been
+                        // implemented.
+                        codegen_f16_f128::f32_to_f16(fx, res)
+                    } else {
+                        res
+                    }
                 } else {
                     fx.bcx.ins().iadd(a, b)
                 }
@@ -644,7 +727,22 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
 
             simd_reduce(fx, v, Some(acc), ret, &|fx, lane_ty, a, b| {
                 if lane_ty.is_floating_point() {
-                    fx.bcx.ins().fmul(a, b)
+                    // FIXME(bytecodealliance/wasmtime#8312): Remove once backend lowerings have
+                    // been added to Cranelift.
+                    let (a, b) = if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        (codegen_f16_f128::f16_to_f32(fx, a), codegen_f16_f128::f16_to_f32(fx, b))
+                    } else {
+                        (a, b)
+                    };
+                    let res = fx.bcx.ins().fmul(a, b);
+                    if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        // FIXME(bytecodealliance/wasmtime#8312): Use native Cranelift
+                        // operation once Cranelift backend lowerings have been
+                        // implemented.
+                        codegen_f16_f128::f32_to_f16(fx, res)
+                    } else {
+                        res
+                    }
                 } else {
                     fx.bcx.ins().imul(a, b)
                 }
@@ -662,7 +760,22 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
 
             simd_reduce(fx, v, None, ret, &|fx, lane_ty, a, b| {
                 if lane_ty.is_floating_point() {
-                    fx.bcx.ins().fmul(a, b)
+                    // FIXME(bytecodealliance/wasmtime#8312): Remove once backend lowerings have
+                    // been added to Cranelift.
+                    let (a, b) = if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        (codegen_f16_f128::f16_to_f32(fx, a), codegen_f16_f128::f16_to_f32(fx, b))
+                    } else {
+                        (a, b)
+                    };
+                    let res = fx.bcx.ins().fmul(a, b);
+                    if *lane_ty.kind() == ty::Float(FloatTy::F16) {
+                        // FIXME(bytecodealliance/wasmtime#8312): Use native Cranelift
+                        // operation once Cranelift backend lowerings have been
+                        // implemented.
+                        codegen_f16_f128::f32_to_f16(fx, res)
+                    } else {
+                        res
+                    }
                 } else {
                     fx.bcx.ins().imul(a, b)
                 }
