@@ -5,7 +5,6 @@ use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span};
 
 use crate::dep_graph;
 use crate::dep_graph::DepNodeKey;
-use crate::query::erase::{self, Erasable, Erased};
 use crate::query::{EnsureMode, QueryCache, QueryMode, QueryVTable};
 use crate::ty::TyCtxt;
 
@@ -74,38 +73,18 @@ pub(crate) fn query_ensure_result<'tcx, C, T>(
     key: C::Key,
 ) -> Result<(), ErrorGuaranteed>
 where
-    C: QueryCache<Value = Erased<Result<T, ErrorGuaranteed>>>,
-    Result<T, ErrorGuaranteed>: Erasable,
+    C: QueryCache<Value = Result<T, ErrorGuaranteed>>,
 {
-    let convert = |value: Erased<Result<T, ErrorGuaranteed>>| -> Result<(), ErrorGuaranteed> {
-        match erase::restore_val(value) {
-            Ok(_) => Ok(()),
-            Err(guar) => Err(guar),
-        }
-    };
-
-    match try_get_cached(tcx, &query.cache, key) {
-        Some(value) => convert(value),
-        None => {
-            match (query.execute_query_fn)(
+    try_get_cached(tcx, &query.cache, key)
+        .or_else(|| {
+            (query.execute_query_fn)(
                 tcx,
                 DUMMY_SP,
                 key,
                 QueryMode::Ensure { ensure_mode: EnsureMode::Ok },
-            ) {
-                // We executed the query. Convert the successful result.
-                Some(res) => convert(res),
-
-                // Reaching here means we didn't execute the query, but we can just assume the
-                // query succeeded, because it was green in the incremental cache. If it is green,
-                // that means that the previous compilation that wrote to the incremental cache
-                // compiles successfully. That is only possible if the cache entry was `Ok(())`, so
-                // we emit that here, without actually encoding the `Result` in the cache or
-                // loading it from there.
-                None => Ok(()),
-            }
-        }
-    }
+            )
+        })
+        .map_or(Ok(()), |res| res.map(|_| ()))
 }
 
 /// "Feeds" a feedable query by adding a given key/value pair to its in-memory cache.

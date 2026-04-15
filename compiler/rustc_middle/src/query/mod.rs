@@ -14,7 +14,6 @@ use crate::ty::TyCtxt;
 
 pub(crate) mod arena_cached;
 mod caches;
-pub mod erase;
 pub(crate) mod inner;
 mod into_query_key;
 mod job;

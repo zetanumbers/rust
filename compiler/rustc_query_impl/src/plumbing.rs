@@ -6,9 +6,8 @@ use rustc_middle::bug;
 #[expect(unused_imports, reason = "used by doc comments")]
 use rustc_middle::dep_graph::DepKindVTable;
 use rustc_middle::dep_graph::{DepNode, DepNodeKey, SerializedDepNodeIndex};
-use rustc_middle::query::erase::{Erasable, Erased};
 use rustc_middle::query::on_disk_cache::{CacheDecoder, CacheEncoder};
-use rustc_middle::query::{QueryCache, QueryJobId, QueryMode, QueryVTable, erase};
+use rustc_middle::query::{QueryCache, QueryJobId, QueryMode, QueryVTable};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::ty::tls::{self, ImplicitCtxt};
 use rustc_serialize::{Decodable, Encodable};
@@ -81,20 +80,20 @@ pub(crate) fn encode_query_values<'tcx>(tcx: TyCtxt<'tcx>, encoder: &mut CacheEn
     });
 }
 
-fn encode_query_values_inner<'a, 'tcx, C, V>(
+fn encode_query_values_inner<'a, 'tcx, C>(
     tcx: TyCtxt<'tcx>,
     query: &'tcx QueryVTable<'tcx, C>,
     encoder: &mut CacheEncoder<'a, 'tcx>,
 ) where
-    C: QueryCache<Value = Erased<V>>,
-    V: Erasable + Encodable<CacheEncoder<'a, 'tcx>>,
+    C: QueryCache,
+    C::Value: Encodable<CacheEncoder<'a, 'tcx>>,
 {
     let _timer = tcx.prof.generic_activity_with_arg("encode_query_results_for", query.name);
 
     assert!(all_inactive(&query.state));
     query.cache.for_each(&mut |key, value, dep_node| {
         if (query.will_cache_on_disk_for_key_fn)(*key) {
-            encoder.encode_query_value::<V>(dep_node, &erase::restore_val::<V>(*value));
+            encoder.encode_query_value(dep_node, value);
         }
     });
 }

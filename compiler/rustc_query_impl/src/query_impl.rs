@@ -1,5 +1,4 @@
 use rustc_middle::queries::TaggedQueryKey;
-use rustc_middle::query::erase::{self, Erased};
 use rustc_middle::query::{AsLocalQueryKey, QueryMode, QueryVTable};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::Span;
@@ -55,7 +54,7 @@ macro_rules! define_queries {
                         span: Span,
                         key: Key<'tcx>,
                         mode: QueryMode,
-                    ) -> Option<Erased<Value<'tcx>>> {
+                    ) -> Option<Value<'tcx>> {
                         #[cfg(debug_assertions)]
                         let _guard = tracing::span!(tracing::Level::TRACE, stringify!($name), ?key).entered();
                         crate::execution::execute_query_incr_inner(
@@ -78,7 +77,7 @@ macro_rules! define_queries {
                         span: Span,
                         key: Key<'tcx>,
                         __mode: QueryMode,
-                    ) -> Option<Erased<Value<'tcx>>> {
+                    ) -> Option<Value<'tcx>> {
                         Some(crate::execution::execute_query_non_incr_inner(
                             &tcx.query_system.query_vtables.$name,
                             tcx,
@@ -95,13 +94,13 @@ macro_rules! define_queries {
                 /// (after demangling) must be `__rust_begin_short_backtrace`.
                 mod invoke_provider_fn {
                     use super::*;
-                    use rustc_middle::queries::$name::{Key, Value, provided_to_erased};
+                    use rustc_middle::queries::$name::{Key, Value, from_provided};
 
                     #[inline(never)]
                     pub(crate) fn __rust_begin_short_backtrace<'tcx>(
                         tcx: TyCtxt<'tcx>,
                         key: Key<'tcx>,
-                    ) -> Erased<Value<'tcx>> {
+                    ) -> Value<'tcx> {
                         #[cfg(debug_assertions)]
                         let _guard = tracing::span!(tracing::Level::TRACE, stringify!($name), ?key).entered();
 
@@ -121,9 +120,8 @@ macro_rules! define_queries {
                             tracing::trace!(?provided_value);
                         });
 
-                        // Erase the returned value, because `QueryVTable` uses erased values.
-                        // For queries with `arena_cache`, this also arena-allocates the value.
-                        provided_to_erased(tcx, provided_value)
+                        // For queries with `arena_cache`, this arena-allocates the value.
+                        from_provided(tcx, provided_value)
                     }
                 }
 
@@ -161,22 +159,20 @@ macro_rules! define_queries {
 
                         #[cfg($cache_on_disk)]
                         try_load_from_disk_fn: |tcx, prev_index| {
-                            use rustc_middle::queries::$name::{ProvidedValue, provided_to_erased};
+                            use rustc_middle::queries::$name::{ProvidedValue, from_provided};
 
                             let loaded_value: ProvidedValue<'tcx> =
                                 $crate::plumbing::try_load_from_disk(tcx, prev_index)?;
 
-                            // Arena-alloc the value if appropriate, and erase it.
-                            Some(provided_to_erased(tcx, loaded_value))
+                            // Arena-alloc the value if appropriate.
+                            Some(from_provided(tcx, loaded_value))
                         },
                         #[cfg(not($cache_on_disk))]
                         try_load_from_disk_fn: |_tcx, _prev_index| None,
 
                         #[cfg($handle_cycle_error)]
                         handle_cycle_error_fn: |tcx, key, cycle, err| {
-                            use rustc_middle::query::erase::erase_val;
-
-                            erase_val($crate::handle_cycle_error::$name(tcx, key, cycle, err))
+                            $crate::handle_cycle_error::$name(tcx, key, cycle, err)
                         },
                         #[cfg(not($handle_cycle_error))]
                         handle_cycle_error_fn: |_tcx, _key, _cycle, err| {
@@ -186,13 +182,12 @@ macro_rules! define_queries {
                         #[cfg($no_hash)]
                         hash_value_fn: None,
                         #[cfg(not($no_hash))]
-                        hash_value_fn: Some(|hcx, erased_value: &erase::Erased<Value<'tcx>>| {
-                            let value = erase::restore_val(*erased_value);
-                            rustc_middle::dep_graph::hash_result(hcx, &value)
+                        hash_value_fn: Some(|hcx, value: &Value<'tcx>| {
+                            rustc_middle::dep_graph::hash_result(hcx, value)
                         }),
 
-                        format_value: |erased_value: &erase::Erased<Value<'tcx>>| {
-                            format!("{:?}", erase::restore_val(*erased_value))
+                        format_value: |value: &Value<'tcx>| {
+                            format!("{:?}", *value)
                         },
                         create_tagged_key: TaggedQueryKey::$name,
                         execute_query_fn: if incremental {

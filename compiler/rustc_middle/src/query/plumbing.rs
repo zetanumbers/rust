@@ -319,7 +319,6 @@ macro_rules! define_callbacks {
         $(
             pub mod $name {
                 use super::*;
-                use $crate::query::erase::{self, Erased};
 
                 pub type Key<'tcx> = $($K)*;
                 pub type Value<'tcx> = $V;
@@ -342,17 +341,17 @@ macro_rules! define_callbacks {
                 pub type ProvidedValue<'tcx> = Value<'tcx>;
 
                 pub type Cache<'tcx> =
-                    <Key<'tcx> as $crate::query::QueryKey>::Cache<Erased<Value<'tcx>>>;
+                    <Key<'tcx> as $crate::query::QueryKey>::Cache<Value<'tcx>>;
 
                 /// This helper function takes a value returned by the query provider
                 /// (or loaded from disk, or supplied by query feeding), allocates
                 /// it in an arena if requested by the `arena_cache` modifier, and
-                /// then returns an erased copy of it.
+                /// then returns copy of it.
                 #[inline(always)]
-                pub fn provided_to_erased<'tcx>(
+                pub fn from_provided<'tcx>(
                     tcx: TyCtxt<'tcx>,
                     provided_value: ProvidedValue<'tcx>,
-                ) -> Erased<Value<'tcx>> {
+                ) -> Value<'tcx> {
                     // For queries with the `arena_cache` modifier, store the
                     // provided value in an arena and get a reference to it.
                     #[cfg($arena_cache)]
@@ -372,7 +371,7 @@ macro_rules! define_callbacks {
                         provided_value
                     };
 
-                    erase::erase_val(value)
+                    value
                 }
 
                 // Ensure that keys grow no larger than 88 bytes by accident.
@@ -569,14 +568,12 @@ macro_rules! define_callbacks {
                 $(#[$attr])*
                 #[inline(always)]
                 pub fn $name(self, key: maybe_into_query_key!($($K)*)) -> $V {
-                    use $crate::query::{erase, inner};
-
-                    erase::restore_val::<$V>(inner::query_get_at(
+                    $crate::query::inner::query_get_at(
                         self.tcx,
                         self.span,
                         &self.tcx.query_system.query_vtables.$name,
                         $crate::query::IntoQueryKey::into_query_key(key),
-                    ))
+                    )
                 }
             )*
         }
@@ -643,7 +640,7 @@ macro_rules! define_callbacks {
                         self.tcx,
                         &self.tcx.query_system.query_vtables.$name,
                         self.key().into_query_key(),
-                        $name::provided_to_erased(self.tcx, value),
+                        $name::from_provided(self.tcx, value),
                     );
                 }
             }
