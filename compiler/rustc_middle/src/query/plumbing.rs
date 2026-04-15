@@ -117,8 +117,6 @@ pub struct QueryVTable<'tcx, C: QueryCache> {
     pub handle_cycle_error_fn:
         fn(tcx: TyCtxt<'tcx>, key: C::Key, cycle: Cycle<'tcx>, error: Diag<'_>) -> C::Value,
 
-    pub format_value: fn(&C::Value) -> String,
-
     pub create_tagged_key: fn(C::Key) -> TaggedQueryKey<'tcx>,
 
     /// Function pointer that is called by the query methods on [`TyCtxt`] and

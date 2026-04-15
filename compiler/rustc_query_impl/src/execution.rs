@@ -378,26 +378,24 @@ fn check_feedable_consistency<'tcx, C: QueryCache>(
         panic!(
             "no_hash fed query later has its value computed.\n\
             Remove `no_hash` modifier to allow recomputation.\n\
-            The already cached value: {}",
-            (query.format_value)(&cached_value)
+            The already cached value: {cached_value:?}"
         );
     };
 
     let (old_hash, new_hash) = tcx.with_stable_hashing_context(|mut hcx| {
         (hash_value_fn(&mut hcx, &cached_value), hash_value_fn(&mut hcx, value))
     });
-    let formatter = query.format_value;
     if old_hash != new_hash {
         // We have an inconsistency. This can happen if one of the two
         // results is tainted by errors.
         assert!(
             tcx.dcx().has_errors().is_some(),
             "Computed query value for {:?}({:?}) is inconsistent with fed value,\n\
-                computed={:#?}\nfed={:#?}",
+                computed={:?}\nfed={:?}",
             query.dep_kind,
             key,
-            formatter(value),
-            formatter(&cached_value),
+            value,
+            cached_value,
         );
     }
 }
@@ -546,14 +544,7 @@ fn load_from_disk_or_invoke_provider_green<'tcx, C: QueryCache>(
         //
         // See issue #82920 for an example of a miscompilation that would get turned into
         // an ICE by this check
-        incremental_verify_ich(
-            tcx,
-            dep_graph_data,
-            &value,
-            prev_index,
-            query.hash_value_fn,
-            query.format_value,
-        );
+        incremental_verify_ich(tcx, dep_graph_data, &value, prev_index, query.hash_value_fn);
     }
 
     value

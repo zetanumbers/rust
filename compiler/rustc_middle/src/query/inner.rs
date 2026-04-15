@@ -98,8 +98,6 @@ pub(crate) fn query_feed<'tcx, C>(
     C: QueryCache,
     C::Key: DepNodeKey<'tcx>,
 {
-    let format_value = query.format_value;
-
     // Check whether the in-memory cache already has a value for this key.
     match try_get_cached(tcx, &query.cache, key) {
         Some(old) => {
@@ -116,9 +114,7 @@ pub(crate) fn query_feed<'tcx, C>(
                     // ensure compilation is doomed, and keep the `old` value.
                     tcx.dcx().delayed_bug(format!(
                         "Trying to feed an already recorded value for query {query:?} key={key:?}:\n\
-                        old value: {old}\nnew value: {value}",
-                        old = format_value(&old),
-                        value = format_value(&value),
+                        old value: {old:?}\nnew value: {value:?}",
                     ));
                 }
             } else {
@@ -127,9 +123,7 @@ pub(crate) fn query_feed<'tcx, C>(
                 // the query should not be marked `no_hash`.
                 bug!(
                     "Trying to feed an already recorded value for query {query:?} key={key:?}:\n\
-                    old value: {old}\nnew value: {value}",
-                    old = format_value(&old),
-                    value = format_value(&value),
+                    old value: {old:?}\nnew value: {value:?}",
                 )
             }
         }
@@ -137,13 +131,8 @@ pub(crate) fn query_feed<'tcx, C>(
             // There is no cached value for this key, so feed the query by
             // adding the provided value to the cache.
             let dep_node = dep_graph::DepNode::construct(tcx, query.dep_kind, &key);
-            let dep_node_index = tcx.dep_graph.with_feed_task(
-                dep_node,
-                tcx,
-                &value,
-                query.hash_value_fn,
-                query.format_value,
-            );
+            let dep_node_index =
+                tcx.dep_graph.with_feed_task(dep_node, tcx, &value, query.hash_value_fn);
             query.cache.complete(key, value, dep_node_index);
         }
     }

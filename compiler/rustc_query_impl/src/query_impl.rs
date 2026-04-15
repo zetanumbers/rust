@@ -142,7 +142,6 @@ macro_rules! define_queries {
                 pub(crate) fn make_query_vtable<'tcx>(incremental: bool)
                     -> QueryVTable<'tcx, rustc_middle::queries::$name::Cache<'tcx>>
                 {
-                    use rustc_middle::queries::$name::Value;
                     QueryVTable {
                         name: stringify!($name),
                         eval_always: $eval_always,
@@ -182,13 +181,10 @@ macro_rules! define_queries {
                         #[cfg($no_hash)]
                         hash_value_fn: None,
                         #[cfg(not($no_hash))]
-                        hash_value_fn: Some(|hcx, value: &Value<'tcx>| {
+                        hash_value_fn: Some(|hcx, value: &rustc_middle::queries::$name::Value<'tcx>| {
                             rustc_middle::dep_graph::hash_result(hcx, value)
                         }),
 
-                        format_value: |value: &Value<'tcx>| {
-                            format!("{:?}", *value)
-                        },
                         create_tagged_key: TaggedQueryKey::$name,
                         execute_query_fn: if incremental {
                             crate::query_impl::$name::execute_query_incr::__rust_end_short_backtrace

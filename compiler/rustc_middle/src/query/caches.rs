@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::sync::OnceLock;
 
 use rustc_data_structures::sharded::ShardedHashMap;
@@ -16,7 +17,7 @@ use crate::query::keys::QueryKey;
 /// by the `Cache` associated type of the `rustc_middle::query::Key` trait.
 pub trait QueryCache: Sized {
     type Key: QueryKey;
-    type Value: Copy;
+    type Value: Debug + Copy;
 
     /// Returns the cached value (and other information) associated with the
     /// given key, if it is present in the cache.
@@ -53,7 +54,7 @@ impl<K, V> Default for DefaultCache<K, V> {
 impl<K, V> QueryCache for DefaultCache<K, V>
 where
     K: QueryKey,
-    V: Copy,
+    V: Debug + Copy,
 {
     type Key = K;
     type Value = V;
@@ -97,7 +98,7 @@ impl<V> Default for SingleCache<V> {
 
 impl<V> QueryCache for SingleCache<V>
 where
-    V: Copy,
+    V: Debug + Copy,
 {
     type Key = ();
     type Value = V;
@@ -142,7 +143,7 @@ impl<V> Default for DefIdCache<V> {
 
 impl<V> QueryCache for DefIdCache<V>
 where
-    V: Copy,
+    V: Debug + Copy,
 {
     type Key = DefId;
     type Value = V;
@@ -180,7 +181,7 @@ where
 impl<K, V> QueryCache for VecCache<K, V, DepNodeIndex>
 where
     K: Idx + QueryKey,
-    V: Copy,
+    V: Debug + Copy,
 {
     type Key = K;
     type Value = V;

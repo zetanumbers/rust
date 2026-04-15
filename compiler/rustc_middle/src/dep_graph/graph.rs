@@ -555,13 +555,12 @@ impl DepGraph {
     /// FIXME: If the code is changed enough for this node to be marked before requiring the
     /// caller's node, we suppose that those changes will be enough to mark this node red and
     /// force a recomputation using the "normal" way.
-    pub fn with_feed_task<'tcx, R>(
+    pub fn with_feed_task<'tcx, R: Debug>(
         &self,
         node: DepNode,
         tcx: TyCtxt<'tcx>,
         result: &R,
         hash_result: Option<fn(&mut StableHashingContext<'_>, &R) -> Fingerprint>,
-        format_value_fn: fn(&R) -> String,
     ) -> DepNodeIndex {
         if let Some(data) = self.data.as_ref() {
             // The caller query has more dependencies than the node we are creating. We may
@@ -573,14 +572,7 @@ impl DepGraph {
             if let Some(prev_index) = data.previous.node_to_index_opt(&node) {
                 let dep_node_index = data.colors.current(prev_index);
                 if let Some(dep_node_index) = dep_node_index {
-                    incremental_verify_ich(
-                        tcx,
-                        data,
-                        result,
-                        prev_index,
-                        hash_result,
-                        format_value_fn,
-                    );
+                    incremental_verify_ich(tcx, data, result, prev_index, hash_result);
 
                     #[cfg(debug_assertions)]
                     if hash_result.is_some() {
