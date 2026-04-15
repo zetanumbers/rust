@@ -55,7 +55,6 @@ macro_rules! ast_fragments {
         $($Kind:ident($AstTy:ty) {
             $kind_name:expr;
             $(one
-                fn $mut_visit_ast:ident;
                 fn $visit_ast:ident;
             )?
             $(many
@@ -148,7 +147,7 @@ macro_rules! ast_fragments {
                         }
                     }
                     AstFragment::MethodReceiverExpr(expr) => vis.visit_method_receiver_expr(expr),
-                    $($(AstFragment::$Kind(ast) => vis.$mut_visit_ast(ast),)?)*
+                    $($(AstFragment::$Kind(ast) => vis.$visit_ast(ast),)?)*
                     $($(AstFragment::$Kind(ast) =>
                         ast.flat_map_in_place(|ast| vis.$flat_map_ast_elt(ast, $($args)*)),)?)*
                 }
@@ -178,17 +177,17 @@ macro_rules! ast_fragments {
 ast_fragments! {
     Expr(Box<ast::Expr>) {
         "expression";
-        one fn visit_expr; fn visit_expr;
+        one fn visit_expr;
         fn make_expr;
     }
     Pat(Box<ast::Pat>) {
         "pattern";
-        one fn visit_pat; fn visit_pat;
+        one fn visit_pat;
         fn make_pat;
     }
     Ty(Box<ast::Ty>) {
         "type";
-        one fn visit_ty; fn visit_ty;
+        one fn visit_ty;
         fn make_ty;
     }
     Stmts(SmallVec<[ast::Stmt; 1]>) {
@@ -262,7 +261,7 @@ ast_fragments! {
     }
     Crate(ast::Crate) {
         "crate";
-        one fn visit_crate; fn visit_crate;
+        one fn visit_crate;
         fn make_crate;
     }
 }
