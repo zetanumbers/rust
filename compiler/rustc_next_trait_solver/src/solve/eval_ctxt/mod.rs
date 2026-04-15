@@ -8,7 +8,9 @@ use rustc_type_ir::inherent::*;
 use rustc_type_ir::relate::Relate;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::search_graph::{CandidateHeadUsages, PathKind};
-use rustc_type_ir::solve::{AccessedOpaques, MaybeInfo, OpaqueTypesJank, RerunCondition, SmallCopyList};
+use rustc_type_ir::solve::{
+    AccessedOpaques, MaybeInfo, FetchEligibleAssocItemResponse, OpaqueTypesJank, RerunCondition, SmallCopyList,
+};
 use rustc_type_ir::{
     self as ty, CanonicalVarValues, ClauseKind, InferCtxtLike, Interner, MayBeErased,
     OpaqueTypeKey, PredicateKind, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeSuperVisitable,
@@ -1350,7 +1352,7 @@ where
         goal_trait_ref: ty::TraitRef<I>,
         trait_assoc_def_id: I::DefId,
         impl_def_id: I::ImplId,
-    ) -> Result<Option<I::DefId>, I::ErrorGuaranteed> {
+    ) -> FetchEligibleAssocItemResponse<I> {
         self.delegate.fetch_eligible_assoc_item(goal_trait_ref, trait_assoc_def_id, impl_def_id)
     }
 

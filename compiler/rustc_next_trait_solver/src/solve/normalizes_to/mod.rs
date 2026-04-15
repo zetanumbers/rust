@@ -6,6 +6,8 @@ mod opaque_types;
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::{SolverAdtLangItem, SolverLangItem, SolverTraitLangItem};
+
+use rustc_type_ir::solve::FetchEligibleAssocItemResponse;
 use rustc_type_ir::{
     self as ty, FieldInfo, Interner, MayBeErased, NormalizesTo, PredicateKind, Unnormalized,
     Upcast as _,
@@ -281,9 +283,9 @@ where
                 goal.predicate.def_id(),
                 impl_def_id,
             ) {
-                Ok(Some(target_item_def_id)) => target_item_def_id,
-                Ok(None) => {
-                    match ecx.typing_mode() {
+                FetchEligibleAssocItemResponse::Found(target_item_def_id) => target_item_def_id,
+                FetchEligibleAssocItemResponse::NotFound(tm) => {
+                    match tm {
                         // In case the associated item is hidden due to specialization,
                         // normalizing this associated item is always ambiguous. Treating
                         // the associated item as rigid would be incomplete and allow for
@@ -304,8 +306,7 @@ where
                         ty::TypingMode::Analysis { .. }
                         | ty::TypingMode::Borrowck { .. }
                         | ty::TypingMode::PostBorrowckAnalysis { .. }
-                        | ty::TypingMode::PostAnalysis
-                        | ty::TypingMode::ErasedNotCoherence(MayBeErased) => {
+                        | ty::TypingMode::PostAnalysis => {
                             ecx.structurally_instantiate_normalizes_to_term(
                                 goal,
                                 goal.predicate.alias,
@@ -315,7 +316,11 @@ where
                         }
                     };
                 }
-                Err(guar) => return error_response(ecx, guar),
+                FetchEligibleAssocItemResponse::Err(guar) => return error_response(ecx, guar),
+                FetchEligibleAssocItemResponse::NotFoundBecauseErased => {
+                    ecx.opaque_accesses.rerun_always("fetch eligible assoc item");
+                    return Err(NoSolution);
+                }
             };
 
             if !cx.has_item_definition(target_item_def_id) {

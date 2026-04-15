@@ -13,7 +13,9 @@ use tracing::debug;
 
 use crate::lang_items::SolverTraitLangItem;
 use crate::search_graph::PathKind;
-use crate::{self as ty, Canonical, CanonicalVarValues, Interner, Upcast};
+use crate::{
+    self as ty, Canonical, CanonicalVarValues, CantBeErased, Interner, TypingMode, Upcast,
+};
 
 pub type CanonicalInput<I, T = <I as Interner>::Predicate> =
     ty::CanonicalQueryInput<I, QueryInput<I, T>>;
@@ -31,8 +33,8 @@ pub type QueryResult<I> = Result<CanonicalResponse<I>, NoSolution>;
 pub struct NoSolution;
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
 pub enum SmallCopyList<T: Copy + Debug + Hash + Eq> {
     Empty,
     One([T; 1]),
@@ -108,8 +110,8 @@ impl<T: Copy + Debug + Hash + Eq> AsRef<[T]> for SmallCopyList<T> {
 ///
 /// Some variant names contain an `Or` here. They rerun when any of the two conditions applies
 #[derive_where(Copy, Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
 pub enum RerunCondition<I: Interner> {
     Never,
 
@@ -212,8 +214,8 @@ impl<I: Interner> RerunCondition<I> {
 }
 
 #[derive_where(Copy, Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
 pub struct AccessedOpaques<I: Interner> {
     #[type_visitable(ignore)]
     #[type_foldable(identity)]
@@ -484,6 +486,14 @@ pub enum BuiltinImplSource {
     ///
     /// The index is only used for winnowing.
     TraitUpcasting(usize),
+}
+
+#[derive_where(Copy, Clone, Debug; I: Interner)]
+pub enum FetchEligibleAssocItemResponse<I: Interner> {
+    Err(I::ErrorGuaranteed),
+    Found(I::DefId),
+    NotFound(TypingMode<I, CantBeErased>),
+    NotFoundBecauseErased,
 }
 
 #[derive_where(Clone, Copy, Hash, PartialEq, Debug; I: Interner)]
