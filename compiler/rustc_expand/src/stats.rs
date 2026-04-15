@@ -32,10 +32,6 @@ pub(crate) fn elems_to_string<T>(elems: &SmallVec<[T; 1]>, f: impl Fn(&T) -> Str
     s
 }
 
-pub(crate) fn unreachable_to_string<T>(_: &T) -> String {
-    unreachable!()
-}
-
 pub(crate) fn update_bang_macro_stats(
     ecx: &mut ExtCtxt<'_>,
     fragment_kind: AstFragmentKind,
