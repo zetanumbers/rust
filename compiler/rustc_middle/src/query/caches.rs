@@ -23,6 +23,12 @@ pub trait QueryCache: Sized {
     /// given key, if it is present in the cache.
     fn lookup(&self, key: &Self::Key) -> Option<(Self::Value, DepNodeIndex)>;
 
+    /// Returns true if cached value (and other information) associated with the
+    /// given key, if it is present in the cache.
+    fn contains(&self, key: &Self::Key) -> bool {
+        self.lookup(key).is_some()
+    }
+
     /// Adds a key/value entry to this cache.
     ///
     /// Called by some part of the query system, after having obtained the
@@ -143,6 +149,10 @@ where
         self.cache.get().copied()
     }
 
+    fn contains(&self, _key: &()) -> bool {
+        self.cache.get().is_some()
+    }
+
     #[inline]
     fn complete(&self, _key: (), value: V, index: DepNodeIndex) {
         self.cache.set((value, index)).ok();
@@ -189,6 +199,15 @@ where
             self.local.lookup(&key.index)
         } else {
             self.foreign.lookup(key)
+        }
+    }
+
+    #[inline(always)]
+    fn contains(&self, key: &Self::Key) -> bool {
+        if key.krate == LOCAL_CRATE {
+            self.local.lookup(&key.index).is_some()
+        } else {
+            self.foreign.contains(key)
         }
     }
 

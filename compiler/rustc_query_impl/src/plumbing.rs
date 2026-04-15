@@ -156,10 +156,8 @@ pub(crate) fn promote_from_disk_inner<'tcx, C: QueryCache>(
         return;
     }
 
-    match query.cache.lookup(&key) {
-        // If the value is already in memory, then promotion isn't needed.
-        Some(_) => {}
-
+    // If the value is already in memory, then promotion isn't needed.
+    if !query.cache.contains(&key) {
         // "Execute" the query to load its disk-cached value into memory.
         //
         // We know that the key is cache-on-disk and its node is green,
@@ -167,9 +165,7 @@ pub(crate) fn promote_from_disk_inner<'tcx, C: QueryCache>(
         //
         // FIXME(Zalathar): Is there a reasonable way to skip more of the
         // query bookkeeping when doing this?
-        None => {
-            (query.execute_query_fn)(tcx, DUMMY_SP, key, QueryMode::Get);
-        }
+        (query.execute_query_fn)(tcx, DUMMY_SP, key, QueryMode::Get);
     }
 }
 
