@@ -1688,7 +1688,6 @@ pub struct Closure<'hir> {
 #[derive(Debug, Clone, Copy, HashStable_Generic)]
 pub struct ExplicitCapture {
     pub var_hir_id: HirId,
-    pub origin_span: Span,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Copy, Hash, StableHash, Encodable, Decodable)]
