@@ -103,3 +103,5 @@ tests/ui/lto/all-crates.rs
 tests/ui/consts/const-eval/c-variadic.rs
 tests/ui/eii/default/call_default_panics.rs
 tests/ui/explicit-tail-calls/indirect.rs
+tests/ui/traits/inheritance/self-in-supertype.rs
+tests/ui/fmt/fmt_debug/shallow.rs
