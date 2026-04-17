@@ -4,9 +4,7 @@ mod simd;
 #[cfg(feature = "master")]
 use std::iter;
 
-#[cfg(feature = "master")]
-use gccjit::Type;
-use gccjit::{ComparisonOp, Function, FunctionType, RValue, ToRValue, UnaryOp};
+use gccjit::{ComparisonOp, Function, FunctionType, RValue, ToRValue, Type, UnaryOp};
 #[cfg(feature = "master")]
 use rustc_abi::ExternAbi;
 use rustc_abi::{BackendRepr, HasDataLayout, WrappingRange};
@@ -40,6 +38,22 @@ use crate::context::CodegenCx;
 use crate::intrinsic::simd::generic_simd_intrinsic;
 use crate::type_of::LayoutGccExt;
 
+fn float_intrinsic<'gcc, 'tcx>(
+    cx: &CodegenCx<'gcc, 'tcx>,
+    typ: Type<'gcc>,
+    name: &str,
+) -> Option<Function<'gcc>> {
+    // GCC doesn't have the intrinsic we want so we use the compiler-builtins one
+    Some(cx.context.new_function(
+        None,
+        FunctionType::Extern,
+        typ,
+        &[cx.context.new_parameter(None, typ, "a"), cx.context.new_parameter(None, typ, "b")],
+        name,
+        false,
+    ))
+}
+
 fn get_simple_intrinsic<'gcc, 'tcx>(
     cx: &CodegenCx<'gcc, 'tcx>,
     name: Symbol,
@@ -70,65 +84,19 @@ fn get_simple_intrinsic<'gcc, 'tcx>(
         // FIXME: calling `fma` from libc without FMA target feature uses expensive software emulation
         sym::fmuladdf32 => "fmaf", // FIXME: use gcc intrinsic analogous to llvm.fmuladd.f32
         sym::fmuladdf64 => "fma",  // FIXME: use gcc intrinsic analogous to llvm.fmuladd.f64
-        sym::minimumf32 => "fminimumf",
-        sym::minimumf64 => "fminimum",
-        sym::minimumf128 => {
-            // GCC doesn't have the intrinsic we want so we use the compiler-builtins one
-            // https://docs.rs/compiler_builtins/latest/compiler_builtins/math/full_availability/fn.fminimumf128.html
-            let f128_type = cx.type_f128();
-            return Some(cx.context.new_function(
-                None,
-                FunctionType::Extern,
-                f128_type,
-                &[
-                    cx.context.new_parameter(None, f128_type, "a"),
-                    cx.context.new_parameter(None, f128_type, "b"),
-                ],
-                "fminimumf128",
-                false,
-            ));
-        }
-        sym::maximumf32 => "fmaximumf",
-        sym::maximumf64 => "fmaximum",
-        sym::maximumf128 => {
-            // GCC doesn't have the intrinsic we want so we use the compiler-builtins one
-            // https://docs.rs/compiler_builtins/latest/compiler_builtins/math/full_availability/fn.fmaximumf128.html
-            let f128_type = cx.type_f128();
-            return Some(cx.context.new_function(
-                None,
-                FunctionType::Extern,
-                f128_type,
-                &[
-                    cx.context.new_parameter(None, f128_type, "a"),
-                    cx.context.new_parameter(None, f128_type, "b"),
-                ],
-                "fmaximumf128",
-                false,
-            ));
-        }
+        sym::minimumf32 => return float_intrinsic(cx, cx.type_f32(), "fminimumf"),
+        sym::minimumf64 => return float_intrinsic(cx, cx.type_f64(), "fminimum"),
+        sym::minimumf128 => return float_intrinsic(cx, cx.type_f128(), "fminimumf128"),
+        sym::maximumf32 => return float_intrinsic(cx, cx.type_f32(), "fmaximumf"),
+        sym::maximumf64 => return float_intrinsic(cx, cx.type_f64(), "fmaximum"),
+        sym::maximumf128 => return float_intrinsic(cx, cx.type_f128(), "fmaximumf128"),
         sym::copysignf32 => "copysignf",
         sym::copysignf64 => "copysign",
         sym::floorf32 => "floorf",
         sym::floorf64 => "floor",
         sym::ceilf32 => "ceilf",
         sym::ceilf64 => "ceil",
-        sym::powf128 => {
-            // GCC doesn't have the intrinsic we want so we use the compiler-builtins one.
-            // FIXME(antoyo): there's some duplication here with functions like minimumf128,
-            // copysignf128 and maximumf128.
-            let f128_type = cx.type_f128();
-            return Some(cx.context.new_function(
-                None,
-                FunctionType::Extern,
-                f128_type,
-                &[
-                    cx.context.new_parameter(None, f128_type, "a"),
-                    cx.context.new_parameter(None, f128_type, "b"),
-                ],
-                "powf128",
-                false,
-            ));
-        }
+        sym::powf128 => return float_intrinsic(cx, cx.type_f128(), "powf128"),
         sym::truncf32 => "truncf",
         sym::truncf64 => "trunc",
         // We match the LLVM backend and lower this to `rint`.
