@@ -600,7 +600,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         &mut self,
         typ: Type<'gcc>,
         fn_attrs: Option<&CodegenFnAttrs>,
-        _fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
+        fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         func: RValue<'gcc>,
         args: &[RValue<'gcc>],
         then: Block<'gcc>,
@@ -612,7 +612,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
         let current_block = self.block;
         self.block = try_block;
-        let call = self.call(typ, fn_attrs, _fn_abi, func, args, None, instance); // FIXME(antoyo): use funclet here?
+        let call = self.call(typ, fn_attrs, fn_abi, func, args, None, instance); // FIXME(antoyo): use funclet here?
         self.block = current_block;
 
         let return_value =
