@@ -362,11 +362,9 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             }
         };
         let gcc_func = func_ptr_type.dyncast_function_ptr_type().expect("function ptr");
-        let on_stack_param_indices = if let Some(fn_abi) = fn_abi {
-            fn_abi.gcc_type(self.cx).on_stack_param_indices
-        } else {
-            self.on_stack_params.borrow().get(&gcc_func).cloned().unwrap_or_default()
-        };
+        let on_stack_param_indices = fn_abi
+            .map(|fn_abi| fn_abi.gcc_type(self.cx).on_stack_param_indices)
+            .unwrap_or_default();
         let func_name = format!("{:?}", func_ptr);
         let previous_arg_count = args.len();
         let orig_args = args;
@@ -614,7 +612,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
         let current_block = self.block;
         self.block = try_block;
-        let call = self.call(typ, fn_attrs, None, func, args, None, instance); // FIXME(antoyo): use funclet here?
+        let call = self.call(typ, fn_attrs, _fn_abi, func, args, None, instance); // FIXME(antoyo): use funclet here?
         self.block = current_block;
 
         let return_value =
@@ -648,7 +646,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         _funclet: Option<&Funclet>,
         instance: Option<Instance<'tcx>>,
     ) -> RValue<'gcc> {
-        let call_site = self.call(typ, fn_attrs, None, func, args, None, instance);
+        let call_site = self.call(typ, fn_attrs, fn_abi, func, args, None, instance);
         let condition = self.context.new_rvalue_from_int(self.bool_type, 1);
         self.llbb().end_with_conditional(self.location, condition, then, catch);
         if let Some(_fn_abi) = fn_abi {
