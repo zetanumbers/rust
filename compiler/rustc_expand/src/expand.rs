@@ -117,21 +117,21 @@ macro_rules! ast_fragments {
             pub(crate) fn make_opt_expr(self) -> Option<Box<ast::Expr>> {
                 match self {
                     AstFragment::OptExpr(expr) => expr,
-                    _ => panic!("AstFragment::make_* called on the wrong kind of fragment"),
+                    _ => panic!("AstFragment::make_opt_expr called on the wrong kind of fragment"),
                 }
             }
 
             pub(crate) fn make_method_receiver_expr(self) -> Box<ast::Expr> {
                 match self {
                     AstFragment::MethodReceiverExpr(expr) => expr,
-                    _ => panic!("AstFragment::make_* called on the wrong kind of fragment"),
+                    _ => panic!("AstFragment::make_method_receiver_expr called on the wrong kind of fragment"),
                 }
             }
 
             $(pub fn $make_ast(self) -> $AstTy {
                 match self {
                     AstFragment::$Kind(ast) => ast,
-                    _ => panic!("AstFragment::make_* called on the wrong kind of fragment"),
+                    _ => panic!("AstFragment::{} called on the wrong kind of fragment", stringify!($make_ast)),
                 }
             })*
 
@@ -251,7 +251,8 @@ ast_fragments! {
         fn make_field_defs;
     }
     Variants(SmallVec<[ast::Variant; 1]>) {
-        "variant"; many fn flat_map_variant; fn visit_variant();
+        "variant";
+        many fn flat_map_variant; fn visit_variant();
         fn make_variants;
     }
     WherePredicates(SmallVec<[ast::WherePredicate; 1]>) {
