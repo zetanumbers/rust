@@ -1077,7 +1077,7 @@ cc = ["@Amanieu", "@folkertdev", "@sayantn"]
 message = "Some changes occurred in `std_detect`"
 cc = ["@Amanieu", "@folkertdev", "@sayantn"]
 
-[mentions."library/core/src/intrinsics/simd.rs"]
+[mentions."library/core/src/intrinsics/simd/mod.rs"]
 message = """
 Some changes occurred to the platform-builtins intrinsics. Make sure the
 LLVM backend as well as portable-simd gets adapted for the changes.
@@ -1451,6 +1451,12 @@ code; adding it needs t-lang approval.
 """
 cc = ["@rust-lang/wg-const-eval"]
 
+[mentions."compiler/rustc_attr_parsing/src/attributes/diagnostic"]
+message = "Some changes occurred to diagnostic attributes."
+cc = ["@mejrs"]
+[mentions."compiler/rustc_hir/src/attrs/diagnostic.rs"]
+message = "Some changes occurred to diagnostic attributes."
+cc = ["@mejrs"]
 
 # ------------------------------------------------------------------------------
 # PR assignments
@@ -1479,7 +1485,6 @@ libs = [
     "@jhpratt",
     "@tgross35",
     "@thomcc",
-    "@ibraheemdev",
     "@joboet",
 ]
 infra-ci = [
@@ -1598,7 +1603,9 @@ dep-bumps = [
 "/compiler/rustc_type_ir" =                              ["compiler", "types"]
 "/compiler/rustc_public" =                               ["project-stable-mir"]
 "/library/alloc" =                                       ["libs"]
+"/library/alloctests" =                                  ["libs"]
 "/library/core" =                                        ["libs", "@scottmcm"]
+"/library/coretests" =                                   ["libs"]
 "/library/panic_abort" =                                 ["libs"]
 "/library/panic_unwind" =                                ["libs"]
 "/library/proc_macro" =                                  ["@petrochenkov"]
@@ -1626,6 +1633,18 @@ dep-bumps = [
 "/src/llvm-project" =                                    ["@cuviper"]
 "/src/rustdoc-json-types" =                              ["rustdoc"]
 "/src/stage0" =                                          ["bootstrap"]
+"/tests/assembly-llvm" =                                 ["compiler"]
+"/tests/auxiliary" =                                     ["compiler"]
+"/tests/codegen-llvm" =                                  ["compiler"]
+"/tests/codegen-units" =                                 ["compiler"]
+"/tests/COMPILER_TESTS.md" =                             ["compiler"]
+"/tests/coverage-run-rustdoc" =                          ["compiler"]
+"/tests/coverage" =                                      ["compiler"]
+"/tests/crashes" =                                       ["compiler"]
+"/tests/debuginfo" =                                     ["compiler"]
+"/tests/incremental" =                                   ["compiler"]
+"/tests/mir-opt" =                                       ["compiler"]
+"/tests/pretty" =                                        ["compiler"]
 "/tests/run-make" =                                      ["compiler"]
 "/tests/run-make-cargo" =                                ["compiler"]
 "/tests/rustdoc-html" =                                  ["rustdoc"]
@@ -1635,6 +1654,7 @@ dep-bumps = [
 "/tests/rustdoc-json" =                                  ["@aDotInTheVoid"]
 "/tests/rustdoc-ui" =                                    ["rustdoc"]
 "/tests/ui" =                                            ["compiler"]
+"/tests/ui-fulldeps" =                                   ["compiler"]
 "/src/tools/build-manifest" =                            ["bootstrap"]
 "/src/tools/cargo" =                                     ["@ehuss"]
 "/src/tools/compiletest" =                               ["bootstrap", "@wesleywiser", "@oli-obk", "@jieyouxu"]

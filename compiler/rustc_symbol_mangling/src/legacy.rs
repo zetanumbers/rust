@@ -9,6 +9,7 @@ use rustc_middle::bug;
 use rustc_middle::ty::print::{PrettyPrinter, Print, PrintError, Printer};
 use rustc_middle::ty::{
     self, GenericArg, GenericArgKind, Instance, ReifyReason, Ty, TyCtxt, TypeVisitableExt,
+    Unnormalized,
 };
 use tracing::debug;
 
@@ -32,7 +33,7 @@ pub(super) fn mangle<'tcx>(
             | DefPathData::ValueNs(_)
             | DefPathData::Closure
             | DefPathData::SyntheticCoroutineBody => {
-                instance_ty = tcx.type_of(ty_def_id).instantiate_identity();
+                instance_ty = tcx.type_of(ty_def_id).instantiate_identity().skip_norm_wip();
                 debug!(?instance_ty);
                 break;
             }
@@ -242,7 +243,11 @@ impl<'tcx> Printer<'tcx> for LegacySymbolMangler<'tcx> {
         match *ty.kind() {
             // Print all nominal types as paths (unlike `pretty_print_type`).
             ty::FnDef(def_id, args)
-            | ty::Alias(ty::Projection | ty::Opaque, ty::AliasTy { def_id, args, .. })
+            | ty::Alias(ty::AliasTy {
+                kind: ty::Projection { def_id } | ty::Opaque { def_id },
+                args,
+                ..
+            })
             | ty::Closure(def_id, args)
             | ty::CoroutineClosure(def_id, args)
             | ty::Coroutine(def_id, args) => self.print_def_path(def_id, args),
@@ -264,7 +269,9 @@ impl<'tcx> Printer<'tcx> for LegacySymbolMangler<'tcx> {
                 Ok(())
             }
 
-            ty::Alias(ty::Inherent, _) => panic!("unexpected inherent projection"),
+            ty::Alias(ty::AliasTy { kind: ty::Inherent { .. }, .. }) => {
+                panic!("unexpected inherent projection")
+            }
 
             _ => self.pretty_print_type(ty),
         }
@@ -428,8 +435,9 @@ impl<'tcx> Printer<'tcx> for LegacySymbolMangler<'tcx> {
         {
             (
                 ty::TypingEnv::post_analysis(self.tcx, impl_def_id),
-                self_ty.instantiate_identity(),
-                impl_trait_ref.map(|impl_trait_ref| impl_trait_ref.instantiate_identity()),
+                self_ty.instantiate_identity().skip_norm_wip(),
+                impl_trait_ref
+                    .map(|impl_trait_ref| impl_trait_ref.instantiate_identity().skip_norm_wip()),
             )
         } else {
             assert!(
@@ -439,19 +447,24 @@ impl<'tcx> Printer<'tcx> for LegacySymbolMangler<'tcx> {
             );
             (
                 ty::TypingEnv::fully_monomorphized(),
-                self_ty.instantiate(self.tcx, args),
-                impl_trait_ref.map(|impl_trait_ref| impl_trait_ref.instantiate(self.tcx, args)),
+                self_ty.instantiate(self.tcx, args).skip_norm_wip(),
+                impl_trait_ref.map(|impl_trait_ref| {
+                    impl_trait_ref.instantiate(self.tcx, args).skip_norm_wip()
+                }),
             )
         };
 
         match &mut impl_trait_ref {
             Some(impl_trait_ref) => {
                 assert_eq!(impl_trait_ref.self_ty(), self_ty);
-                *impl_trait_ref = self.tcx.normalize_erasing_regions(typing_env, *impl_trait_ref);
+                *impl_trait_ref = self
+                    .tcx
+                    .normalize_erasing_regions(typing_env, Unnormalized::new_wip(*impl_trait_ref));
                 self_ty = impl_trait_ref.self_ty();
             }
             None => {
-                self_ty = self.tcx.normalize_erasing_regions(typing_env, self_ty);
+                self_ty =
+                    self.tcx.normalize_erasing_regions(typing_env, Unnormalized::new_wip(self_ty));
             }
         }
 

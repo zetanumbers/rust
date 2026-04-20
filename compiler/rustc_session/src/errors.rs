@@ -71,7 +71,7 @@ pub(crate) struct FeatureDiagnosticHelp {
     applicability = "maybe-incorrect",
     code = "#![feature({feature})]\n"
 )]
-pub struct FeatureDiagnosticSuggestion {
+pub(crate) struct FeatureDiagnosticSuggestion {
     pub feature: Symbol,
     #[primary_span]
     pub span: Span,
@@ -81,13 +81,6 @@ pub struct FeatureDiagnosticSuggestion {
 #[help("add `-Zcrate-attr=\"feature({$feature})\"` to the command-line options to enable")]
 pub(crate) struct CliFeatureDiagnosticHelp {
     pub(crate) feature: Symbol,
-}
-
-#[derive(Diagnostic)]
-#[diag("must be a name of an associated function")]
-pub struct MustBeNameOfAssociatedFunction {
-    #[primary_span]
-    pub span: Span,
 }
 
 #[derive(Diagnostic)]
@@ -530,3 +523,7 @@ pub(crate) struct UnexpectedBuiltinCfg {
 #[derive(Diagnostic)]
 #[diag("ThinLTO is not supported by the codegen backend, using fat LTO instead")]
 pub(crate) struct ThinLtoNotSupportedByBackend;
+
+#[derive(Diagnostic)]
+#[diag("`-Zpacked-stack` is only supported on s390x")]
+pub(crate) struct UnsupportedPackedStack;

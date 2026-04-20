@@ -24,7 +24,9 @@ use rustc_middle::lint::LevelAndSource;
 use rustc_middle::middle::privacy::EffectiveVisibilities;
 use rustc_middle::ty::layout::{LayoutError, LayoutOfHelpers, TyAndLayout};
 use rustc_middle::ty::print::{PrintError, PrintTraitRefExt as _, Printer, with_no_trimmed_paths};
-use rustc_middle::ty::{self, GenericArg, RegisteredTools, Ty, TyCtxt, TypingEnv, TypingMode};
+use rustc_middle::ty::{
+    self, GenericArg, RegisteredTools, Ty, TyCtxt, TypingEnv, TypingMode, Unnormalized,
+};
 use rustc_session::lint::{FutureIncompatibleInfo, Lint, LintExpectationId, LintId};
 use rustc_session::{DynLintStore, Session};
 use rustc_span::edit_distance::find_best_match_for_names;
@@ -637,7 +639,7 @@ impl<'tcx> LateContext<'tcx> {
     }
 
     pub fn typing_env(&self) -> TypingEnv<'tcx> {
-        TypingEnv { typing_mode: self.typing_mode(), param_env: self.param_env }
+        TypingEnv::new(self.param_env, self.typing_mode())
     }
 
     pub fn type_is_copy_modulo_regions(&self, ty: Ty<'tcx>) -> bool {
@@ -833,7 +835,8 @@ impl<'tcx> LateContext<'tcx> {
             .find_by_ident_and_kind(tcx, Ident::with_dummy_span(name), ty::AssocTag::Type, trait_id)
             .and_then(|assoc| {
                 let proj = Ty::new_projection(tcx, assoc.def_id, [self_ty]);
-                tcx.try_normalize_erasing_regions(self.typing_env(), proj).ok()
+                tcx.try_normalize_erasing_regions(self.typing_env(), Unnormalized::new_wip(proj))
+                    .ok()
             })
     }
 

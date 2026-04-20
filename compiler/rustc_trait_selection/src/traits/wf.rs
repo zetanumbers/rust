@@ -285,9 +285,8 @@ fn extend_cause_with_original_assoc_item_obligation<'tcx>(
     };
 
     let ty_to_impl_span = |ty: Ty<'_>| {
-        if let ty::Alias(ty::Projection, projection_ty) = ty.kind()
-            && let Some(&impl_item_id) =
-                tcx.impl_item_implementor_ids(impl_def_id).get(&projection_ty.def_id)
+        if let ty::Alias(ty::AliasTy { kind: ty::Projection { def_id }, .. }) = ty.kind()
+            && let Some(&impl_item_id) = tcx.impl_item_implementor_ids(impl_def_id).get(def_id)
             && let Some(impl_item) =
                 items.iter().find(|item| item.owner_id.to_def_id() == impl_item_id)
         {
@@ -597,7 +596,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
                     cause,
                     self.recursion_depth,
                     self.param_env,
-                    pred,
+                    pred.skip_norm_wip(),
                 )
             })
             .filter(|pred| !pred.has_escaping_bound_vars())
@@ -798,11 +797,15 @@ impl<'a, 'tcx> TypeVisitor<TyCtxt<'tcx>> for WfPredicates<'a, 'tcx> {
                 // Simple cases that are WF if their type args are WF.
             }
 
-            ty::Alias(ty::Projection | ty::Opaque | ty::Free, data) => {
-                let obligations = self.nominal_obligations(data.def_id, data.args);
+            ty::Alias(ty::AliasTy {
+                kind: ty::Projection { def_id } | ty::Opaque { def_id } | ty::Free { def_id },
+                args,
+                ..
+            }) => {
+                let obligations = self.nominal_obligations(def_id, args);
                 self.out.extend(obligations);
             }
-            ty::Alias(ty::Inherent, data) => {
+            ty::Alias(data @ ty::AliasTy { kind: ty::Inherent { .. }, .. }) => {
                 self.add_wf_preds_for_inherent_projection(data.into());
                 return; // Subtree handled by compute_inherent_projection.
             }
@@ -819,7 +822,7 @@ impl<'a, 'tcx> TypeVisitor<TyCtxt<'tcx>> for WfPredicates<'a, 'tcx> {
                 // perfect and there may be ways to abuse the fact that we
                 // ignore requirements with escaping bound vars. That's a
                 // more general issue however.
-                let fn_sig = tcx.fn_sig(did).instantiate(tcx, args);
+                let fn_sig = tcx.fn_sig(did).instantiate(tcx, args).skip_norm_wip();
                 fn_sig.output().skip_binder().visit_with(self);
 
                 let obligations = self.nominal_obligations(did, args);
@@ -999,7 +1002,8 @@ impl<'a, 'tcx> TypeVisitor<TyCtxt<'tcx>> for WfPredicates<'a, 'tcx> {
                                 p.term.as_const().map(|ct| {
                                     let assoc_const_ty = tcx
                                         .type_of(p.projection_term.def_id)
-                                        .instantiate(tcx, p.projection_term.args);
+                                        .instantiate(tcx, p.projection_term.args)
+                                        .skip_norm_wip();
                                     ty::PredicateKind::Clause(ty::ClauseKind::ConstArgHasType(
                                         ct,
                                         assoc_const_ty,
@@ -1131,8 +1135,10 @@ impl<'a, 'tcx> TypeVisitor<TyCtxt<'tcx>> for WfPredicates<'a, 'tcx> {
                             let cause = self.cause(ObligationCauseCode::WellFormed(None));
                             self.out.extend(variant_def.fields.iter().zip(adt_val.fields).map(
                                 |(field_def, &field_val)| {
-                                    let field_ty =
-                                        tcx.type_of(field_def.did).instantiate(tcx, args);
+                                    let field_ty = tcx
+                                        .type_of(field_def.did)
+                                        .instantiate(tcx, args)
+                                        .skip_norm_wip();
                                     let predicate = ty::PredicateKind::Clause(
                                         ty::ClauseKind::ConstArgHasType(field_val, field_ty),
                                     );

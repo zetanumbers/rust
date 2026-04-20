@@ -7,7 +7,7 @@ use rustc_middle::bug;
 use rustc_middle::ty::error::TypeError;
 use rustc_middle::ty::{
     self, AliasRelationDirection, InferConst, Term, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable,
-    TypeVisitableExt, TypeVisitor, TypingMode,
+    TypeVisitableExt, TypeVisitor,
 };
 use rustc_span::Span;
 use tracing::{debug, instrument, warn};
@@ -300,10 +300,10 @@ impl<'tcx> InferCtxt<'tcx> {
         assert!(!source_term.has_escaping_bound_vars());
         let (for_universe, root_vid) = match target_vid {
             TermVid::Ty(ty_vid) => {
-                (self.probe_ty_var(ty_vid).unwrap_err(), TermVid::Ty(self.root_var(ty_vid)))
+                (self.try_resolve_ty_var(ty_vid).unwrap_err(), TermVid::Ty(self.root_var(ty_vid)))
             }
             TermVid::Const(ct_vid) => (
-                self.probe_const_var(ct_vid).unwrap_err(),
+                self.try_resolve_const_var(ct_vid).unwrap_err(),
                 TermVid::Const(self.inner.borrow_mut().const_unification_table().find(ct_vid).vid),
             ),
         };
@@ -603,7 +603,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for Generalizer<'_, 'tcx> {
                             //
                             // cc trait-system-refactor-initiative#108
                             if self.infcx.next_trait_solver()
-                                && !matches!(self.infcx.typing_mode(), TypingMode::Coherence)
+                                && !self.infcx.typing_mode().is_coherence()
                                 && self.in_alias
                             {
                                 inner.type_variables().equate(vid, new_var_id);
@@ -635,7 +635,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for Generalizer<'_, 'tcx> {
                 }
             }
 
-            ty::Alias(_, data) => match self.structurally_relate_aliases {
+            ty::Alias(data) => match self.structurally_relate_aliases {
                 StructurallyRelateAliases::No => {
                     self.generalize_alias_term(data.into()).map(|v| v.expect_type())
                 }
@@ -735,7 +735,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for Generalizer<'_, 'tcx> {
                             // See the comment for type inference variables
                             // for more details.
                             if self.infcx.next_trait_solver()
-                                && !matches!(self.infcx.typing_mode(), TypingMode::Coherence)
+                                && !self.infcx.typing_mode().is_coherence()
                                 && self.in_alias
                             {
                                 variable_table.union(vid, new_var_id);

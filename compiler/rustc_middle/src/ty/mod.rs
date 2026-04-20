@@ -40,6 +40,7 @@ use rustc_hir as hir;
 use rustc_hir::attrs::StrippedCfgItem;
 use rustc_hir::def::{CtorKind, CtorOf, DefKind, DocLinkResMap, LifetimeRes, Res};
 use rustc_hir::def_id::{CrateNum, DefId, DefIdMap, LocalDefId, LocalDefIdMap};
+use rustc_hir::definitions::PerParentDisambiguatorState;
 use rustc_hir::{LangItem, attrs as attr, find_attr};
 use rustc_index::IndexVec;
 use rustc_index::bit_set::BitMatrix;
@@ -85,6 +86,7 @@ pub use self::context::{
 };
 pub use self::fold::*;
 pub use self::instance::{Instance, InstanceKind, ReifyReason};
+pub(crate) use self::list::RawList;
 pub use self::list::{List, ListWithCachedTypeInfo};
 pub use self::opaque_types::OpaqueTypeKey;
 pub use self::pattern::{Pattern, PatternKind};
@@ -95,16 +97,18 @@ pub use self::predicate::{
     PolyExistentialPredicate, PolyExistentialProjection, PolyExistentialTraitRef,
     PolyProjectionPredicate, PolyRegionOutlivesPredicate, PolySubtypePredicate, PolyTraitPredicate,
     PolyTraitRef, PolyTypeOutlivesPredicate, Predicate, PredicateKind, ProjectionPredicate,
-    RegionOutlivesPredicate, SubtypePredicate, TraitPredicate, TraitRef, TypeOutlivesPredicate,
+    RegionConstraint, RegionEqPredicate, RegionOutlivesPredicate, SubtypePredicate, TraitPredicate,
+    TraitRef, TypeOutlivesPredicate,
 };
 pub use self::region::{
     EarlyParamRegion, LateParamRegion, LateParamRegionKind, Region, RegionKind, RegionVid,
 };
 pub use self::sty::{
-    AliasTy, Article, Binder, BoundConst, BoundRegion, BoundRegionKind, BoundTy, BoundTyKind,
-    BoundVariableKind, CanonicalPolyFnSig, CoroutineArgsExt, EarlyBinder, FnSig, InlineConstArgs,
-    InlineConstArgsParts, ParamConst, ParamTy, PlaceholderConst, PlaceholderRegion,
-    PlaceholderType, PolyFnSig, TyKind, TypeAndMut, TypingMode, UpvarArgs,
+    AliasTy, AliasTyKind, Article, Binder, BoundConst, BoundRegion, BoundRegionKind, BoundTy,
+    BoundTyKind, BoundVariableKind, CanonicalPolyFnSig, CoroutineArgsExt, EarlyBinder, FnSig,
+    FnSigKind, InlineConstArgs, InlineConstArgsParts, ParamConst, ParamTy, PlaceholderConst,
+    PlaceholderRegion, PlaceholderType, PolyFnSig, TyKind, TypeAndMut, TypingMode,
+    TypingModeEqWrapper, Unnormalized, UpvarArgs,
 };
 pub use self::trait_def::TraitDef;
 pub use self::typeck_results::{
@@ -222,6 +226,8 @@ pub struct ResolverAstLowering<'tcx> {
 
     // Information about delegations which is used when handling recursive delegations
     pub delegation_infos: LocalDefIdMap<DelegationInfo>,
+
+    pub per_parent_disambiguators: LocalDefIdMap<Steal<PerParentDisambiguatorState>>,
 }
 
 #[derive(Debug)]
@@ -604,7 +610,7 @@ impl<'tcx> Term<'tcx> {
     pub fn to_alias_term(self) -> Option<AliasTerm<'tcx>> {
         match self.kind() {
             TermKind::Ty(ty) => match *ty.kind() {
-                ty::Alias(_kind, alias_ty) => Some(alias_ty.into()),
+                ty::Alias(alias_ty) => Some(alias_ty.into()),
                 _ => None,
             },
             TermKind::Const(ct) => match ct.kind() {
@@ -687,9 +693,9 @@ impl<'tcx> TermKind<'tcx> {
 /// `[[], [U:Bar<T>]]`. Now if there were some particular reference
 /// like `Foo<isize,usize>`, then the `InstantiatedPredicates` would be `[[],
 /// [usize:Bar<isize>]]`.
-#[derive(Clone, Debug, TypeFoldable, TypeVisitable)]
+#[derive(Clone, Debug)]
 pub struct InstantiatedPredicates<'tcx> {
-    pub predicates: Vec<Clause<'tcx>>,
+    pub predicates: Vec<Unnormalized<'tcx, Clause<'tcx>>>,
     pub spans: Vec<Span>,
 }
 
@@ -708,9 +714,12 @@ impl<'tcx> InstantiatedPredicates<'tcx> {
 }
 
 impl<'tcx> IntoIterator for InstantiatedPredicates<'tcx> {
-    type Item = (Clause<'tcx>, Span);
+    type Item = (Unnormalized<'tcx, Clause<'tcx>>, Span);
 
-    type IntoIter = std::iter::Zip<std::vec::IntoIter<Clause<'tcx>>, std::vec::IntoIter<Span>>;
+    type IntoIter = std::iter::Zip<
+        std::vec::IntoIter<Unnormalized<'tcx, Clause<'tcx>>>,
+        std::vec::IntoIter<Span>,
+    >;
 
     fn into_iter(self) -> Self::IntoIter {
         debug_assert_eq!(self.predicates.len(), self.spans.len());
@@ -719,10 +728,10 @@ impl<'tcx> IntoIterator for InstantiatedPredicates<'tcx> {
 }
 
 impl<'a, 'tcx> IntoIterator for &'a InstantiatedPredicates<'tcx> {
-    type Item = (Clause<'tcx>, Span);
+    type Item = (Unnormalized<'tcx, Clause<'tcx>>, Span);
 
     type IntoIter = std::iter::Zip<
-        std::iter::Copied<std::slice::Iter<'a, Clause<'tcx>>>,
+        std::iter::Copied<std::slice::Iter<'a, Unnormalized<'tcx, Clause<'tcx>>>>,
         std::iter::Copied<std::slice::Iter<'a, Span>>,
     >;
 
@@ -876,8 +885,8 @@ impl<'tcx> DefinitionSiteHiddenType<'tcx> {
         other: &Self,
         tcx: TyCtxt<'tcx>,
     ) -> Result<Diag<'tcx>, ErrorGuaranteed> {
-        let self_ty = self.ty.instantiate_identity();
-        let other_ty = other.ty.instantiate_identity();
+        let self_ty = self.ty.instantiate_identity().skip_norm_wip();
+        let other_ty = other.ty.instantiate_identity().skip_norm_wip();
         (self_ty, other_ty).error_reported()?;
         // Found different concrete types for the opaque type.
         let sub_diag = if self.span == other.span {
@@ -979,11 +988,19 @@ pub struct ParamEnvAnd<'tcx, T> {
 pub struct TypingEnv<'tcx> {
     #[type_foldable(identity)]
     #[type_visitable(ignore)]
-    pub typing_mode: TypingMode<'tcx>,
+    typing_mode: TypingModeEqWrapper<'tcx>,
     pub param_env: ParamEnv<'tcx>,
 }
 
 impl<'tcx> TypingEnv<'tcx> {
+    pub fn new(param_env: ParamEnv<'tcx>, typing_mode: TypingMode<'tcx>) -> Self {
+        Self { typing_mode: TypingModeEqWrapper(typing_mode), param_env }
+    }
+
+    pub fn typing_mode(&self) -> TypingMode<'tcx> {
+        self.typing_mode.0
+    }
+
     /// Create a typing environment with no where-clauses in scope
     /// where all opaque types and default associated items are revealed.
     ///
@@ -992,7 +1009,7 @@ impl<'tcx> TypingEnv<'tcx> {
     /// use `TypingMode::PostAnalysis`, they may still have where-clauses
     /// in scope.
     pub fn fully_monomorphized() -> TypingEnv<'tcx> {
-        TypingEnv { typing_mode: TypingMode::PostAnalysis, param_env: ParamEnv::empty() }
+        Self::new(ParamEnv::empty(), TypingMode::PostAnalysis)
     }
 
     /// Create a typing environment for use during analysis outside of a body.
@@ -1005,7 +1022,7 @@ impl<'tcx> TypingEnv<'tcx> {
         def_id: impl IntoQueryKey<DefId>,
     ) -> TypingEnv<'tcx> {
         let def_id = def_id.into_query_key();
-        TypingEnv { typing_mode: TypingMode::non_body_analysis(), param_env: tcx.param_env(def_id) }
+        Self::new(tcx.param_env(def_id), TypingMode::non_body_analysis())
     }
 
     pub fn post_analysis(tcx: TyCtxt<'tcx>, def_id: impl IntoQueryKey<DefId>) -> TypingEnv<'tcx> {
@@ -1017,8 +1034,12 @@ impl<'tcx> TypingEnv<'tcx> {
     /// opaque types in the `param_env`.
     pub fn with_post_analysis_normalized(self, tcx: TyCtxt<'tcx>) -> TypingEnv<'tcx> {
         let TypingEnv { typing_mode, param_env } = self;
-        if let TypingMode::PostAnalysis = typing_mode {
-            return self;
+        match typing_mode.0 {
+            TypingMode::Coherence
+            | TypingMode::Analysis { .. }
+            | TypingMode::Borrowck { .. }
+            | TypingMode::PostBorrowckAnalysis { .. } => {}
+            TypingMode::PostAnalysis => return self,
         }
 
         // No need to reveal opaques with the new solver enabled,
@@ -1028,7 +1049,7 @@ impl<'tcx> TypingEnv<'tcx> {
         } else {
             ParamEnv::new(tcx.reveal_opaque_types_in_bounds(param_env.caller_bounds()))
         };
-        TypingEnv { typing_mode: TypingMode::PostAnalysis, param_env }
+        TypingEnv { typing_mode: TypingModeEqWrapper(TypingMode::PostAnalysis), param_env }
     }
 
     /// Combine this typing environment with the given `value` to be used by
@@ -1363,7 +1384,7 @@ impl<'tcx> FieldDef {
     /// Returns the type of this field. The resulting type is not normalized. The `arg` is
     /// typically obtained via the second field of [`TyKind::Adt`].
     pub fn ty(&self, tcx: TyCtxt<'tcx>, args: GenericArgsRef<'tcx>) -> Ty<'tcx> {
-        tcx.type_of(self.did).instantiate(tcx, args)
+        tcx.type_of(self.did).instantiate(tcx, args).skip_norm_wip()
     }
 
     /// Computes the `Ident` of this variant by looking up the `Span`
@@ -1722,29 +1743,6 @@ impl<'tcx> TyCtxt<'tcx> {
         }
     }
 
-    #[deprecated = "Though there are valid usecases for this method, especially when your attribute is not a parsed attribute, usually you want to call rustc_hir::find_attr! instead."]
-    pub fn get_attr(self, did: impl Into<DefId>, attr: Symbol) -> Option<&'tcx hir::Attribute> {
-        if cfg!(debug_assertions) && !rustc_feature::is_valid_for_get_attr(attr) {
-            let did: DefId = did.into();
-            bug!("get_attr: unexpected called with DefId `{:?}`, attr `{:?}`", did, attr);
-        } else {
-            #[allow(deprecated)]
-            self.get_attrs(did, attr).next()
-        }
-    }
-
-    /// Determines whether an item is annotated with an attribute.
-    #[deprecated = "Though there are valid usecases for this method, especially when your attribute is not a parsed attribute, usually you want to call rustc_hir::find_attr! instead."]
-    pub fn has_attr(self, did: impl Into<DefId>, attr: Symbol) -> bool {
-        #[allow(deprecated)]
-        self.get_attrs(did, attr).next().is_some()
-    }
-
-    /// Determines whether an item is annotated with a multi-segment attribute
-    pub fn has_attrs_with_path(self, did: impl Into<DefId>, attrs: &[Symbol]) -> bool {
-        self.get_attrs_by_path(did.into(), attrs).next().is_some()
-    }
-
     /// Returns `true` if this is an `auto trait`.
     pub fn trait_is_auto(self, trait_def_id: DefId) -> bool {
         self.trait_def(trait_def_id).has_auto_impl
@@ -1786,7 +1784,7 @@ impl<'tcx> TyCtxt<'tcx> {
             // If we have a `Coroutine` that comes from an coroutine-closure,
             // then it may be a by-move or by-ref body.
             let ty::Coroutine(_, identity_args) =
-                *self.type_of(def_id).instantiate_identity().kind()
+                *self.type_of(def_id).instantiate_identity().skip_norm_wip().kind()
             else {
                 unreachable!();
             };

@@ -13,12 +13,12 @@ use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::{Expr, ExprKind, FnRetTy, HirId, LangItem, Node, QPath, is_range_literal};
 use rustc_hir_analysis::check::potentially_plural_count;
-use rustc_hir_analysis::hir_ty_lowering::{HirTyLowerer, PermitVariants};
+use rustc_hir_analysis::hir_ty_lowering::{HirTyLowerer, ResolvedStructPath};
 use rustc_index::IndexVec;
 use rustc_infer::infer::{BoundRegionConversionTime, DefineOpaqueTypes, InferOk, TypeTrace};
 use rustc_middle::ty::adjustment::AllowTwoPhase;
 use rustc_middle::ty::error::TypeError;
-use rustc_middle::ty::{self, IsSuggestable, Ty, TyCtxt, TypeVisitableExt};
+use rustc_middle::ty::{self, IsSuggestable, Ty, TyCtxt, TypeVisitableExt, Unnormalized};
 use rustc_middle::{bug, span_bug};
 use rustc_session::Session;
 use rustc_span::{DUMMY_SP, Ident, Span, kw, sym};
@@ -95,8 +95,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // as otherwise we can wind up conservatively proving `Copy` which may
                 // infer the repeat expr count to something that never required `Copy` in
                 // the first place.
-                let count = self
-                    .structurally_resolve_const(element.span, self.normalize(element.span, count));
+                let count = self.structurally_resolve_const(
+                    element.span,
+                    self.normalize(element.span, Unnormalized::new_wip(count)),
+                );
 
                 // Avoid run on "`NotCopy: Copy` is not implemented" errors when the
                 // repeat expr count is erroneous/unknown. The user might wind up
@@ -183,6 +185,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // The expressions for each provided argument
         provided_args: &'tcx [hir::Expr<'tcx>],
         // Whether the function is variadic, for example when imported from C
+        // FIXME(splat): maybe change this to FnSigKind?
         c_variadic: bool,
         // Whether the arguments have been bundled in a tuple (ex: closures)
         tuple_arguments: TupleArgumentsFlag,
@@ -215,6 +218,29 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             self.check_place_expr_if_unsized(fn_input_ty, arg_expr);
         }
 
+        let formal_input_tys_ns;
+        let formal_input_tys = if self.next_trait_solver() {
+            // In the new solver, the normalizations are done lazily.
+            // Because of this, if we encounter unnormalized alias types inside this
+            // fudge scope, we might lose the relationships between them and other vars
+            // when fudging inference variables created here.
+            // So, we utilize generalization to normalize aliases by adding a new
+            // inference var and equating it with the type we want to pull out of the
+            // fudge scope.
+            formal_input_tys_ns = formal_input_tys
+                .iter()
+                .map(|&ty| {
+                    let generalized_ty = self.next_ty_var(call_span);
+                    self.demand_eqtype(call_span, ty, generalized_ty);
+                    generalized_ty
+                })
+                .collect_vec();
+
+            formal_input_tys_ns.as_slice()
+        } else {
+            formal_input_tys
+        };
+
         // First, let's unify the formal method signature with the expectation eagerly.
         // We use this to guide coercion inference; it's output is "fudged" which means
         // any remaining type variables are assigned to new, unrelated variables. This
@@ -238,37 +264,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     let origin = self.misc(call_span);
                     ocx.sup(&origin, self.param_env, expected_output, formal_output)?;
 
-                    let formal_input_tys_ns;
-                    let formal_input_tys = if self.next_trait_solver() {
-                        // In the new solver, the normalizations are done lazily.
-                        // Because of this, if we encounter unnormalized alias types inside this
-                        // fudge scope, we might lose the relationships between them and other vars
-                        // when fudging inference variables created here.
-                        // So, we utilize generalization to normalize aliases by adding a new
-                        // inference var and equating it with the type we want to pull out of the
-                        // fudge scope.
-                        formal_input_tys_ns = formal_input_tys
-                            .iter()
-                            .map(|&ty| {
-                                // If we replace a (unresolved) inference var with a new inference
-                                // var, it will be eventually resolved to itself and this will
-                                // weaken type inferences as the new inference var will be fudged
-                                // out and lose all relationships with other vars while the former
-                                // will not be fudged.
-                                if ty.is_ty_var() {
-                                    return ty;
-                                }
-
-                                let generalized_ty = self.next_ty_var(call_span);
-                                ocx.eq(&origin, self.param_env, ty, generalized_ty).unwrap();
-                                generalized_ty
-                            })
-                            .collect_vec();
-
-                        formal_input_tys_ns.as_slice()
-                    } else {
-                        formal_input_tys
-                    };
+                    // Check the well-formedness of expected input tys, as using ill-formed
+                    // expectation may cause type inference errors, see #150316.
+                    for &ty in formal_input_tys {
+                        ocx.register_obligation(traits::Obligation::new(
+                            self.tcx,
+                            self.misc(call_span),
+                            self.param_env,
+                            ty::ClauseKind::WellFormed(ty.into()),
+                        ));
+                    }
 
                     if !ocx.try_evaluate_obligations().is_empty() {
                         return Err(TypeError::Mismatch);
@@ -276,7 +281,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
                     // Record all the argument types, with the args
                     // produced from the above subtyping unification.
-                    Ok(Some(formal_input_tys.to_vec()))
+                    Ok(Some(
+                        formal_input_tys
+                            .iter()
+                            .map(|&ty| self.resolve_vars_if_possible(ty))
+                            .collect(),
+                    ))
                 })
                 .ok()
             })
@@ -487,7 +497,21 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
                 // There are a few types which get autopromoted when passed via varargs
                 // in C but we just error out instead and require explicit casts.
+                //
+                // We use implementations of VaArgSafe as the source of truth. On some embedded
+                // targets, c_double is f32 and c_int/c_uing are i16/u16, and these types implement
+                // VaArgSafe there. On all other targets, these types do not implement VaArgSafe.
+                //
+                // cfg(bootstrap): change the if let to an unwrap.
                 let arg_ty = self.structurally_resolve_type(arg.span, arg_ty);
+                if let Some(trait_def_id) = tcx.lang_items().va_arg_safe()
+                    && self
+                        .type_implements_trait(trait_def_id, [arg_ty], self.param_env)
+                        .must_apply_modulo_regions()
+                {
+                    continue;
+                }
+
                 match arg_ty.kind() {
                     ty::Float(ty::FloatTy::F32) => {
                         variadic_error(tcx.sess, arg.span, arg_ty, "c_double");
@@ -711,6 +735,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     pub(in super::super) fn check_expr_lit(
         &self,
         lit: &hir::Lit,
+        lint_id: HirId,
         expected: Expectation<'tcx>,
     ) -> Ty<'tcx> {
         let tcx = self.tcx;
@@ -758,7 +783,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     ty::Float(_) => Some(ty),
                     _ => None,
                 });
-                opt_ty.unwrap_or_else(|| self.next_float_var())
+                opt_ty.unwrap_or_else(|| self.next_float_var(lit.span, Some(lint_id)))
             }
             ast::LitKind::Bool(_) => tcx.types.bool,
             ast::LitKind::CStr(_, _) => Ty::new_imm_ref(
@@ -1260,38 +1285,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         path_span: Span,
         hir_id: HirId,
     ) -> (Res, LoweredTy<'tcx>) {
+        let ResolvedStructPath { res: result, ty } =
+            self.lowerer().lower_path_for_struct_expr(*qpath, path_span, hir_id);
         match *qpath {
-            QPath::Resolved(ref maybe_qself, path) => {
-                let self_ty = maybe_qself.as_ref().map(|qself| self.lower_ty(qself).raw);
-                let ty = self.lowerer().lower_resolved_ty_path(
-                    self_ty,
-                    path,
-                    hir_id,
-                    PermitVariants::Yes,
-                );
-                (path.res, LoweredTy::from_raw(self, path_span, ty))
-            }
-            QPath::TypeRelative(hir_self_ty, segment) => {
-                let self_ty = self.lower_ty(hir_self_ty);
-
-                let result = self.lowerer().lower_type_relative_ty_path(
-                    self_ty.raw,
-                    hir_self_ty,
-                    segment,
-                    hir_id,
-                    path_span,
-                    PermitVariants::Yes,
-                );
-                let ty = result
-                    .map(|(ty, _, _)| ty)
-                    .unwrap_or_else(|guar| Ty::new_error(self.tcx(), guar));
+            QPath::Resolved(_, path) => (path.res, LoweredTy::from_raw(self, path_span, ty)),
+            QPath::TypeRelative(_, _) => {
                 let ty = LoweredTy::from_raw(self, path_span, ty);
-                let result = result.map(|(_, kind, def_id)| (kind, def_id));
+                let resolution =
+                    result.map(|res: Res| (self.tcx().def_kind(res.def_id()), res.def_id()));
 
                 // Write back the new resolution.
-                self.write_resolution(hir_id, result);
+                self.write_resolution(hir_id, resolution);
 
-                (result.map_or(Res::Err, |(kind, def_id)| Res::Def(kind, def_id)), ty)
+                (result.unwrap_or(Res::Err), ty)
             }
         }
     }
@@ -1402,7 +1408,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         // fn-like predicates with different args, but callable types really never
                         // do that, so it's OK.
                         for (predicate, span) in instantiated {
-                            if let ty::ClauseKind::Trait(pred) = predicate.kind().skip_binder()
+                            if let ty::ClauseKind::Trait(pred) =
+                                predicate.skip_norm_wip().kind().skip_binder()
                                 && pred.self_ty().peel_refs() == callee_ty
                                 && self.tcx.is_fn_trait(pred.def_id())
                             {
@@ -1412,7 +1419,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         }
                     }
                 }
-                ty::Alias(ty::Opaque, ty::AliasTy { def_id: new_def_id, .. })
+                ty::Alias(ty::AliasTy { kind: ty::Opaque { def_id: new_def_id }, .. })
                 | ty::Closure(new_def_id, _)
                 | ty::FnDef(new_def_id, _) => {
                     def_id = new_def_id;
@@ -1805,14 +1812,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             (Some(_), Some(_)) | (None, None) => unreachable!(),
             (Some(body), None) => {
                 let params = self.tcx.hir_body(body).params;
-                let params =
-                    params.get(is_method as usize..params.len() - sig.decl.c_variadic as usize)?;
+                let params = params
+                    .get(is_method as usize..params.len() - sig.decl.c_variadic() as usize)?;
                 debug_assert_eq!(params.len(), fn_inputs.len());
                 Some((fn_inputs.zip(params.iter().map(FnParam::Param)).collect(), generics))
             }
             (None, Some(params)) => {
-                let params =
-                    params.get(is_method as usize..params.len() - sig.decl.c_variadic as usize)?;
+                let params = params
+                    .get(is_method as usize..params.len() - sig.decl.c_variadic() as usize)?;
                 debug_assert_eq!(params.len(), fn_inputs.len());
                 Some((
                     fn_inputs.zip(params.iter().map(|&ident| FnParam::Ident(ident))).collect(),
@@ -3026,7 +3033,8 @@ impl<'a, 'b, 'tcx> ArgsCtxt<'a, 'b, 'tcx> {
                 .fn_ctxt
                 .tcx
                 .fn_sig(assoc.def_id)
-                .instantiate(self.call_ctxt.fn_ctxt.tcx, args);
+                .instantiate(self.call_ctxt.fn_ctxt.tcx, args)
+                .skip_norm_wip();
 
             self.call_ctxt.fn_ctxt.instantiate_binder_with_fresh_vars(
                 call_name.span,

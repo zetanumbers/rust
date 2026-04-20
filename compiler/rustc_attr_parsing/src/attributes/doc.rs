@@ -1,16 +1,19 @@
 use rustc_ast::ast::{AttrStyle, LitKind, MetaItemLit};
+use rustc_errors::{Diagnostic, msg};
 use rustc_feature::template;
 use rustc_hir::Target;
 use rustc_hir::attrs::{
     AttributeKind, CfgEntry, CfgHideShow, CfgInfo, DocAttribute, DocInline, HideOrShow,
 };
 use rustc_hir::lints::AttributeLintKind;
+use rustc_session::parse::feature_err;
 use rustc_span::{Span, Symbol, edition, sym};
 use thin_vec::ThinVec;
 
 use super::prelude::{ALL_TARGETS, AllowedTargets};
 use super::{AcceptMapping, AttributeParser};
 use crate::context::{AcceptContext, FinalizeContext, Stage};
+use crate::errors::{DocAliasDuplicated, DocAutoCfgExpectsHideOrShow, IllFormedAttributeInput};
 use crate::parser::{ArgParser, MetaItemOrLitParser, MetaItemParser, OwnedPathParser};
 use crate::session_diagnostics::{
     DocAliasBadChar, DocAliasEmpty, DocAliasMalformed, DocAliasStartEnd, DocAttrNotCrateLevel,
@@ -134,7 +137,7 @@ fn parse_keyword_and_attribute<S: Stage>(
 
     let span = path.span();
     if attr_value.is_some() {
-        cx.duplicate_key(span, path.word_sym().unwrap());
+        cx.adcx().duplicate_key(span, path.word_sym().unwrap());
         return;
     }
 
@@ -169,12 +172,15 @@ impl DocParser {
 
                 if let Some(used_span) = self.attribute.no_crate_inject {
                     let unused_span = path.span();
-                    cx.emit_lint(
+                    cx.emit_dyn_lint(
                         rustc_session::lint::builtin::INVALID_DOC_ATTRIBUTES,
-                        AttributeLintKind::UnusedDuplicate {
-                            this: unused_span,
-                            other: used_span,
-                            warning: true,
+                        move |dcx, level| {
+                            rustc_errors::lints::UnusedDuplicate {
+                                this: unused_span,
+                                other: used_span,
+                                warning: true,
+                            }
+                            .into_diag(dcx, level)
                         },
                         unused_span,
                     );
@@ -250,9 +256,9 @@ impl DocParser {
         }
 
         if let Some(first_definition) = self.attribute.aliases.get(&alias).copied() {
-            cx.emit_lint(
+            cx.emit_dyn_lint(
                 rustc_session::lint::builtin::UNUSED_ATTRIBUTES,
-                AttributeLintKind::DuplicateDocAlias { first_definition },
+                move |dcx, level| DocAliasDuplicated { first_definition }.into_diag(dcx, level),
                 span,
             );
         }
@@ -273,7 +279,7 @@ impl DocParser {
             ArgParser::List(list) => {
                 for i in list.mixed() {
                     let Some(alias) = i.lit().and_then(|i| i.value_str()) else {
-                        cx.expected_string_literal(i.span(), i.lit());
+                        cx.adcx().expected_string_literal(i.span(), i.lit());
                         continue;
                     };
 
@@ -282,7 +288,7 @@ impl DocParser {
             }
             ArgParser::NameValue(nv) => {
                 let Some(alias) = nv.value_as_str() else {
-                    cx.expected_string_literal(nv.value_span, Some(nv.value_as_lit()));
+                    cx.adcx().expected_string_literal(nv.value_span, Some(nv.value_as_lit()));
                     return;
                 };
                 self.add_alias(cx, alias, nv.value_span);
@@ -338,9 +344,9 @@ impl DocParser {
             ArgParser::List(list) => {
                 for meta in list.mixed() {
                     let MetaItemOrLitParser::MetaItemParser(item) = meta else {
-                        cx.emit_lint(
+                        cx.emit_dyn_lint(
                             rustc_session::lint::builtin::INVALID_DOC_ATTRIBUTES,
-                            AttributeLintKind::DocAutoCfgExpectsHideOrShow,
+                            |dcx, level| DocAutoCfgExpectsHideOrShow.into_diag(dcx, level),
                             meta.span(),
                         );
                         continue;
@@ -349,9 +355,9 @@ impl DocParser {
                         Some(sym::hide) => (HideOrShow::Hide, sym::hide),
                         Some(sym::show) => (HideOrShow::Show, sym::show),
                         _ => {
-                            cx.emit_lint(
+                            cx.emit_dyn_lint(
                                 rustc_session::lint::builtin::INVALID_DOC_ATTRIBUTES,
-                                AttributeLintKind::DocAutoCfgExpectsHideOrShow,
+                                |dcx, level| DocAutoCfgExpectsHideOrShow.into_diag(dcx, level),
                                 item.span(),
                             );
                             continue;
@@ -481,15 +487,19 @@ impl DocParser {
         }
         macro_rules! no_args_and_crate_level {
             ($ident: ident) => {{
+                no_args_and_crate_level!($ident, |span| {});
+            }};
+            ($ident: ident, |$span:ident| $extra_validation:block) => {{
                 if let Err(span) = args.no_args() {
                     expected_no_args(cx, span);
                     return;
                 }
-                let span = path.span();
-                if !check_attr_crate_level(cx, span) {
+                let $span = path.span();
+                if !check_attr_crate_level(cx, $span) {
                     return;
                 }
-                self.attribute.$ident = Some(span);
+                $extra_validation
+                self.attribute.$ident = Some($span);
             }};
         }
         macro_rules! string_arg_and_crate_level {
@@ -553,7 +563,17 @@ impl DocParser {
             ),
             Some(sym::fake_variadic) => no_args_and_not_crate_level!(fake_variadic),
             Some(sym::search_unbox) => no_args_and_not_crate_level!(search_unbox),
-            Some(sym::rust_logo) => no_args_and_crate_level!(rust_logo),
+            Some(sym::rust_logo) => no_args_and_crate_level!(rust_logo, |span| {
+                if !cx.features().rustdoc_internals() {
+                    feature_err(
+                        cx.sess(),
+                        sym::rustdoc_internals,
+                        span,
+                        msg!("the `#[doc(rust_logo)]` attribute is used for Rust branding"),
+                    )
+                    .emit();
+                }
+            }),
             Some(sym::auto_cfg) => self.parse_auto_cfg(cx, path, args),
             Some(sym::test) => {
                 let Some(list) = args.list() else {
@@ -645,11 +665,13 @@ impl DocParser {
     ) {
         match args {
             ArgParser::NoArgs => {
-                let suggestions = cx.suggestions();
+                let suggestions = cx.adcx().suggestions();
                 let span = cx.attr_span;
-                cx.emit_lint(
+                cx.emit_dyn_lint(
                     rustc_session::lint::builtin::INVALID_DOC_ATTRIBUTES,
-                    AttributeLintKind::IllFormedAttributeInput { suggestions, docs: None },
+                    move |dcx, level| {
+                        IllFormedAttributeInput::new(&suggestions, None, None).into_diag(dcx, level)
+                    },
                     span,
                 );
             }

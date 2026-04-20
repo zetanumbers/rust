@@ -52,13 +52,12 @@ pub trait Ty<I: Interner<Ty = Self>>:
 
     fn new_canonical_bound(interner: I, var: ty::BoundVar) -> Self;
 
-    fn new_alias(interner: I, kind: ty::AliasTyKind, alias_ty: ty::AliasTy<I>) -> Self;
+    fn new_alias(interner: I, alias_ty: ty::AliasTy<I>) -> Self;
 
     fn new_projection_from_args(interner: I, def_id: I::DefId, args: I::GenericArgs) -> Self {
-        Ty::new_alias(
+        Self::new_alias(
             interner,
-            ty::AliasTyKind::Projection,
-            ty::AliasTy::new_from_args(interner, def_id, args),
+            ty::AliasTy::new_from_args(interner, ty::AliasTyKind::Projection { def_id }, args),
         )
     }
 
@@ -67,10 +66,9 @@ pub trait Ty<I: Interner<Ty = Self>>:
         def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> Self {
-        Ty::new_alias(
+        Self::new_alias(
             interner,
-            ty::AliasTyKind::Projection,
-            ty::AliasTy::new(interner, def_id, args),
+            ty::AliasTy::new(interner, ty::AliasTyKind::Projection { def_id }, args),
         )
     }
 
@@ -187,7 +185,7 @@ pub trait Ty<I: Interner<Ty = Self>>:
             | ty::CoroutineWitness(_, _)
             | ty::Never
             | ty::Tuple(_)
-            | ty::Alias(_, _)
+            | ty::Alias(_)
             | ty::Param(_)
             | ty::Bound(_, _)
             | ty::Placeholder(_)
@@ -205,18 +203,51 @@ pub trait Tys<I: Interner<Tys = Self>>:
     fn output(self) -> I::Ty;
 }
 
+pub trait FSigKind<I: Interner<FSigKind = Self>>: Copy + Debug + Hash + Eq {
+    /// The identity function.
+    fn fn_sig_kind(self) -> Self;
+
+    /// Create a new FnSigKind with the given ABI, safety, and C-style variadic flag.
+    fn new(abi: I::Abi, safety: I::Safety, c_variadic: bool) -> Self;
+
+    /// Returns the ABI.
+    fn abi(self) -> I::Abi;
+
+    /// Returns the safety mode.
+    fn safety(self) -> I::Safety;
+
+    /// Do the function arguments end with a C-style variadic argument?
+    fn c_variadic(self) -> bool;
+}
+
 pub trait Abi<I: Interner<Abi = Self>>: Copy + Debug + Hash + Eq {
-    fn rust() -> Self;
+    /// The identity function.
+    fn abi(self) -> Self;
+
+    /// The ABI `extern "Rust"`.
+    fn rust() -> I::Abi;
 
     /// Whether this ABI is `extern "Rust"`.
     fn is_rust(self) -> bool;
+
+    /// Pack the ABI into a small dense integer, so it can be stored as packed `FnSigKind` flags.
+    fn pack_abi(self) -> u8;
+
+    /// Unpack the ABI from packed `FnSigKind` flags.
+    fn unpack_abi(abi_index: u8) -> Self;
 }
 
 pub trait Safety<I: Interner<Safety = Self>>: Copy + Debug + Hash + Eq {
+    /// The `safe` safety mode.
     fn safe() -> Self;
 
+    /// The `unsafe` safety mode.
+    fn unsafe_mode() -> Self;
+
+    /// Is the safety mode `Safe`?
     fn is_safe(self) -> bool;
 
+    /// The string prefix for this safety mode.
     fn prefix_str(self) -> &'static str;
 }
 
@@ -392,7 +423,7 @@ pub trait Term<I: Interner<Term = Self>>:
     fn to_alias_term(self) -> Option<ty::AliasTerm<I>> {
         match self.kind() {
             ty::TermKind::Ty(ty) => match ty.kind() {
-                ty::Alias(_kind, alias_ty) => Some(alias_ty.into()),
+                ty::Alias(alias_ty) => Some(alias_ty.into()),
                 _ => None,
             },
             ty::TermKind::Const(ct) => match ct.kind() {

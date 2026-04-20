@@ -145,6 +145,7 @@ pub trait Interner:
         + Eq
         + TypeVisitable<Self>
         + SliceLike<Item = Self::Pat>;
+    type FSigKind: FSigKind<Self>;
     type Safety: Safety<Self>;
     type Abi: Abi<Self>;
 
@@ -196,6 +197,7 @@ pub trait Interner:
     type VariancesOf: Copy + Debug + SliceLike<Item = ty::Variance>;
     fn variances_of(self, def_id: Self::DefId) -> Self::VariancesOf;
 
+    // FIXME: remove `def_id` param after `AliasTermKind` contains `def_id` within
     fn opt_alias_variances(
         self,
         kind: impl Into<ty::AliasTermKind>,
@@ -211,7 +213,7 @@ pub trait Interner:
     type AdtDef: AdtDef<Self>;
     fn adt_def(self, adt_def_id: Self::AdtId) -> Self::AdtDef;
 
-    fn alias_ty_kind(self, alias: ty::AliasTy<Self>) -> ty::AliasTyKind;
+    fn alias_ty_kind_from_def_id(self, def_id: Self::DefId) -> ty::AliasTyKind<Self>;
 
     fn alias_term_kind(self, alias: ty::AliasTerm<Self>) -> ty::AliasTermKind;
 

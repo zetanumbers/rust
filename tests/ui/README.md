@@ -22,6 +22,12 @@ These tests exercise `#![feature(allocator_api)]` and the `#[global_allocator]` 
 
 See [Allocator traits and `std::heap` #32838](https://github.com/rust-lang/rust/issues/32838).
 
+## `tests/ui/allow-partial-mitigations`
+
+These tests exercise the support for mitigation coverage and the `allow-partial-mitigations` and `deny-partial-mitigations` options.
+
+See [RFC 3855](https://github.com/rust-lang/rfcs/pull/3855).
+
 ## `tests/ui/annotate-moves`
 
 These tests exercise the `annotate-moves` feature.
@@ -35,6 +41,8 @@ These tests exercise the [`annotate-snippets`]-based emitter implementation.
 [`annotate-snippets`] is an initiative to share the diagnostics emitting infrastructure between rustc and cargo to reduce duplicate maintenance effort and divergence. See <https://github.com/rust-lang/rust/issues/59346> about the initiative.
 
 [`annotate-snippets`]: https://github.com/rust-lang/annotate-snippets-rs
+
+**FIXME**: merge this with `error-emitter`
 
 ## `tests/ui/anon-params`
 
@@ -140,6 +148,8 @@ However, only a single test was ever added to this category: <https://github.com
 ## `tests/ui/binding/`: Pattern Binding
 
 Tests for pattern binding in match expressions, let statements, and other binding contexts. E.g. binding modes and refutability. See [Patterns | Reference](https://doc.rust-lang.org/reference/patterns.html).
+
+**FIXME**: quite some overlap with `tests/ui/pattern` and `tests/ui/match`.
 
 ## `tests/ui/binop/`: Binary operators
 
@@ -272,7 +282,7 @@ This directory is actually for the standard library [`std::process::Command`](ht
 
 Some traits' implementation must be compared with their definition, checking for problems such as the implementation having stricter requirements (such as needing to implement `Copy`).
 
-This subdirectory is *not* intended comparison traits (`PartialEq`, `Eq`, `PartialOrd`, `Ord`).
+This subdirectory is *not* intended for comparison traits (`PartialEq`, `Eq`, `PartialOrd`, `Ord`).
 
 ## `tests/ui/compile-flags/`
 
@@ -448,6 +458,8 @@ Exercises diagnostics for when a code block attempts to gain ownership of a non-
 
 Exercises diagnostics for disallowed struct destructuring.
 
+**FIXME**: does this really need to be its own immediate subdirectory?
+
 ## `tests/ui/dist`
 
 Tests that require distribution artifacts.
@@ -508,7 +520,7 @@ These tests run in specific Rust editions, such as Rust 2015 or Rust 2018, and c
 
 ## `tests/ui/eii`: Externally Implementable Items
 
-Exercises `eii` keyword.
+Exercises the `#[eii]` attribute and related features.
 
 ## `tests/ui/entry-point/`: `main` function
 
@@ -610,8 +622,6 @@ Tests for `#![feature(fn_traits)]`. See [`fn_traits` | The Unstable book](https:
 ## `tests/ui/for-loop-while`
 
 Anything to do with loops and `for`, `loop` and `while` keywords to express them.
-
-**FIXME**: After `ui/for` is merged into this, also carry over its SUMMARY text.
 
 ## `tests/ui/force-inlining/`: `#[rustc_force_inline]`
 
@@ -729,6 +739,8 @@ Tests on type inference.
 ## `tests/ui/infinite/`
 
 Tests for diagnostics on infinitely recursive types without indirection.
+
+**FIXME**: check for overlap with `structs-enums/enum-rec` and `structs-enums/struct-rec`
 
 ## `tests/ui/inline-const/`
 
@@ -853,7 +865,9 @@ Tests exercising analysis for unused variables, unreachable statements, function
 
 ## `tests/ui/loop-match`
 
-Tests for `loop` with `match` expressions.
+Tests for the `loop_match` feature to optimize `loop`s consisting of one big `match` expressions.
+
+See [Tracking issue for way to express intraprocedural finite state machines #132306](https://github.com/rust-lang/rust/issues/132306).
 
 ## `tests/ui/loops/`
 
@@ -891,6 +905,8 @@ See [Tracking issue for allowing overlapping implementations for marker trait #2
 
 Broad category of tests on `match` constructs.
 
+**FIXME**: many tests overlap with `tests/ui/bindings`, try to reduce duplication.
+
 ## `tests/ui/methods/`
 
 A broad category for anything related to methods and method resolution.
@@ -898,6 +914,8 @@ A broad category for anything related to methods and method resolution.
 ## `tests/ui/mir/`
 
 Certain mir-opt regression tests.
+
+**FIXME**: many tests in this directory are not about MIR or optimizations, relocate these.
 
 ## `tests/ui/mir-dataflow`
 
@@ -976,6 +994,8 @@ Tests that exercises edge cases, such as specific floats, large or very small nu
 ## `tests/ui/numeric/`
 
 Tests that checks numeric types and their interactions, such as casting among them with `as` or providing the wrong numeric suffix.
+
+**FIXME**: these tests could get moved to other directories, in particular `cast/` or `parser/`.
 
 ## `tests/ui/object-lifetime/`
 
@@ -1308,7 +1328,7 @@ Some standard library tests which are too inconvenient or annoying to implement 
 
 ## `tests/ui/str/`
 
-Exercise `str` keyword and string slices.
+Exercise `str` primitive and string slices.
 
 ## `tests/ui/structs/`
 
@@ -1338,7 +1358,7 @@ See [Strict Version Hash](https://rustc-dev-guide.rust-lang.org/backend/libs-and
 
 ## `tests/ui/symbol-names/`: Symbol mangling and related attributes
 
-These tests revolve around `#[no_mangle]` attribute, as well as consistently mangled symbol names (checked with the `rustc_symbol_name` attribute), which is important to build reproducible binaries.
+These tests revolve around `#[no_mangle]` attribute, as well as consistently mangled symbol names (checked with the `rustc_dump_symbol_name` attribute), which is important to build reproducible binaries.
 
 ## `tests/ui/sync/`: `Sync` trait
 
@@ -1463,6 +1483,8 @@ See [RFC 0132 Unified Function Call Syntax](https://github.com/rust-lang/rfcs/bl
 ## `tests/ui/unboxed-closures/`
 
 `#![feature(unboxed_closures)]`, `Fn`, `FnMut` and `FnOnce` traits
+
+**FIXME**: many tests have `unboxed-closure` in their name but only test normal closures, rename these.
 
 See [Tracking issue for Fn traits (`unboxed_closures` & `fn_traits` feature)](https://github.com/rust-lang/rust/issues/29625).
 

@@ -447,8 +447,11 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         let tcx = self.infcx.tcx;
 
         for proj in &user_ty.projs {
+            // Necessary for non-trivial patterns whose user-type annotation is an opaque type,
+            // e.g. `let (_a,): Tait = whatever`, see #105897
             if !self.infcx.next_trait_solver()
-                && let ty::Alias(ty::Opaque, ..) = curr_projected_ty.ty.kind()
+                && let ty::Alias(ty::AliasTy { kind: ty::Opaque { .. }, .. }) =
+                    curr_projected_ty.ty.kind()
             {
                 // There is nothing that we can compare here if we go through an opaque type.
                 // We're always in its defining scope as we can otherwise not project through
@@ -1012,7 +1015,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                         if let ty::FnDef(def_id, _) = *src_ty.kind()
                             && let ty::FnPtr(_, target_hdr) = *ty.kind()
                             && tcx.codegen_fn_attrs(def_id).safe_target_features
-                            && target_hdr.safety.is_safe()
+                            && target_hdr.safety().is_safe()
                             && let Some(safe_sig) = tcx.adjust_target_feature_sig(
                                 def_id,
                                 src_sig,
@@ -1756,7 +1759,8 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     );
                 }
             } else if let Some(static_def_id) = constant.check_static_ptr(tcx) {
-                let unnormalized_ty = tcx.type_of(static_def_id).instantiate_identity();
+                let unnormalized_ty =
+                    tcx.type_of(static_def_id).instantiate_identity().skip_norm_wip();
                 let normalized_ty = self.normalize(unnormalized_ty, locations);
                 let literal_ty = constant.const_.ty().builtin_deref(true).unwrap();
 
@@ -1968,7 +1972,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         term_location: Location,
         call_source: CallSource,
     ) {
-        if args.len() < sig.inputs().len() || (args.len() > sig.inputs().len() && !sig.c_variadic) {
+        if args.len() < sig.inputs().len() || (args.len() > sig.inputs().len() && !sig.c_variadic())
+        {
             span_mirbug!(self, term, "call to {:?} with wrong # of args", sig);
         }
 

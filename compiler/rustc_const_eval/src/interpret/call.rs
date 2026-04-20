@@ -9,7 +9,7 @@ use rustc_abi::{self as abi, ExternAbi, FieldIdx, Integer, VariantIdx};
 use rustc_hir::def_id::DefId;
 use rustc_hir::find_attr;
 use rustc_middle::ty::layout::{IntegerExt, TyAndLayout};
-use rustc_middle::ty::{self, AdtDef, Instance, Ty, VariantDef};
+use rustc_middle::ty::{self, AdtDef, Instance, Ty, Unnormalized, VariantDef};
 use rustc_middle::{bug, mir, span_bug};
 use rustc_target::callconv::{ArgAbi, FnAbi};
 use tracing::field::Empty;
@@ -219,7 +219,9 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 // Even if `ty` is normalized, the search for the unsized tail will project
                 // to fields, which can yield non-normalized types. So we need to provide a
                 // normalization function.
-                let normalize = |ty| self.tcx.normalize_erasing_regions(self.typing_env, ty);
+                let normalize = |ty| {
+                    self.tcx.normalize_erasing_regions(self.typing_env, Unnormalized::new_wip(ty))
+                };
                 ty.ptr_metadata_ty(*self.tcx, normalize)
             };
             return interp_ok(meta_ty(caller) == meta_ty(callee));
@@ -704,7 +706,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                             // actually access memory to resolve this method.
                             // Also see <https://github.com/rust-lang/miri/issues/2786>.
                             let val = self.read_immediate(&receiver)?;
-                            break self.ref_to_mplace(&val)?;
+                            break self.imm_ptr_to_mplace(&val)?;
                         }
                         ty::Dynamic(..) => break receiver.assert_mem_place(), // no immediate unsized values
                         _ => {
@@ -877,7 +879,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         // then dispatches that to the normal call machinery. However, our call machinery currently
         // only supports calling `VtblEntry::Method`; it would choke on a `MetadataDropInPlace`. So
         // instead we do the virtual call stuff ourselves. It's easier here than in `eval_fn_call`
-        // since we can just get a place of the underlying type and use `mplace_to_ref`.
+        // since we can just get a place of the underlying type and use `mplace_to_imm_ptr`.
         let place = match place.layout.ty.kind() {
             ty::Dynamic(data, _) => {
                 // Dropping a trait object. Need to find actual drop fn.
@@ -898,7 +900,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         };
         let fn_abi = self.fn_abi_of_instance_no_deduced_attrs(instance, ty::List::empty())?;
 
-        let arg = self.mplace_to_ref(&place)?;
+        let arg = self.mplace_to_imm_ptr(&place, None)?;
         let ret = MPlaceTy::fake_alloc_zst(self.layout_of(self.tcx.types.unit)?);
 
         self.init_fn_call(

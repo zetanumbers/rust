@@ -106,7 +106,7 @@ fn dylib_name(name: &str) -> String {
     format!("{}{name}.{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_EXTENSION)
 }
 
-pub fn run(
+pub(crate) fn run(
     config: &Config,
     stdout: &dyn ConsoleOut,
     stderr: &dyn ConsoleOut,
@@ -181,7 +181,7 @@ pub fn run(
     cx.create_stamp();
 }
 
-pub fn compute_stamp_hash(config: &Config) -> String {
+pub(crate) fn compute_stamp_hash(config: &Config) -> String {
     let mut hash = DefaultHasher::new();
     config.stage_id.hash(&mut hash);
     config.run.hash(&mut hash);
@@ -266,12 +266,6 @@ impl<'test> TestCx<'test> {
     /// Code executed for each revision in turn (or, if there are no
     /// revisions, exactly once, with revision == None).
     fn run_revision(&self) {
-        if self.props.should_ice
-            && self.config.mode != TestMode::Incremental
-            && self.config.mode != TestMode::Crashes
-        {
-            self.fatal("cannot use should-ice in a test that is not cfail");
-        }
         // Run the test multiple times if requested.
         // This is useful for catching flaky tests under the parallel frontend.
         for _ in 0..self.config.iteration_count {
@@ -333,15 +327,12 @@ impl<'test> TestCx<'test> {
             TestMode::Incremental => {
                 let revision =
                     self.revision.expect("incremental tests require a list of revisions");
-                if revision.starts_with("cpass")
-                    || revision.starts_with("rpass")
-                    || revision.starts_with("rfail")
-                {
+                if revision.starts_with("cpass") || revision.starts_with("rpass") {
                     true
                 } else if revision.starts_with("cfail") {
                     pm.is_some()
                 } else {
-                    panic!("revision name must begin with cpass, rpass, rfail, or cfail");
+                    panic!("revision name must begin with `cfail`, `cpass`, or `rpass`");
                 }
             }
             mode => panic!("unimplemented for mode {:?}", mode),
@@ -455,6 +446,7 @@ impl<'test> TestCx<'test> {
         rustc
             .arg(input)
             .args(&["-Z", &format!("unpretty={}", pretty_type)])
+            .arg("-Zunstable-options")
             .args(&["--target", &self.config.target])
             .arg("-L")
             .arg(&aux_dir)
@@ -560,6 +552,7 @@ impl<'test> TestCx<'test> {
         rustc
             .arg("-")
             .arg("-Zno-codegen")
+            .arg("-Zunstable-options")
             .arg("--out-dir")
             .arg(&out_dir)
             .arg(&format!("--target={}", target))
@@ -670,16 +663,6 @@ impl<'test> TestCx<'test> {
             } else {
                 missing_patterns.push(pattern.to_string());
             }
-        }
-    }
-
-    fn check_no_compiler_crash(&self, proc_res: &ProcRes, should_ice: bool) {
-        match proc_res.status.code() {
-            Some(101) if !should_ice => {
-                self.fatal_proc_rec("compiler encountered internal error", proc_res)
-            }
-            None => self.fatal_proc_rec("compiler terminated by signal", proc_res),
-            _ => (),
         }
     }
 
@@ -996,6 +979,7 @@ impl<'test> TestCx<'test> {
                     AllowUnused::No
                 }
             }
+            TestMode::Incremental => AllowUnused::Yes,
             _ => AllowUnused::No,
         };
 
@@ -2985,7 +2969,7 @@ struct ProcArgs {
 }
 
 #[derive(Debug)]
-pub struct ProcRes {
+pub(crate) struct ProcRes {
     status: ExitStatus,
     stdout: String,
     stderr: String,
@@ -2995,7 +2979,7 @@ pub struct ProcRes {
 
 impl ProcRes {
     #[must_use]
-    pub fn format_info(&self) -> String {
+    pub(crate) fn format_info(&self) -> String {
         fn render(name: &str, contents: &str) -> String {
             let contents = json::extract_rendered(contents);
             let contents = contents.trim_end();
