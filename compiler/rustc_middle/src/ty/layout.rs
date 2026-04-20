@@ -24,7 +24,7 @@ use crate::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use crate::query::TyCtxtAt;
 use crate::traits::ObligationCause;
 use crate::ty::normalize_erasing_regions::NormalizationError;
-use crate::ty::{self, CoroutineArgsExt, Ty, TyCtxt, TypeVisitableExt};
+use crate::ty::{self, CoroutineArgsExt, Ty, TyCtxt, TypeVisitableExt, Unnormalized};
 
 #[extension(pub trait IntegerExt)]
 impl abi::Integer {
@@ -260,8 +260,6 @@ pub enum LayoutError<'tcx> {
     NormalizationFailure(Ty<'tcx>, NormalizationError<'tcx>),
     /// A non-layout error is reported elsewhere.
     ReferencesError(ErrorGuaranteed),
-    /// A type has cyclic layout, i.e. the type contains itself without indirection.
-    Cycle(ErrorGuaranteed),
 }
 
 impl<'tcx> fmt::Display for LayoutError<'tcx> {
@@ -286,7 +284,6 @@ impl<'tcx> fmt::Display for LayoutError<'tcx> {
                 t,
                 e.get_type_for_failure()
             ),
-            LayoutError::Cycle(_) => write!(f, "a cycle occurred during layout computation"),
             LayoutError::ReferencesError(_) => write!(f, "the type has an unknown layout"),
         }
     }
@@ -320,12 +317,6 @@ pub enum SizeSkeleton<'tcx> {
     /// Alignment can be `None` if unknown.
     Known(Size, Option<Align>),
 
-    /// This is a generic const expression (i.e. N * 2), which may contain some parameters.
-    /// It must be of type usize, and represents the size of a type in bytes.
-    /// It is not required to be evaluatable to a concrete value, but can be used to check
-    /// that another SizeSkeleton is of equal size.
-    Generic(ty::Const<'tcx>),
-
     /// A potentially-wide pointer.
     Pointer {
         /// If true, this pointer is never null.
@@ -358,8 +349,7 @@ impl<'tcx> SizeSkeleton<'tcx> {
             Err(err @ LayoutError::TooGeneric(_)) => err,
             // We can't extract SizeSkeleton info from other layout errors
             Err(
-                e @ LayoutError::Cycle(_)
-                | e @ LayoutError::Unknown(_)
+                e @ LayoutError::Unknown(_)
                 | e @ LayoutError::SizeOverflow(_)
                 | e @ LayoutError::InvalidSimd { .. }
                 | e @ LayoutError::NormalizationFailure(..)
@@ -374,7 +364,9 @@ impl<'tcx> SizeSkeleton<'tcx> {
                 let tail = tcx.struct_tail_raw(
                     pointee,
                     &ObligationCause::dummy(),
-                    |ty| match tcx.try_normalize_erasing_regions(typing_env, ty) {
+                    |ty| match tcx
+                        .try_normalize_erasing_regions(typing_env, Unnormalized::new_wip(ty))
+                    {
                         Ok(ty) => ty,
                         Err(e) => Ty::new_error_with_message(
                             tcx,
@@ -389,7 +381,11 @@ impl<'tcx> SizeSkeleton<'tcx> {
                 );
 
                 match tail.kind() {
-                    ty::Param(_) | ty::Alias(ty::Projection | ty::Inherent, _) => {
+                    ty::Param(_)
+                    | ty::Alias(ty::AliasTy {
+                        kind: ty::Projection { .. } | ty::Inherent { .. },
+                        ..
+                    }) => {
                         debug_assert!(tail.has_non_region_param());
                         Ok(SizeSkeleton::Pointer {
                             non_zero,
@@ -426,7 +422,7 @@ impl<'tcx> SizeSkeleton<'tcx> {
                         }
                         Err(err)
                     }
-                    SizeSkeleton::Pointer { .. } | SizeSkeleton::Generic(_) => Err(err),
+                    SizeSkeleton::Pointer { .. } => Err(err),
                 }
             }
 
@@ -459,9 +455,6 @@ impl<'tcx> SizeSkeleton<'tcx> {
                                     return Err(err);
                                 }
                                 ptr = Some(field);
-                            }
-                            SizeSkeleton::Generic(_) => {
-                                return Err(err);
                             }
                         }
                     }
@@ -500,7 +493,8 @@ impl<'tcx> SizeSkeleton<'tcx> {
             }
 
             ty::Alias(..) => {
-                let normalized = tcx.normalize_erasing_regions(typing_env, ty);
+                let normalized =
+                    tcx.normalize_erasing_regions(typing_env, Unnormalized::new_wip(ty));
                 if ty == normalized {
                     Err(err)
                 } else {
@@ -508,8 +502,21 @@ impl<'tcx> SizeSkeleton<'tcx> {
                 }
             }
 
-            // Pattern types are always the same size as their base.
-            ty::Pat(base, _) => SizeSkeleton::compute(base, tcx, typing_env),
+            ty::Pat(base, pat) => {
+                // Pattern types are always the same size as their base.
+                let base = SizeSkeleton::compute(base, tcx, typing_env);
+                match *pat {
+                    ty::PatternKind::Range { .. } | ty::PatternKind::Or(_) => base,
+                    // But in the case of `!null` patterns we need to note that in the
+                    // raw pointer.
+                    ty::PatternKind::NotNull => match base? {
+                        SizeSkeleton::Known(..) => base,
+                        SizeSkeleton::Pointer { non_zero: _, tail } => {
+                            Ok(SizeSkeleton::Pointer { non_zero: true, tail })
+                        }
+                    },
+                }
+            }
 
             _ => Err(err),
         }
@@ -521,9 +528,6 @@ impl<'tcx> SizeSkeleton<'tcx> {
             (SizeSkeleton::Pointer { tail: a, .. }, SizeSkeleton::Pointer { tail: b, .. }) => {
                 a == b
             }
-            // constants are always pre-normalized into a canonical form so this
-            // only needs to check if their pointers are identical.
-            (SizeSkeleton::Generic(a), SizeSkeleton::Generic(b)) => a == b,
             _ => false,
         }
     }
@@ -863,7 +867,7 @@ where
                     {
                         let metadata = tcx.normalize_erasing_regions(
                             cx.typing_env(),
-                            Ty::new_projection(tcx, metadata_def_id, [pointee]),
+                            Unnormalized::new(Ty::new_projection(tcx, metadata_def_id, [pointee])),
                         );
 
                         // Map `Metadata = DynMetadata<dyn Trait>` back to a vtable, since it

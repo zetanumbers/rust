@@ -6,17 +6,15 @@
 //! item.
 
 use std::cell::Cell;
-use std::collections::hash_map::Entry;
 use std::slice;
 
 use rustc_abi::ExternAbi;
 use rustc_ast::{AttrStyle, MetaItemKind, ast};
 use rustc_attr_parsing::{AttributeParser, Late};
-use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::thin_vec::ThinVec;
 use rustc_data_structures::unord::UnordMap;
 use rustc_errors::{DiagCtxtHandle, IntoDiagArg, MultiSpan, msg};
-use rustc_feature::{AttributeDuplicates, AttributeType, BUILTIN_ATTRIBUTE_MAP, BuiltinAttribute};
+use rustc_feature::BUILTIN_ATTRIBUTE_MAP;
 use rustc_hir::attrs::diagnostic::Directive;
 use rustc_hir::attrs::{
     AttributeKind, DocAttribute, DocInline, EiiDecl, EiiImpl, EiiImplResolution, InlineAttr,
@@ -27,7 +25,7 @@ use rustc_hir::def_id::LocalModDefId;
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{
     self as hir, Attribute, CRATE_HIR_ID, Constness, FnSig, ForeignItem, GenericParamKind, HirId,
-    Item, ItemKind, MethodKind, Node, ParamName, Safety, Target, TraitItem, find_attr,
+    Item, ItemKind, MethodKind, Node, ParamName, Target, TraitItem, find_attr,
 };
 use rustc_macros::Diagnostic;
 use rustc_middle::hir::nested_filter;
@@ -35,7 +33,7 @@ use rustc_middle::middle::resolve_bound_vars::ObjectLifetimeDefault;
 use rustc_middle::query::Providers;
 use rustc_middle::traits::ObligationCause;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
-use rustc_middle::ty::{self, TyCtxt, TypingMode};
+use rustc_middle::ty::{self, TyCtxt, TypingMode, Unnormalized};
 use rustc_middle::{bug, span_bug};
 use rustc_session::config::CrateType;
 use rustc_session::lint;
@@ -73,6 +71,13 @@ struct DiagnosticOnConstOnlyForNonConstTraitImpls {
 #[derive(Diagnostic)]
 #[diag("`#[diagnostic::on_move]` can only be applied to enums, structs or unions")]
 struct DiagnosticOnMoveOnlyForAdt;
+
+#[derive(Diagnostic)]
+#[diag("`#[diagnostic::on_unknown]` can only be applied to `use` statements")]
+struct DiagnosticOnUnknownOnlyForImports {
+    #[label("not an import")]
+    item_span: Span,
+}
 
 fn target_from_impl_item<'tcx>(tcx: TyCtxt<'tcx>, impl_item: &hir::ImplItem<'_>) -> Target {
     match impl_item.kind {
@@ -138,7 +143,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         target: Target,
         item: Option<ItemLike<'_>>,
     ) {
-        let mut seen = FxHashMap::default();
         let attrs = self.tcx.hir_attrs(hir_id);
         for attr in attrs {
             let mut style = None;
@@ -219,6 +223,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 },
                 Attribute::Parsed(AttributeKind::DoNotRecommend{attr_span}) => {self.check_do_not_recommend(*attr_span, hir_id, target, item)},
                 Attribute::Parsed(AttributeKind::OnUnimplemented{span, directive}) => {self.check_diagnostic_on_unimplemented(*span, hir_id, target,directive.as_deref())},
+                Attribute::Parsed(AttributeKind::OnUnknown { span, .. }) => { self.check_diagnostic_on_unknown(*span, hir_id, target) },
                 Attribute::Parsed(AttributeKind::OnConst{span, ..}) => {self.check_diagnostic_on_const(*span, hir_id, target, item)}
                 Attribute::Parsed(AttributeKind::OnMove { span, directive }) => {
                     self.check_diagnostic_on_move(*span, hir_id, target, directive.as_deref())
@@ -276,7 +281,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::Path(..)
                     | AttributeKind::PatternComplexityLimit { .. }
                     | AttributeKind::PinV2(..)
-                    | AttributeKind::Pointee(..)
                     | AttributeKind::PreludeImport
                     | AttributeKind::ProfilerRuntime
                     | AttributeKind::RecursionLimit { .. }
@@ -302,7 +306,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcConstStableIndirect
                     | AttributeKind::RustcConversionSuggestion
                     | AttributeKind::RustcDeallocator
-                    | AttributeKind::RustcDefPath(..)
                     | AttributeKind::RustcDelayedBugFromInsideQuery
                     | AttributeKind::RustcDenyExplicitImpl(..)
                     | AttributeKind::RustcDeprecatedSafe2024 {..}
@@ -311,9 +314,13 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcDocPrimitive(..)
                     | AttributeKind::RustcDummy
                     | AttributeKind::RustcDumpDefParents
+                    | AttributeKind::RustcDumpDefPath(..)
+                    | AttributeKind::RustcDumpHiddenTypeOfOpaques
                     | AttributeKind::RustcDumpInferredOutlives
                     | AttributeKind::RustcDumpItemBounds
+                    | AttributeKind::RustcDumpLayout(..)
                     | AttributeKind::RustcDumpPredicates
+                    | AttributeKind::RustcDumpSymbolName(..)
                     | AttributeKind::RustcDumpUserArgs
                     | AttributeKind::RustcDumpVariances
                     | AttributeKind::RustcDumpVariancesOfOpaques
@@ -323,13 +330,11 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcEiiForeignItem
                     | AttributeKind::RustcEvaluateWhereClauses
                     | AttributeKind::RustcHasIncoherentInherentImpls
-                    | AttributeKind::RustcHiddenTypeOfOpaques
                     | AttributeKind::RustcIfThisChanged(..)
                     | AttributeKind::RustcInheritOverflowChecks
                     | AttributeKind::RustcInsignificantDtor
                     | AttributeKind::RustcIntrinsic
                     | AttributeKind::RustcIntrinsicConstStableIndirect
-                    | AttributeKind::RustcLayout(..)
                     | AttributeKind::RustcLayoutScalarValidRangeEnd(..)
                     | AttributeKind::RustcLayoutScalarValidRangeStart(..)
                     | AttributeKind::RustcLintOptDenyFieldAccess { .. }
@@ -339,11 +344,13 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcMacroTransparency(_)
                     | AttributeKind::RustcMain
                     | AttributeKind::RustcMir(_)
+                    | AttributeKind::RustcMustMatchExhaustively(..)
                     | AttributeKind::RustcNeverReturnsNullPtr
                     | AttributeKind::RustcNeverTypeOptions {..}
                     | AttributeKind::RustcNoImplicitAutorefs
                     | AttributeKind::RustcNoImplicitBounds
                     | AttributeKind::RustcNoMirInline
+                    | AttributeKind::RustcNoWritable
                     | AttributeKind::RustcNonConstTraitMethod
                     | AttributeKind::RustcNonnullOptimizationGuaranteed
                     | AttributeKind::RustcNounwind
@@ -365,7 +372,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcSpecializationTrait(..)
                     | AttributeKind::RustcStdInternalSymbol (..)
                     | AttributeKind::RustcStrictCoherence(..)
-                    | AttributeKind::RustcSymbolName(..)
                     | AttributeKind::RustcTestMarker(..)
                     | AttributeKind::RustcThenThisWouldNeed(..)
                     | AttributeKind::RustcTrivialFieldReads
@@ -376,6 +382,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::ThreadLocal
                     | AttributeKind::TypeLengthLimit { .. }
                     | AttributeKind::UnstableFeatureBound(..)
+                    | AttributeKind::UnstableRemoved(..)
                     | AttributeKind::Used { .. }
                     | AttributeKind::WindowsSubsystem(..)
                     // tidy-alphabetical-end
@@ -413,65 +420,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                         [] => unreachable!(),
                     }
                 }
-            }
-
-            if hir_id != CRATE_HIR_ID {
-                match attr {
-                    Attribute::Parsed(_) => { /* Already validated. */ }
-                    Attribute::Unparsed(attr) => {
-                        // FIXME(jdonszelmann): remove once all crate-level attrs are parsed and caught by
-                        // the above
-                        if let Some(BuiltinAttribute { type_: AttributeType::CrateLevel, .. }) =
-                            attr.path
-                                .segments
-                                .first()
-                                .and_then(|name| BUILTIN_ATTRIBUTE_MAP.get(&name))
-                        {
-                            match attr.style {
-                                ast::AttrStyle::Outer => {
-                                    let attr_span = attr.span;
-                                    let bang_position = self
-                                        .tcx
-                                        .sess
-                                        .source_map()
-                                        .span_until_char(attr_span, '[')
-                                        .shrink_to_hi();
-
-                                    self.tcx.emit_node_span_lint(
-                                        UNUSED_ATTRIBUTES,
-                                        hir_id,
-                                        attr.span,
-                                        errors::OuterCrateLevelAttr {
-                                            suggestion: errors::OuterCrateLevelAttrSuggestion {
-                                                bang_position,
-                                            },
-                                        },
-                                    )
-                                }
-                                ast::AttrStyle::Inner => self.tcx.emit_node_span_lint(
-                                    UNUSED_ATTRIBUTES,
-                                    hir_id,
-                                    attr.span,
-                                    errors::InnerCrateLevelAttr,
-                                ),
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Attribute::Unparsed(unparsed_attr) = attr
-                && let Some(BuiltinAttribute { duplicates, .. }) =
-                    attr.name().and_then(|name| BUILTIN_ATTRIBUTE_MAP.get(&name))
-            {
-                check_duplicates(
-                    self.tcx,
-                    unparsed_attr.span,
-                    attr,
-                    hir_id,
-                    *duplicates,
-                    &mut seen,
-                );
             }
 
             self.check_unused_attribute(hir_id, attr, style)
@@ -542,9 +490,9 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
     fn check_eii_impl(&self, impls: &[EiiImpl], target: Target) {
         for EiiImpl { span, inner_span, resolution, impl_marked_unsafe, is_default: _ } in impls {
             match target {
-                Target::Fn => {}
+                Target::Fn | Target::Static => {}
                 _ => {
-                    self.dcx().emit_err(errors::EiiImplNotFunction { span: *span });
+                    self.dcx().emit_err(errors::EiiImplTarget { span: *span });
                 }
             }
 
@@ -607,7 +555,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
 
         if let Some(directive) = directive {
             if let Node::Item(Item {
-                kind: ItemKind::Trait(_, _, _, trait_name, generics, _, _),
+                kind: ItemKind::Trait(_, _, _, _, trait_name, generics, _, _),
                 ..
             }) = self.tcx.hir_node(hir_id)
             {
@@ -724,6 +672,19 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     }
                 });
             }
+        }
+    }
+
+    /// Checks if `#[diagnostic::on_unknown]` is applied to a trait impl
+    fn check_diagnostic_on_unknown(&self, attr_span: Span, hir_id: HirId, target: Target) {
+        if !matches!(target, Target::Use) {
+            let item_span = self.tcx.hir_span(hir_id);
+            self.tcx.emit_node_span_lint(
+                MISPLACED_DIAGNOSTIC_ATTRIBUTES,
+                hir_id,
+                attr_span,
+                DiagnosticOnUnknownOnlyForImports { item_span },
+            );
         }
     }
 
@@ -1047,7 +1008,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         match item.kind {
             ItemKind::Enum(_, generics, _) | ItemKind::Struct(_, generics, _)
                 if generics.params.len() != 0 => {}
-            ItemKind::Trait(_, _, _, _, generics, _, items)
+            ItemKind::Trait(_, _, _, _, _, generics, _, items)
                 if generics.params.len() != 0
                     || items.iter().any(|item| {
                         matches!(self.tcx.def_kind(item.owner_id), DefKind::AssocTy)
@@ -1188,7 +1149,8 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             html_no_source: _,
             // already checked in attr_parsing
             issue_tracker_base_url: _,
-            rust_logo,
+            // already checked in attr_parsing
+            rust_logo: _,
             // allowed anywhere
             test_attrs: _,
             // already checked in attr_parsing
@@ -1216,18 +1178,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         }
 
         self.check_doc_inline(hir_id, target, inline);
-
-        if let Some(span) = rust_logo
-            && !self.tcx.features().rustdoc_internals()
-        {
-            feature_err(
-                &self.tcx.sess,
-                sym::rustdoc_internals,
-                *span,
-                msg!("the `#[doc(rust_logo)]` attribute is used for Rust branding"),
-            )
-            .emit();
-        }
 
         if let Some(span) = masked {
             self.check_doc_masked(*span, hir_id, target);
@@ -1710,11 +1660,11 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         let fresh_args = infcx.fresh_args_for_item(span, def_id.to_def_id());
         let sig = tcx.liberate_late_bound_regions(
             def_id.to_def_id(),
-            tcx.fn_sig(def_id).instantiate(tcx, fresh_args),
+            tcx.fn_sig(def_id).instantiate(tcx, fresh_args).skip_norm_wip(),
         );
 
         let mut cause = ObligationCause::misc(span, def_id);
-        let sig = ocx.normalize(&cause, param_env, sig);
+        let sig = ocx.normalize(&cause, param_env, Unnormalized::new_wip(sig));
 
         // proc macro is not WF.
         let errors = ocx.try_evaluate_obligations();
@@ -1722,7 +1672,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             return;
         }
 
-        let expected_sig = tcx.mk_fn_sig(
+        let expected_sig = tcx.mk_fn_sig_safe_rust_abi(
             std::iter::repeat_n(
                 token_stream,
                 match kind {
@@ -1731,9 +1681,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 },
             ),
             token_stream,
-            false,
-            Safety::Safe,
-            ExternAbi::Rust,
         );
 
         if let Err(terr) = ocx.eq(&cause, param_env, expected_sig, sig) {
@@ -2027,67 +1974,6 @@ fn check_mod_attrs(tcx: TyCtxt<'_>, module_def_id: LocalModDefId) {
 
 pub(crate) fn provide(providers: &mut Providers) {
     *providers = Providers { check_mod_attrs, ..*providers };
-}
-
-// FIXME(jdonszelmann): remove, check during parsing
-fn check_duplicates(
-    tcx: TyCtxt<'_>,
-    attr_span: Span,
-    attr: &Attribute,
-    hir_id: HirId,
-    duplicates: AttributeDuplicates,
-    seen: &mut FxHashMap<Symbol, Span>,
-) {
-    use AttributeDuplicates::*;
-    if matches!(duplicates, WarnFollowingWordOnly) && !attr.is_word() {
-        return;
-    }
-    let attr_name = attr.name().unwrap();
-    match duplicates {
-        DuplicatesOk => {}
-        WarnFollowing | FutureWarnFollowing | WarnFollowingWordOnly | FutureWarnPreceding => {
-            match seen.entry(attr_name) {
-                Entry::Occupied(mut entry) => {
-                    let (this, other) = if matches!(duplicates, FutureWarnPreceding) {
-                        let to_remove = entry.insert(attr_span);
-                        (to_remove, attr_span)
-                    } else {
-                        (attr_span, *entry.get())
-                    };
-                    tcx.emit_node_span_lint(
-                        UNUSED_ATTRIBUTES,
-                        hir_id,
-                        this,
-                        errors::UnusedDuplicate {
-                            this,
-                            other,
-                            warning: matches!(
-                                duplicates,
-                                FutureWarnFollowing | FutureWarnPreceding
-                            ),
-                        },
-                    );
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(attr_span);
-                }
-            }
-        }
-        ErrorFollowing | ErrorPreceding => match seen.entry(attr_name) {
-            Entry::Occupied(mut entry) => {
-                let (this, other) = if matches!(duplicates, ErrorPreceding) {
-                    let to_remove = entry.insert(attr_span);
-                    (to_remove, attr_span)
-                } else {
-                    (attr_span, *entry.get())
-                };
-                tcx.dcx().emit_err(errors::UnusedMultiple { this, other, name: attr_name });
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(attr_span);
-            }
-        },
-    }
 }
 
 fn doc_fake_variadic_is_allowed_self_ty(self_ty: &hir::Ty<'_>) -> bool {

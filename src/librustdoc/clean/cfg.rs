@@ -41,15 +41,15 @@ fn is_simple_cfg(cfg: &CfgEntry) -> bool {
     }
 }
 
-/// Returns `false` if is `Any`, otherwise returns `true`.
-fn is_all_cfg(cfg: &CfgEntry) -> bool {
+/// Returns `true` if is [`CfgEntry::Any`], otherwise returns `false`.
+fn is_any_cfg(cfg: &CfgEntry) -> bool {
     match cfg {
         CfgEntry::Bool(..)
         | CfgEntry::NameValue { .. }
         | CfgEntry::Not(..)
         | CfgEntry::Version(..)
-        | CfgEntry::All(..) => true,
-        CfgEntry::Any(..) => false,
+        | CfgEntry::All(..) => false,
+        CfgEntry::Any(..) => true,
     }
 }
 
@@ -370,7 +370,7 @@ impl Display<'_> {
                     } else {
                         Either::Right(
                             Wrapped::with_parens()
-                                .when(!is_all_cfg(sub_cfg))
+                                .when(is_any_cfg(sub_cfg))
                                 .wrap(Display(sub_cfg, self.1)),
                         )
                     }
@@ -394,7 +394,7 @@ impl fmt::Display for Display<'_> {
                     .iter()
                     .map(|sub_cfg| {
                         Wrapped::with_parens()
-                            .when(!is_all_cfg(sub_cfg))
+                            .when(is_any_cfg(sub_cfg))
                             .wrap(Display(sub_cfg, self.1))
                     })
                     .joined(separator, fmt)
@@ -423,6 +423,13 @@ impl fmt::Display for Display<'_> {
                     (sym::unix, None) => "Unix",
                     (sym::windows, None) => "Windows",
                     (sym::debug_assertions, None) => "debug-assertions enabled",
+                    (sym::target_object_format, Some(format)) => match self.1 {
+                        Format::LongHtml => {
+                            return write!(fmt, "object format <code>{format}</code>");
+                        }
+                        Format::LongPlain => return write!(fmt, "object format `{format}`"),
+                        Format::ShortHtml => return write!(fmt, "<code>{format}</code>"),
+                    },
                     (sym::target_os, Some(os)) => human_readable_target_os(*os).unwrap_or_default(),
                     (sym::target_arch, Some(arch)) => {
                         human_readable_target_arch(*arch).unwrap_or_default()
@@ -545,15 +552,15 @@ fn human_readable_target_arch(os: Symbol) -> Option<&'static str> {
     Some(match arch {
         // tidy-alphabetical-start
         AArch64 => "AArch64",
-        AmdGpu => "AMG GPU",
+        AmdGpu => "AMD GPU",
         Arm => "ARM",
         Arm64EC => "ARM64EC",
         Avr => "AVR",
         Bpf => "BPF",
         CSky => "C-SKY",
         Hexagon => "Hexagon",
-        LoongArch32 => "LoongArch64",
-        LoongArch64 => "LoongArch32",
+        LoongArch32 => "LoongArch32",
+        LoongArch64 => "LoongArch64",
         M68k => "Motorola 680x0",
         Mips => "MIPS",
         Mips32r6 => "MIPS release 6",

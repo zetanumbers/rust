@@ -86,14 +86,17 @@ where
                         TypingMode::Borrowck { .. } => {
                             let actual = cx
                                 .type_of_opaque_hir_typeck(def_id)
-                                .instantiate(cx, opaque_ty.args);
+                                .instantiate(cx, opaque_ty.args)
+                                .skip_norm_wip();
                             let actual = fold_regions(cx, actual, |re, _dbi| match re.kind() {
                                 ty::ReErased => self.next_region_var(),
                                 _ => re,
                             });
                             self.eq(goal.param_env, expected, actual)?;
                         }
-                        _ => unreachable!(),
+                        TypingMode::Coherence
+                        | TypingMode::PostBorrowckAnalysis { .. }
+                        | TypingMode::PostAnalysis => unreachable!(),
                     }
                 }
 
@@ -115,7 +118,8 @@ where
                     return self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes);
                 };
 
-                let actual = cx.type_of(def_id.into()).instantiate(cx, opaque_ty.args);
+                let actual =
+                    cx.type_of(def_id.into()).instantiate(cx, opaque_ty.args).skip_norm_wip();
                 // FIXME: Actually use a proper binder here instead of relying on `ReErased`.
                 //
                 // This is also probably unsound or sth :shrug:
@@ -128,7 +132,8 @@ where
             }
             TypingMode::PostAnalysis => {
                 // FIXME: Add an assertion that opaque type storage is empty.
-                let actual = cx.type_of(opaque_ty.def_id).instantiate(cx, opaque_ty.args);
+                let actual =
+                    cx.type_of(opaque_ty.def_id).instantiate(cx, opaque_ty.args).skip_norm_wip();
                 self.eq(goal.param_env, expected, actual)?;
                 self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
             }

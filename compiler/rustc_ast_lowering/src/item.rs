@@ -24,8 +24,8 @@ use tracing::instrument;
 use super::errors::{InvalidAbi, InvalidAbiSuggestion, TupleStructWithDefault, UnionWithDefault};
 use super::stability::{enabled_names, gate_unstable_abi};
 use super::{
-    AstOwner, FnDeclKind, ImplTraitContext, ImplTraitPosition, LoweringContext, ParamMode,
-    RelaxedBoundForbiddenReason, RelaxedBoundPolicy, ResolverAstLoweringExt,
+    AstOwner, FnDeclKind, GenericArgsMode, ImplTraitContext, ImplTraitPosition, LoweringContext,
+    ParamMode, RelaxedBoundForbiddenReason, RelaxedBoundPolicy, ResolverAstLoweringExt,
 };
 
 /// Wraps either IndexVec (during `hir_crate`), which acts like a primary
@@ -153,7 +153,7 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
                     self.lower_item_id_use_tree(nested, vec);
                 }
             }
-            UseTreeKind::Simple(..) | UseTreeKind::Glob => {}
+            UseTreeKind::Simple(..) | UseTreeKind::Glob(_) => {}
         }
     }
 
@@ -213,8 +213,14 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
         i: &ItemKind,
     ) -> Vec<hir::Attribute> {
         match i {
-            ItemKind::Fn(box Fn { eii_impls, .. }) if eii_impls.is_empty() => Vec::new(),
-            ItemKind::Fn(box Fn { eii_impls, .. }) => {
+            ItemKind::Fn(box Fn { eii_impls, .. })
+            | ItemKind::Static(box StaticItem { eii_impls, .. })
+                if eii_impls.is_empty() =>
+            {
+                Vec::new()
+            }
+            ItemKind::Fn(box Fn { eii_impls, .. })
+            | ItemKind::Static(box StaticItem { eii_impls, .. }) => {
                 vec![hir::Attribute::Parsed(AttributeKind::EiiImpls(
                     eii_impls.iter().map(|i| self.lower_eii_impl(i)).collect(),
                 ))]
@@ -226,7 +232,6 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
 
             ItemKind::ExternCrate(..)
             | ItemKind::Use(..)
-            | ItemKind::Static(..)
             | ItemKind::Const(..)
             | ItemKind::ConstBlock(..)
             | ItemKind::Mod(..)
@@ -287,7 +292,11 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
             }
             ItemKind::Use(use_tree) => {
                 // Start with an empty prefix.
-                let prefix = Path { segments: ThinVec::new(), span: use_tree.span, tokens: None };
+                let prefix = Path {
+                    segments: ThinVec::new(),
+                    span: use_tree.prefix.span.shrink_to_lo(),
+                    tokens: None,
+                };
 
                 self.lower_use_tree(use_tree, &prefix, id, vis_span, attrs)
             }
@@ -298,6 +307,7 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
                 mutability: m,
                 expr: e,
                 define_opaque,
+                eii_impls: _,
             }) => {
                 let ident = self.lower_ident(*ident);
                 let ty = self
@@ -536,14 +546,14 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
                 constness,
                 is_auto,
                 safety,
-                // FIXME(impl_restrictions): lower to HIR
-                impl_restriction: _,
+                impl_restriction,
                 ident,
                 generics,
                 bounds,
                 items,
             }) => {
                 let constness = self.lower_constness(*constness);
+                let impl_restriction = self.lower_impl_restriction(impl_restriction);
                 let ident = self.lower_ident(*ident);
                 let (generics, (safety, items, bounds)) = self.lower_generics(
                     generics,
@@ -562,7 +572,16 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
                         (safety, items, bounds)
                     },
                 );
-                hir::ItemKind::Trait(constness, *is_auto, safety, ident, generics, bounds, items)
+                hir::ItemKind::Trait(
+                    constness,
+                    *is_auto,
+                    safety,
+                    impl_restriction,
+                    ident,
+                    generics,
+                    bounds,
+                    items,
+                )
             }
             ItemKind::TraitAlias(box TraitAlias { constness, ident, generics, bounds }) => {
                 let constness = self.lower_constness(*constness);
@@ -659,7 +678,7 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
                 let ident = self.lower_ident(ident);
                 hir::ItemKind::Use(path, hir::UseKind::Single(ident))
             }
-            UseTreeKind::Glob => {
+            UseTreeKind::Glob(_) => {
                 let res = self.expect_full_res(id);
                 let res = self.lower_res(res);
                 // Put the result in the appropriate namespace.
@@ -731,7 +750,7 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
                             owner_id,
                             kind,
                             vis_span,
-                            span: this.lower_span(use_tree.span),
+                            span: this.lower_span(use_tree.span()),
                             has_delayed_lints: !this.delayed_lints.is_empty(),
                             eii: find_attr!(attrs, EiiImpls(..) | EiiDeclaration(..)),
                         };
@@ -813,6 +832,7 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
                 expr: _,
                 safety,
                 define_opaque,
+                eii_impls: _,
             }) => {
                 let ty = self
                     .lower_ty_alloc(ty, ImplTraitContext::Disallowed(ImplTraitPosition::StaticTy));
@@ -1825,6 +1845,38 @@ impl<'hir, R: ResolverAstLoweringExt<'hir>> LoweringContext<'_, 'hir, R> {
             Safety::Default => default,
             Safety::Safe(_) => hir::Safety::Safe,
         }
+    }
+
+    pub(super) fn lower_impl_restriction(
+        &mut self,
+        r: &ImplRestriction,
+    ) -> &'hir hir::ImplRestriction<'hir> {
+        let kind = match &r.kind {
+            RestrictionKind::Unrestricted => hir::RestrictionKind::Unrestricted,
+            RestrictionKind::Restricted { path, id, shorthand: _ } => {
+                let res = self.resolver.get_partial_res(*id);
+                if let Some(did) = res.and_then(|res| res.expect_full_res().opt_def_id()) {
+                    hir::RestrictionKind::Restricted(self.arena.alloc(hir::Path {
+                        res: did,
+                        segments: self.arena.alloc_from_iter(path.segments.iter().map(|segment| {
+                            self.lower_path_segment(
+                                path.span,
+                                segment,
+                                ParamMode::Explicit,
+                                GenericArgsMode::Err,
+                                ImplTraitContext::Disallowed(ImplTraitPosition::Path),
+                                None,
+                            )
+                        })),
+                        span: self.lower_span(path.span),
+                    }))
+                } else {
+                    self.dcx().span_delayed_bug(path.span, "should have errored in resolve");
+                    hir::RestrictionKind::Unrestricted
+                }
+            }
+        };
+        self.arena.alloc(hir::ImplRestriction { kind, span: self.lower_span(r.span) })
     }
 
     /// Return the pair of the lowered `generics` as `hir::Generics` and the evaluation of `f` with

@@ -11,7 +11,7 @@ use rustc_codegen_ssa::traits::DebugInfoCodegenMethods;
 use rustc_hir::attrs::Linkage;
 use rustc_middle::dep_graph;
 #[cfg(feature = "master")]
-use rustc_middle::mir::mono::Visibility;
+use rustc_middle::mono::Visibility;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::DebugInfo;
 use rustc_span::Symbol;
@@ -83,8 +83,7 @@ pub fn compile_codegen_unit(
     let (module, _) = tcx.dep_graph.with_task(
         dep_node,
         tcx,
-        (cgu_name, target_info, lto_supported),
-        module_codegen,
+        || module_codegen(tcx, cgu_name, target_info, lto_supported),
         Some(dep_graph::hash_result),
     );
     let time_to_codegen = start_time.elapsed();
@@ -96,7 +95,9 @@ pub fn compile_codegen_unit(
 
     fn module_codegen(
         tcx: TyCtxt<'_>,
-        (cgu_name, target_info, lto_supported): (Symbol, LockedTargetInfo, bool),
+        cgu_name: Symbol,
+        target_info: LockedTargetInfo,
+        lto_supported: bool,
     ) -> ModuleCodegen<GccContext> {
         let cgu = tcx.codegen_unit(cgu_name);
         // Instantiate monomorphizations without filling out definitions yet...

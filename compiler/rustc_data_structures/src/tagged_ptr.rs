@@ -56,9 +56,6 @@ pub unsafe trait Tag: Copy {
 /// (this is based on `T`'s alignment).
 pub const fn bits_for<T: ?Sized + Aligned>() -> u32 {
     let alignment = crate::aligned::align_of::<T>();
-    #[cfg(bootstrap)]
-    let alignment = alignment.as_nonzero();
-    #[cfg(not(bootstrap))]
     let alignment = alignment.as_nonzero_usize();
     alignment.trailing_zeros()
 }
@@ -262,12 +259,12 @@ impl<P, T: Tag> Hash for TaggedRef<'_, P, T> {
     }
 }
 
-impl<'a, P, T, HCX> HashStable<HCX> for TaggedRef<'a, P, T>
+impl<'a, P, T, Hcx> HashStable<Hcx> for TaggedRef<'a, P, T>
 where
-    P: HashStable<HCX> + Aligned + ?Sized,
-    T: Tag + HashStable<HCX>,
+    P: HashStable<Hcx> + Aligned + ?Sized,
+    T: Tag + HashStable<Hcx>,
 {
-    fn hash_stable(&self, hcx: &mut HCX, hasher: &mut StableHasher) {
+    fn hash_stable(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
         self.pointer().hash_stable(hcx, hasher);
         self.tag().hash_stable(hcx, hasher);
     }

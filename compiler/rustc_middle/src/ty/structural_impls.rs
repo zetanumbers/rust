@@ -198,6 +198,7 @@ TrivialLiftImpls! {
     rustc_hir::Safety,
     rustc_middle::mir::ConstValue,
     rustc_type_ir::BoundConstness,
+    rustc_type_ir::FnSigKind,
     rustc_type_ir::PredicatePolarity,
     // tidy-alphabetical-end
 }
@@ -366,7 +367,7 @@ impl<'tcx> TypeSuperFoldable<TyCtxt<'tcx>> for Ty<'tcx> {
             ty::CoroutineClosure(did, args) => {
                 ty::CoroutineClosure(did, args.try_fold_with(folder)?)
             }
-            ty::Alias(kind, data) => ty::Alias(kind, data.try_fold_with(folder)?),
+            ty::Alias(data) => ty::Alias(data.try_fold_with(folder)?),
             ty::Pat(ty, pat) => ty::Pat(ty.try_fold_with(folder)?, pat.try_fold_with(folder)?),
 
             ty::Bool
@@ -405,7 +406,7 @@ impl<'tcx> TypeSuperFoldable<TyCtxt<'tcx>> for Ty<'tcx> {
             ty::CoroutineWitness(did, args) => ty::CoroutineWitness(did, args.fold_with(folder)),
             ty::Closure(did, args) => ty::Closure(did, args.fold_with(folder)),
             ty::CoroutineClosure(did, args) => ty::CoroutineClosure(did, args.fold_with(folder)),
-            ty::Alias(kind, data) => ty::Alias(kind, data.fold_with(folder)),
+            ty::Alias(data) => ty::Alias(data.fold_with(folder)),
             ty::Pat(ty, pat) => ty::Pat(ty.fold_with(folder), pat.fold_with(folder)),
 
             ty::Bool
@@ -453,7 +454,7 @@ impl<'tcx> TypeSuperVisitable<TyCtxt<'tcx>> for Ty<'tcx> {
             ty::CoroutineWitness(_did, args) => args.visit_with(visitor),
             ty::Closure(_did, args) => args.visit_with(visitor),
             ty::CoroutineClosure(_did, args) => args.visit_with(visitor),
-            ty::Alias(_, data) => data.visit_with(visitor),
+            ty::Alias(data) => data.visit_with(visitor),
 
             ty::Pat(ty, pat) => {
                 try_visit!(ty.visit_with(visitor));

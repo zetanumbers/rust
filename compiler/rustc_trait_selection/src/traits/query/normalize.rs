@@ -10,7 +10,7 @@ use rustc_macros::extension;
 pub use rustc_middle::traits::query::NormalizationResult;
 use rustc_middle::ty::{
     self, FallibleTypeFolder, Ty, TyCtxt, TypeFoldable, TypeSuperFoldable, TypeSuperVisitable,
-    TypeVisitable, TypeVisitableExt, TypeVisitor, TypingMode,
+    TypeVisitable, TypeVisitableExt, TypeVisitor, TypingMode, Unnormalized,
 };
 use rustc_span::DUMMY_SP;
 use tracing::{debug, info, instrument};
@@ -79,7 +79,9 @@ impl<'a, 'tcx> At<'a, 'tcx> {
 
         if self.infcx.next_trait_solver() {
             match crate::solve::deeply_normalize_with_skipped_universes::<_, ScrubbedTraitError<'tcx>>(
-                self, value, universes,
+                self,
+                Unnormalized::new_wip(value),
+                universes,
             ) {
                 Ok(value) => {
                     return Ok(Normalized { value, obligations: PredicateObligations::new() });
@@ -202,19 +204,16 @@ impl<'a, 'tcx> FallibleTypeFolder<TyCtxt<'tcx>> for QueryNormalizer<'a, 'tcx> {
             return Ok(*ty);
         }
 
-        let (kind, data) = match *ty.kind() {
-            ty::Alias(kind, data) => (kind, data),
-            _ => {
-                let res = ty.try_super_fold_with(self)?;
-                self.cache.insert(ty, res);
-                return Ok(res);
-            }
+        let &ty::Alias(data) = ty.kind() else {
+            let res = ty.try_super_fold_with(self)?;
+            self.cache.insert(ty, res);
+            return Ok(res);
         };
 
         // See note in `rustc_trait_selection::traits::project` about why we
         // wait to fold the args.
-        let res = match kind {
-            ty::Opaque => {
+        let res = match data.kind {
+            ty::Opaque { def_id } => {
                 // Only normalize `impl Trait` outside of type inference, usually in codegen.
                 match self.infcx.typing_mode() {
                     TypingMode::Coherence
@@ -239,8 +238,9 @@ impl<'a, 'tcx> FallibleTypeFolder<TyCtxt<'tcx>> for QueryNormalizer<'a, 'tcx> {
                             return Ok(Ty::new_error(self.cx(), guar));
                         }
 
-                        let generic_ty = self.cx().type_of(data.def_id);
-                        let mut concrete_ty = generic_ty.instantiate(self.cx(), args);
+                        let generic_ty = self.cx().type_of(def_id);
+                        let mut concrete_ty =
+                            generic_ty.instantiate(self.cx(), args).skip_norm_wip();
                         self.anon_depth += 1;
                         if concrete_ty == ty {
                             concrete_ty = Ty::new_error_with_message(
@@ -256,8 +256,8 @@ impl<'a, 'tcx> FallibleTypeFolder<TyCtxt<'tcx>> for QueryNormalizer<'a, 'tcx> {
                 }
             }
 
-            ty::Projection | ty::Inherent | ty::Free => self
-                .try_fold_free_or_assoc(ty::AliasTerm::new(self.cx(), data.def_id, data.args))?
+            ty::Projection { def_id } | ty::Inherent { def_id } | ty::Free { def_id } => self
+                .try_fold_free_or_assoc(ty::AliasTerm::new(self.cx(), def_id, data.args))?
                 .expect_type(),
         };
 

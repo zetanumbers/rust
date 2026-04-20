@@ -196,6 +196,7 @@ symbols! {
         Continue,
         ControlFlow,
         Copy,
+        Cow,
         Debug,
         Default,
         Deref,
@@ -399,7 +400,6 @@ symbols! {
         anon_assoc,
         anonymous_lifetime_in_impl_trait,
         any,
-        append_const_msg,
         apx_target_feature,
         arbitrary_enum_discriminant,
         arbitrary_self_types,
@@ -505,6 +505,8 @@ symbols! {
         avx512bw,
         avx512f,
         await_macro,
+        backchain,
+        backend_repr,
         bang,
         begin_panic,
         bench,
@@ -587,6 +589,7 @@ symbols! {
         cfg_target_has_atomic,
         cfg_target_has_atomic_equal_alignment,
         cfg_target_has_reliable_f16_f128,
+        cfg_target_object_format,
         cfg_target_thread_local,
         cfg_target_vendor,
         cfg_trace: "<cfg_trace>", // must not be a valid identifier
@@ -621,6 +624,7 @@ symbols! {
         coerce_pointee_validated,
         coerce_shared,
         coerce_unsized,
+        coff,
         cold,
         cold_path,
         collapse_debuginfo,
@@ -637,7 +641,6 @@ symbols! {
         compiler_move,
         concat,
         concat_bytes,
-        concat_idents,
         conservative_impl_trait,
         console,
         const_allocate,
@@ -799,6 +802,7 @@ symbols! {
         diagnostic_namespace,
         diagnostic_on_const,
         diagnostic_on_move,
+        diagnostic_on_unknown,
         dialect,
         direct,
         discriminant_kind,
@@ -850,6 +854,7 @@ symbols! {
         eii_internals,
         eii_shared_macro,
         element_ty,
+        elf,
         // Notes about `sym::empty`:
         // - It should only be used when it genuinely means "empty symbol". Use
         //   `Option<Symbol>` when "no symbol" is a possibility.
@@ -947,6 +952,7 @@ symbols! {
         floorf32,
         floorf64,
         floorf128,
+        fma4_target_feature,
         fmaf16,
         fmaf32,
         fmaf64,
@@ -1013,6 +1019,7 @@ symbols! {
         generic_assert,
         generic_associated_types,
         generic_associated_types_extended,
+        generic_const_args,
         generic_const_exprs,
         generic_const_items,
         generic_const_parameter_types,
@@ -1041,6 +1048,9 @@ symbols! {
         html_no_source,
         html_playground_url,
         html_root_url,
+        hvx,
+        hvx_length64b: "hvx-length64b",
+        hvx_length128b: "hvx-length128b",
         hwaddress,
         i8,
         i16,
@@ -1160,6 +1170,7 @@ symbols! {
         linkonce_odr,
         lint_reasons,
         literal,
+        little, big,
         load,
         loaded_from_disk,
         local,
@@ -1186,6 +1197,7 @@ symbols! {
         lt,
         m68k,
         m68k_target_feature,
+        macho: "mach-o",
         macro_at_most_once_rep,
         macro_attr,
         macro_attributes_in_derive_output,
@@ -1243,6 +1255,7 @@ symbols! {
         meta_sized,
         metadata_type,
         mgca_type_const_syntax,
+        min_adt_const_params,
         min_const_fn,
         min_const_generics,
         min_const_unsafe_fn,
@@ -1359,6 +1372,7 @@ symbols! {
         new_upper_exp,
         new_upper_hex,
         next,
+        niko,
         nll,
         no,
         no_builtins,
@@ -1412,8 +1426,8 @@ symbols! {
         on_const,
         on_move,
         on_unimplemented,
+        on_unknown,
         opaque,
-        opaque_generic_const_args,
         opaque_module_name_placeholder: "<opaque>",
         ops,
         opt_out_copy,
@@ -1703,7 +1717,6 @@ symbols! {
         rustc_const_unstable,
         rustc_conversion_suggestion,
         rustc_deallocator,
-        rustc_def_path,
         rustc_default_body_unstable,
         rustc_delayed_bug_from_inside_query,
         rustc_deny_explicit_impl,
@@ -1715,10 +1728,14 @@ symbols! {
         rustc_driver,
         rustc_dummy,
         rustc_dump_def_parents,
+        rustc_dump_def_path,
+        rustc_dump_hidden_type_of_opaques,
         rustc_dump_inferred_outlives,
         rustc_dump_item_bounds,
+        rustc_dump_layout,
         rustc_dump_object_lifetime_defaults,
         rustc_dump_predicates,
+        rustc_dump_symbol_name,
         rustc_dump_user_args,
         rustc_dump_variances,
         rustc_dump_variances_of_opaques,
@@ -1730,13 +1747,11 @@ symbols! {
         rustc_expected_cgu_reuse,
         rustc_force_inline,
         rustc_has_incoherent_inherent_impls,
-        rustc_hidden_type_of_opaques,
         rustc_if_this_changed,
         rustc_inherit_overflow_checks,
         rustc_insignificant_dtor,
         rustc_intrinsic,
         rustc_intrinsic_const_stable_indirect,
-        rustc_layout,
         rustc_layout_scalar_valid_range_end,
         rustc_layout_scalar_valid_range_start,
         rustc_legacy_const_generics,
@@ -1748,11 +1763,13 @@ symbols! {
         rustc_main,
         rustc_mir,
         rustc_must_implement_one_of,
+        rustc_must_match_exhaustively,
         rustc_never_returns_null_ptr,
         rustc_never_type_options,
         rustc_no_implicit_autorefs,
         rustc_no_implicit_bounds,
         rustc_no_mir_inline,
+        rustc_no_writable,
         rustc_non_const_trait_method,
         rustc_nonnull_optimization_guaranteed,
         rustc_nounwind,
@@ -1784,7 +1801,6 @@ symbols! {
         rustc_specialization_trait,
         rustc_std_internal_symbol,
         rustc_strict_coherence,
-        rustc_symbol_name,
         rustc_test_marker,
         rustc_then_this_would_need,
         rustc_trivial_field_reads,
@@ -1919,6 +1935,7 @@ symbols! {
         slice_len_fn,
         slice_patterns,
         slicing_syntax,
+        soft_float: "soft-float",
         sparc,
         sparc64,
         sparc_target_feature,
@@ -1977,6 +1994,12 @@ symbols! {
         suggestion,
         super_let,
         supertrait_item_shadowing,
+        sve_cast,
+        sve_tuple_create2,
+        sve_tuple_create3,
+        sve_tuple_create4,
+        sve_tuple_get,
+        sve_tuple_set,
         sym,
         sync,
         synthetic,
@@ -1997,6 +2020,7 @@ symbols! {
         target_has_reliable_f16_math,
         target_has_reliable_f128,
         target_has_reliable_f128_math,
+        target_object_format,
         target_os,
         target_pointer_width,
         target_thread_local,
@@ -2162,6 +2186,7 @@ symbols! {
         unstable_location_reason_default: "this crate is being loaded from the sysroot, an \
                           unstable location; did you mean to load this crate \
                           from crates.io via `Cargo.toml` instead?",
+        unstable_removed,
         untagged_unions,
         unused_imports,
         unwind,
@@ -2186,6 +2211,7 @@ symbols! {
         v1,
         v8plus,
         va_arg,
+        va_arg_safe,
         va_copy,
         va_end,
         va_list,
@@ -2213,12 +2239,14 @@ symbols! {
         volatile_store,
         vreg,
         vreg_low16,
+        vreg_pair,
         vsreg,
         vsx,
         vtable_align,
         vtable_size,
         warn,
         wasip2,
+        wasm,
         wasm32,
         wasm64,
         wasm_abi,
@@ -2253,6 +2281,7 @@ symbols! {
         x86_amx_intrinsics,
         x87_reg,
         x87_target_feature,
+        xcoff,
         xer,
         xmm_reg,
         xop_target_feature,
@@ -2599,17 +2628,17 @@ impl fmt::Display for Symbol {
     }
 }
 
-impl<CTX> HashStable<CTX> for Symbol {
+impl<Hcx> HashStable<Hcx> for Symbol {
     #[inline]
-    fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
+    fn hash_stable(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
         self.as_str().hash_stable(hcx, hasher);
     }
 }
 
-impl<CTX> ToStableHashKey<CTX> for Symbol {
+impl<Hcx> ToStableHashKey<Hcx> for Symbol {
     type KeyType = String;
     #[inline]
-    fn to_stable_hash_key(&self, _: &CTX) -> String {
+    fn to_stable_hash_key(&self, _: &mut Hcx) -> String {
         self.as_str().to_string()
     }
 }
@@ -2659,9 +2688,9 @@ impl fmt::Debug for ByteSymbol {
     }
 }
 
-impl<CTX> HashStable<CTX> for ByteSymbol {
+impl<Hcx> HashStable<Hcx> for ByteSymbol {
     #[inline]
-    fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
+    fn hash_stable(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
         self.as_byte_str().hash_stable(hcx, hasher);
     }
 }

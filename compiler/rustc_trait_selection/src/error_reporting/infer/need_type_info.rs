@@ -255,7 +255,7 @@ impl<'a, 'tcx> TypeFolder<TyCtxt<'tcx>> for ClosureEraser<'a, 'tcx> {
 fn fmt_printer<'a, 'tcx>(infcx: &'a InferCtxt<'tcx>, ns: Namespace) -> FmtPrinter<'a, 'tcx> {
     let mut p = FmtPrinter::new(infcx.tcx, ns);
     let ty_getter = move |ty_vid| {
-        if infcx.probe_ty_var(ty_vid).is_ok() {
+        if infcx.try_resolve_ty_var(ty_vid).is_ok() {
             warn!("resolved ty var in error message");
         }
 
@@ -1021,7 +1021,7 @@ impl<'a, 'tcx> FindInferSourceVisitor<'a, 'tcx> {
                 GenericArgKind::Type(ty) => {
                     if matches!(
                         ty.kind(),
-                        ty::Alias(ty::Opaque, ..)
+                        ty::Alias(ty::AliasTy { kind: ty::Opaque { .. }, .. })
                             | ty::Closure(..)
                             | ty::CoroutineClosure(..)
                             | ty::Coroutine(..)
@@ -1202,7 +1202,8 @@ impl<'a, 'tcx> FindInferSourceVisitor<'a, 'tcx> {
 
                 let parent_def_id = generics.parent.unwrap();
                 if let DefKind::Impl { .. } = tcx.def_kind(parent_def_id) {
-                    let parent_ty = tcx.type_of(parent_def_id).instantiate(tcx, args);
+                    let parent_ty =
+                        tcx.type_of(parent_def_id).instantiate(tcx, args).skip_norm_wip();
                     match (parent_ty.kind(), &ty.kind) {
                         (
                             ty::Adt(def, args),

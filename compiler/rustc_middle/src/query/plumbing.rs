@@ -97,14 +97,13 @@ pub struct QueryVTable<'tcx, C: QueryCache> {
     /// This should be the only code that calls the provider function.
     pub invoke_provider_fn: fn(tcx: TyCtxt<'tcx>, key: C::Key) -> C::Value,
 
-    pub will_cache_on_disk_for_key_fn: fn(tcx: TyCtxt<'tcx>, key: C::Key) -> bool,
+    pub will_cache_on_disk_for_key_fn: fn(key: C::Key) -> bool,
 
-    pub try_load_from_disk_fn: fn(
-        tcx: TyCtxt<'tcx>,
-        key: C::Key,
-        prev_index: SerializedDepNodeIndex,
-        index: DepNodeIndex,
-    ) -> Option<C::Value>,
+    /// Function pointer that tries to load a query value from disk.
+    ///
+    /// This should only be called after a successful check of `will_cache_on_disk_for_key_fn`.
+    pub try_load_from_disk_fn:
+        fn(tcx: TyCtxt<'tcx>, prev_index: SerializedDepNodeIndex) -> Option<C::Value>,
 
     /// Function pointer that hashes this query's result values.
     ///
@@ -167,6 +166,8 @@ pub struct QuerySystem<'tcx> {
     pub extern_providers: ExternProviders,
 
     pub jobs: AtomicU64,
+
+    pub cycle_handler_nesting: Lock<u8>,
 }
 
 #[derive(Copy, Clone)]
@@ -301,8 +302,10 @@ macro_rules! define_callbacks {
                     arena_cache: $arena_cache:literal,
                     cache_on_disk: $cache_on_disk:literal,
                     depth_limit: $depth_limit:literal,
+                    desc: $desc:expr,
                     eval_always: $eval_always:literal,
                     feedable: $feedable:literal,
+                    handle_cycle_error: $handle_cycle_error:literal,
                     no_force: $no_force:literal,
                     no_hash: $no_hash:literal,
                     returns_error_guaranteed: $returns_error_guaranteed:literal,
@@ -435,8 +438,7 @@ macro_rules! define_callbacks {
             pub fn description(&self, tcx: TyCtxt<'tcx>) -> String {
                 let (name, description) = ty::print::with_no_queries!(match self {
                     $(
-                        TaggedQueryKey::$name(key) =>
-                            (stringify!($name), _description_fns::$name(tcx, *key)),
+                        TaggedQueryKey::$name(key) => (stringify!($name), ($desc)(tcx, *key)),
                     )*
                 });
                 if tcx.sess.verbose_internals() {
@@ -444,6 +446,11 @@ macro_rules! define_callbacks {
                 } else {
                     description
                 }
+            }
+
+            /// Calls `self.description` or returns a fallback if there was a fatal error
+            pub fn catch_description(&self, tcx: TyCtxt<'tcx>) -> String {
+                catch_fatal_errors(|| self.description(tcx)).unwrap_or_else(|_| format!("<error describing {}>", self.query_name()))
             }
 
             /// Returns the default span for this query if `span` is a dummy span.
@@ -464,28 +471,9 @@ macro_rules! define_callbacks {
                 }
             }
 
-            pub fn def_kind(&self, tcx: TyCtxt<'tcx>) -> Option<DefKind> {
-                // This is used to reduce code generation as it
-                // can be reused for queries with the same key type.
-                fn inner<'tcx>(key: &impl $crate::query::QueryKey, tcx: TyCtxt<'tcx>)
-                    -> Option<DefKind>
-                {
-                    key
-                        .key_as_def_id()
-                        .and_then(|def_id| def_id.as_local())
-                        .map(|def_id| tcx.def_kind(def_id))
-                }
-
-                if let TaggedQueryKey::def_kind(..) = self {
-                    // Try to avoid infinite recursion.
-                    return None
-                }
-
-                match self {
-                    $(
-                        TaggedQueryKey::$name(key) => inner(key, tcx),
-                    )*
-                }
+            /// Calls `self.default_span` or returns `DUMMY_SP` if there was a fatal error
+            pub fn catch_default_span(&self, tcx: TyCtxt<'tcx>, span: Span) -> Span {
+                catch_fatal_errors(|| self.default_span(tcx, span)).unwrap_or(DUMMY_SP)
             }
         }
 

@@ -14,7 +14,7 @@ use rustc_middle::ty::{
 use rustc_span::{ErrorGuaranteed, Span, kw};
 
 use crate::collect::ItemCtxt;
-use crate::hir_ty_lowering::{GenericArgPosition, HirTyLowerer};
+use crate::hir_ty_lowering::HirTyLowerer;
 
 type RemapTable = FxHashMap<u32, u32>;
 
@@ -281,9 +281,9 @@ fn get_delegation_self_ty<'tcx>(tcx: TyCtxt<'tcx>, delegation_id: LocalDefId) ->
         }
 
         (FnKind::AssocTraitImpl, FnKind::AssocTrait)
-        | (FnKind::AssocInherentImpl, FnKind::AssocTrait) => {
-            Some(tcx.type_of(tcx.local_parent(delegation_id)).instantiate_identity())
-        }
+        | (FnKind::AssocInherentImpl, FnKind::AssocTrait) => Some(
+            tcx.type_of(tcx.local_parent(delegation_id)).instantiate_identity().skip_norm_wip(),
+        ),
 
         // For trait impl's `sig_id` is always equal to the corresponding trait method.
         // For inherent methods delegation is not yet supported.
@@ -318,10 +318,14 @@ fn create_generic_args<'tcx>(
     let (caller_kind, callee_kind) = (fn_kind(tcx, delegation_id), fn_kind(tcx, sig_id));
 
     let delegation_args = ty::GenericArgs::identity_for_item(tcx, delegation_id);
-    let delegation_parent_args_count = tcx.generics_of(delegation_id).parent_count;
 
     let deleg_parent_args_without_self_count =
         get_delegation_parent_args_count_without_self(tcx, delegation_id, sig_id);
+
+    let delegation_generics = tcx.generics_of(delegation_id);
+    let real_args_count = delegation_args.len() - delegation_generics.own_synthetic_params_count();
+    let synth_args = &delegation_args[real_args_count..];
+    let delegation_args = &delegation_args[..real_args_count];
 
     let args = match (caller_kind, callee_kind) {
         (FnKind::Free, FnKind::Free)
@@ -335,18 +339,21 @@ fn create_generic_args<'tcx>(
             // them as parent args. We always generate a function whose generics match
             // child generics in trait.
             let parent = tcx.local_parent(delegation_id);
-            parent_args = tcx.impl_trait_header(parent).trait_ref.instantiate_identity().args;
+            parent_args =
+                tcx.impl_trait_header(parent).trait_ref.instantiate_identity().skip_norm_wip().args;
 
             assert!(child_args.is_empty(), "Child args can not be used in trait impl case");
 
-            tcx.mk_args(&delegation_args[delegation_parent_args_count..])
+            tcx.mk_args(&delegation_args[delegation_generics.parent_count..])
         }
 
         (FnKind::AssocInherentImpl, FnKind::AssocTrait) => {
-            let self_ty = tcx.type_of(tcx.local_parent(delegation_id)).instantiate_identity();
+            let self_ty =
+                tcx.type_of(tcx.local_parent(delegation_id)).instantiate_identity().skip_norm_wip();
 
             tcx.mk_args_from_iter(
-                std::iter::once(ty::GenericArg::from(self_ty)).chain(delegation_args.iter()),
+                std::iter::once(ty::GenericArg::from(self_ty))
+                    .chain(delegation_args.iter().copied()),
             )
         }
 
@@ -411,7 +418,7 @@ fn create_generic_args<'tcx>(
 
         new_args.extend_from_slice(&child_args[child_lifetimes_count..]);
     } else if !parent_args.is_empty() {
-        let child_args = &delegation_args[delegation_parent_args_count..];
+        let child_args = &delegation_args[delegation_generics.parent_count..];
 
         let child_lifetimes_count =
             child_args.iter().take_while(|a| a.as_region().is_some()).count();
@@ -423,6 +430,8 @@ fn create_generic_args<'tcx>(
         let skip_self = matches!(self_pos_kind, SelfPositionKind::AfterLifetimes);
         new_args.extend(&child_args[child_lifetimes_count + skip_self as usize..]);
     }
+
+    new_args.extend(synth_args);
 
     new_args
 }
@@ -450,7 +459,10 @@ pub(crate) fn inherit_predicates_for_delegation_item<'tcx>(
 
             for pred in preds.predicates {
                 let new_pred = pred.0.fold_with(&mut self.folder);
-                self.preds.push((EarlyBinder::bind(new_pred).instantiate(self.tcx, args), pred.1));
+                self.preds.push((
+                    EarlyBinder::bind(new_pred).instantiate(self.tcx, args).skip_norm_wip(),
+                    pred.1,
+                ));
             }
 
             self
@@ -523,7 +535,7 @@ fn check_constraints<'tcx>(
         }));
     };
 
-    if tcx.fn_sig(sig_id).skip_binder().skip_binder().c_variadic {
+    if tcx.fn_sig(sig_id).skip_binder().skip_binder().c_variadic() {
         // See issue #127443 for explanation.
         emit("delegation to C-variadic functions is not allowed");
     }
@@ -581,14 +593,7 @@ fn get_delegation_user_specified_args<'tcx>(
         let self_ty = get_delegation_self_ty(tcx, delegation_id);
 
         lowerer
-            .lower_generic_args_of_path(
-                segment.ident.span,
-                def_id,
-                &[],
-                segment,
-                self_ty,
-                GenericArgPosition::Type,
-            )
+            .lower_generic_args_of_path(segment.ident.span, def_id, &[], segment, self_ty)
             .0
             .as_slice()
     });
@@ -610,17 +615,11 @@ fn get_delegation_user_specified_args<'tcx>(
             };
 
             let args = lowerer
-                .lower_generic_args_of_path(
-                    segment.ident.span,
-                    def_id,
-                    parent_args,
-                    segment,
-                    None,
-                    GenericArgPosition::Value,
-                )
+                .lower_generic_args_of_path(segment.ident.span, def_id, parent_args, segment, None)
                 .0;
 
-            &args[parent_args.len()..]
+            let synth_params_count = tcx.generics_of(def_id).own_synthetic_params_count();
+            &args[parent_args.len()..args.len() - synth_params_count]
         });
 
     (parent_args.unwrap_or_default(), child_args.unwrap_or_default())
