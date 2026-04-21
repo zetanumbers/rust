@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
+use rustc_abi::Size;
 use rustc_const_eval::interpret::{InterpResult, interp_ok};
 use rustc_middle::throw_unsup_format;
 use rustc_target::spec::Os;
@@ -58,6 +59,8 @@ struct Socket {
     is_non_block: Cell<bool>,
     /// The current blocking I/O readiness of the file description.
     io_readiness: RefCell<BlockingIoSourceReadiness>,
+    /// [`Some`] when the socket had an async error which has not yet been fetched via `SO_ERROR`.
+    error: RefCell<Option<io::Error>>,
 }
 
 impl FileDescription for Socket {
@@ -340,6 +343,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             state: RefCell::new(SocketState::Initial),
             is_non_block: Cell::new(is_sock_nonblock),
             io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
+            error: RefCell::new(None),
         });
 
         interp_ok(Scalar::from_i32(fds.insert(fd)))
@@ -950,6 +954,152 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         );
     }
 
+    fn getsockopt(
+        &mut self,
+        socket: &OpTy<'tcx>,
+        level: &OpTy<'tcx>,
+        option_name: &OpTy<'tcx>,
+        option_value: &OpTy<'tcx>,
+        option_len: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let socket = this.read_scalar(socket)?.to_i32()?;
+        let level = this.read_scalar(level)?.to_i32()?;
+        let option_name = this.read_scalar(option_name)?.to_i32()?;
+        // These two pointers are used to return the value: `len_ptr` initially stores how much space
+        // is available. If the actual value fits into that space, it is written to
+        // `value_ptr` and `len_ptr` is updated to represent how many bytes
+        // were actually written. If the value does not fit, it is silently truncated.
+        // Also see <https://pubs.opengroup.org/onlinepubs/9799919799/functions/getsockopt.html>.
+        let option_value_ptr = this.read_pointer(option_value)?;
+        let option_len_ptr = this.read_pointer(option_len)?;
+
+        // Get the file handle
+        let Some(fd) = this.machine.fds.get(socket) else {
+            return this.set_last_error_and_return_i32(LibcError("EBADF"));
+        };
+
+        let Some(socket) = fd.downcast::<Socket>() else {
+            // Man page specifies to return ENOTSOCK if `fd` is not a socket.
+            return this.set_last_error_and_return_i32(LibcError("ENOTSOCK"));
+        };
+
+        if option_value_ptr == Pointer::null() || option_len_ptr == Pointer::null() {
+            // This socket option returns a value and thus we need to return EFAULT
+            // when either the value or the length pointers are null pointers.
+            return this.set_last_error_and_return_i32(LibcError("EFAULT"));
+        }
+
+        let socklen_layout = this.libc_ty_layout("socklen_t");
+        let option_len_ptr_mplace = this.ptr_to_mplace(option_len_ptr, socklen_layout);
+        let option_len: usize = this
+            .read_scalar(&option_len_ptr_mplace)?
+            .to_int(socklen_layout.size)?
+            .try_into()
+            .unwrap();
+
+        // We need a temporary buffer as `option_value_ptr` might not point to a large enough
+        // buffer, in which case we have to truncate.
+        let value_buffer = if level == this.eval_libc_i32("SOL_SOCKET") {
+            let opt_so_error = this.eval_libc_i32("SO_ERROR");
+
+            if option_name == opt_so_error {
+                // Because `TcpStream::take_error()` and `TcpListener::take_error()` consume the latest async
+                // error, we know that our stored `socket.error` is outdated when `TcpStream::take_error()`/
+                // `TcpListener::take_error()` returns `Ok(Some(...))`.
+                // If they return `Ok(None)`, then we fall back to the stored `socket.error`.
+                let error = match &*socket.state.borrow() {
+                    SocketState::Initial | SocketState::Bound(_) => socket.error.take(),
+                    SocketState::Listening(listener) =>
+                        listener.take_error().unwrap_or(socket.error.take()),
+                    SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                        stream.take_error().unwrap_or(socket.error.take()),
+                };
+                // Clear our own stored error -- it was either `take`n above or it is outdated.
+                socket.error.replace(None);
+
+                // We know there is no longer an async error and thus we need to update the
+                // I/O and epoll readiness of the socket.
+                socket.io_readiness.borrow_mut().error = false;
+                this.update_epoll_active_events(socket, /* force_edge */ false)?;
+
+                let return_value = match error {
+                    Some(err) => this.io_error_to_errnum(err)?.to_i32()?,
+                    // If there is no error, we write 0 into the option value buffer.
+                    None => 0,
+                };
+
+                // Allocate new buffer on the stack with the `i32` layout.
+                let value_buffer = this.allocate(this.machine.layouts.i32, MemoryKind::Stack)?;
+                this.write_int(return_value, &value_buffer)?;
+                value_buffer
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option_name:#x} is unsupported for level SOL_SOCKET",
+                );
+            }
+        } else if level == this.eval_libc_i32("IPPROTO_IP") {
+            let opt_ip_ttl = this.eval_libc_i32("IP_TTL");
+
+            if option_name == opt_ip_ttl {
+                let ttl = match &*socket.state.borrow() {
+                    SocketState::Initial | SocketState::Bound(_) =>
+                        throw_unsup_format!(
+                            "getsockopt: reading option IP_TTL on level IPPROTO_IP is only supported \
+                            on connected and listening sockets"
+                        ),
+                    SocketState::Listening(listener) => listener.ttl(),
+                    SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                        stream.ttl(),
+                };
+
+                let ttl = match ttl {
+                    Ok(ttl) => ttl,
+                    Err(e) => return this.set_last_error_and_return_i32(e),
+                };
+
+                // Allocate new buffer on the stack with the `u32` layout.
+                let value_buffer = this.allocate(this.machine.layouts.u32, MemoryKind::Stack)?;
+                this.write_int(ttl, &value_buffer)?;
+                value_buffer
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option_name:#x} is unsupported for level IPPROTO_IP",
+                );
+            }
+        } else {
+            throw_unsup_format!(
+                "getsockopt: level {level:#x} is unsupported, only SOL_SOCKET is allowed"
+            )
+        };
+
+        // Truncated size of the output value.
+        let output_value_len = value_buffer.layout.size.min(Size::from_bytes(option_len));
+        // Copy the truncated value into the buffer pointed to by `option_value_ptr`.
+        this.mem_copy(
+            value_buffer.ptr(),
+            option_value_ptr,
+            // Truncate the value to fit the provided buffer.
+            output_value_len,
+            // The buffers are guaranteed to not overlap since the `value_buffer`
+            // was just newly allocated on the stack.
+            true,
+        )?;
+        // Deallocate the value buffer as it was only needed to store the value and
+        // copy it into the buffer pointed to by `option_value_ptr`.
+        this.deallocate_ptr(value_buffer.ptr(), None, MemoryKind::Stack)?;
+
+        // On output, the length pointer contains the amount of bytes written -- not the size
+        // of the value before truncation.
+        this.write_scalar(
+            Scalar::from_uint(output_value_len.bytes(), socklen_layout.size),
+            &option_len_ptr_mplace,
+        )?;
+
+        interp_ok(Scalar::from_i32(0))
+    }
+
     fn getsockname(
         &mut self,
         socket: &OpTy<'tcx>,
@@ -1232,6 +1382,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             state: RefCell::new(SocketState::Connected(stream)),
             is_non_block: Cell::new(is_client_sock_nonblock),
             io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
+            error: RefCell::new(None),
         });
         // Register the socket to the blocking I/O manager because
         // there is an associated host socket.
@@ -1490,17 +1641,18 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     };
 
                     // Manually check whether there were any errors since calling `connect`.
-                    if let Ok(Some(_)) = stream.take_error() {
+                    if let Ok(Some(err)) = stream.take_error() {
                         // There was an error during connecting and thus we
                         // return ENOTCONN. It's the program's responsibility
                         // to read SO_ERROR itself.
-                        //
+
+                        // Store the error such that we can return it when
+                        // `getsockopt(SOL_SOCKET, SO_ERROR, ...)` is called on the socket.
+                        socket.error.replace(Some(err));
+
                         // Go back to initial state since the only way of getting into the
                         // `Connecting` state is from the `Initial` state and at this point
                         // we know that the connection won't be established anymore.
-                        //
-                        // FIXME: We're currently just dropping the error information. Eventually
-                        // we'll have to store it so that it can be recovered by the user.
                         *state = SocketState::Initial;
                         drop(state);
                         return action.call(this, Err(()))

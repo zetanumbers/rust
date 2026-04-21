@@ -272,7 +272,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .try_into()
             .unwrap();
 
-        let (address_buffer, address_layout) = match address {
+        let address_buffer = match address {
             SocketAddr::V4(address) => {
                 // IPv4 address bytes; already stored in network byte order.
                 let address_bytes = address.ip().octets();
@@ -310,7 +310,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let s_addr_field = this.project_field_named(&sin_addr_field, "s_addr")?;
                 this.write_bytes_ptr(s_addr_field.ptr(), address_bytes)?;
 
-                (address_buffer, sockaddr_in_layout)
+                address_buffer
             }
             SocketAddr::V6(address) => {
                 // IPv6 address bytes; already stored in network byte order.
@@ -363,7 +363,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let s6_addr_field = this.project_field_named(&sin6_addr_field, "s6_addr")?;
                 this.write_bytes_ptr(s6_addr_field.ptr(), address_bytes)?;
 
-                (address_buffer, sockaddr_in6_layout)
+                address_buffer
             }
         };
 
@@ -372,7 +372,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             address_buffer.ptr(),
             address_ptr,
             // Truncate the address to fit the provided buffer.
-            address_layout.size.min(Size::from_bytes(address_buffer_len)),
+            address_buffer.layout.size.min(Size::from_bytes(address_buffer_len)),
             // The buffers are guaranteed to not overlap since the `address_buffer`
             // was just newly allocated on the stack.
             true,
@@ -381,7 +381,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // copy it into the buffer pointed to by `address_ptr`.
         this.deallocate_ptr(address_buffer.ptr(), None, MemoryKind::Stack)?;
         // Size of the non-truncated address.
-        let address_len = address_layout.size.bytes();
+        let address_len = address_buffer.layout.size.bytes();
 
         this.write_scalar(
             Scalar::from_uint(address_len, socklen_layout.size),

@@ -50,6 +50,8 @@ fn main() {
     test_shutdown();
     test_shutdown_readable_after_write_close();
     test_shutdown_writable_after_read_close();
+
+    test_getsockopt_truncate();
 }
 
 /// Test creating a socket and then closing it afterwards.
@@ -639,4 +641,54 @@ fn test_shutdown_writable_after_read_close() {
     }
 
     server_thread.join().unwrap();
+}
+
+/// Test that the value gets silently truncated when a too small
+/// length is provided and that the length gets reduced when the value
+/// is smaller than the provided length.
+fn test_getsockopt_truncate() {
+    let (sockfd, _) = net::make_listener_ipv4().unwrap();
+
+    // The actual TTL with a correctly sized buffer.
+    let ttl = net::getsockopt::<libc::c_uint>(sockfd, libc::IPPROTO_IP, libc::IP_TTL).unwrap();
+
+    let mut option_value = std::mem::MaybeUninit::<u32>::zeroed();
+    // The actual length is 4 bytes.
+    let mut short_option_len = 2 as libc::socklen_t;
+
+    errno_result(unsafe {
+        libc::getsockopt(
+            sockfd,
+            libc::IPPROTO_IP,
+            libc::IP_TTL,
+            option_value.as_mut_ptr().cast(),
+            &mut short_option_len,
+        )
+    })
+    .unwrap();
+    // Ensure that the size wasn't changed.
+    assert_eq!(short_option_len, 2);
+    let short_ttl = unsafe { option_value.assume_init() };
+
+    // Assert that the value was silently truncated.
+    assert_eq!(short_ttl.to_ne_bytes()[0..2], ttl.to_ne_bytes()[0..2]);
+
+    let mut option_value = std::mem::MaybeUninit::<u32>::zeroed();
+    // The actual length is 4 bytes.
+    let mut long_option_len = 6 as libc::socklen_t;
+
+    errno_result(unsafe {
+        libc::getsockopt(
+            sockfd,
+            libc::IPPROTO_IP,
+            libc::IP_TTL,
+            option_value.as_mut_ptr().cast(),
+            &mut long_option_len,
+        )
+    })
+    .unwrap();
+    // Ensure that the size was shortened to the actual length.
+    assert_eq!(long_option_len, 4);
+    let long_ttl = unsafe { option_value.assume_init() };
+    assert_eq!(long_ttl, ttl);
 }
