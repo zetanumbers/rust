@@ -1,7 +1,9 @@
 use std::sync::OnceLock;
 
+use rustc_arena::TypedArena;
 use rustc_data_structures::hash_table::{self, HashTable};
 use rustc_data_structures::sharded::{Sharded, make_hash};
+use rustc_data_structures::sync::{DynSend, DynSync};
 pub use rustc_data_structures::vec_cache::VecCache;
 use rustc_hir::def_id::LOCAL_CRATE;
 use rustc_index::Idx;
@@ -51,15 +53,23 @@ pub struct DefaultCache<K, V> {
     inner: Sharded<DefaultCacheShard<K, V>>,
 }
 
+#[repr(align(4))]
+struct CacheEntryPtr<V>(*const (V, DepNodeIndex));
+
+unsafe impl<V: Sync> Send for CacheEntryPtr<V> {}
+unsafe impl<V: Sync> Sync for CacheEntryPtr<V> {}
+unsafe impl<V: DynSync> DynSend for CacheEntryPtr<V> {}
+unsafe impl<V: DynSync> DynSync for CacheEntryPtr<V> {}
+
 struct DefaultCacheShard<K, V> {
-    indices: HashTable<(K, u32)>,
+    table: HashTable<(K, CacheEntryPtr<V>)>,
     // arena for temporal cache locality
-    arena: Vec<(V, DepNodeIndex)>,
+    arena: TypedArena<(V, DepNodeIndex)>,
 }
 
 impl<K, V> Default for DefaultCacheShard<K, V> {
     fn default() -> Self {
-        DefaultCacheShard { indices: HashTable::with_capacity(32), arena: Vec::with_capacity(32) }
+        DefaultCacheShard { table: HashTable::with_capacity(64), arena: TypedArena::default() }
     }
 }
 
@@ -79,11 +89,9 @@ where
 
     fn lookup(&self, key: &K) -> Option<(V, DepNodeIndex)> {
         let hash = make_hash(&key);
-        let shard = self.inner.lock_shard_by_hash(hash);
-        // SAFETY: we allocate on arena before adding index to the hashmap cache
-        Some(*unsafe {
-            shard.arena.get_unchecked(shard.indices.find(hash, |x| x.0 == *key)?.1 as usize)
-        })
+        let ptr = self.inner.lock_shard_by_hash(hash).table.find(hash, |x| x.0 == *key)?.1.0;
+        // SAFETY: retrieved pointer is valid
+        Some(unsafe { *ptr })
     }
 
     fn complete(&self, key: K, value: V, index: DepNodeIndex) {
@@ -93,35 +101,33 @@ where
         let hash = make_hash(&key);
         let mut shard = self.inner.lock_shard_by_hash(hash);
 
-        let i = shard.arena.len() as u32;
-        shard.arena.push((value, index));
+        let ptr = CacheEntryPtr(shard.arena.alloc((value, index)));
 
-        if cfg!(debug_assertions) {
-            match shard.indices.entry(hash, |(k, _)| *k == key, |(k, _)| make_hash(k)) {
+        cfg_select! {
+            debug_assertions => match shard.table.entry(hash, |(k, _)| *k == key, |(k, _)| make_hash(k)) {
                 hash_table::Entry::Occupied(_) => {
                     panic!("query cache entry is already occupied");
                 }
                 hash_table::Entry::Vacant(e) => {
-                    e.insert((key, i));
+                    e.insert((key, ptr));
                 }
             }
-        } else {
-            shard.indices.insert_unique(hash, (key, i), |(k, _)| make_hash(k));
+            _ => shard.table.insert_unique(hash, (key, i), |(k, _)| make_hash(k)),
         }
     }
 
     fn for_each(&self, f: &mut dyn FnMut(&Self::Key, &Self::Value, DepNodeIndex)) {
         for shard in self.inner.lock_shards() {
-            for (k, i) in shard.indices.iter() {
-                // SAFETY: values are stored in arena and then indices are saved while shard is locked
-                let v = unsafe { &shard.arena.get(*i as usize).unwrap_unchecked() };
+            for (k, p) in shard.table.iter() {
+                // SAFETY: values are stored in read-only arena
+                let v = unsafe { &*p.0 };
                 f(k, &v.0, v.1);
             }
         }
     }
 
     fn len(&self) -> usize {
-        self.inner.lock_shards().map(|shard| shard.indices.len()).sum()
+        self.inner.lock_shards().map(|shard| shard.table.len()).sum()
     }
 }
 
