@@ -55,7 +55,7 @@ use tracing::{debug, instrument};
 
 use crate::inherent::*;
 use crate::visit::{TypeVisitable, TypeVisitableExt as _};
-use crate::{self as ty, BoundVarIndexKind, Interner, TypeFlags};
+use crate::{self as ty, BoundVarIndexKind, Interner};
 
 /// This trait is implemented for every type that can be folded,
 /// providing the skeleton of the traversal.
@@ -433,6 +433,10 @@ impl<I: Interner> TypeFolder<I> for Shifter<I> {
     fn fold_predicate(&mut self, p: I::Predicate) -> I::Predicate {
         if p.has_vars_bound_at_or_above(self.current_index) { p.super_fold_with(self) } else { p }
     }
+
+    fn fold_clauses(&mut self, c: I::Clauses) -> I::Clauses {
+        if c.has_vars_bound_at_or_above(self.current_index) { c.super_fold_with(self) } else { c }
+    }
 }
 
 pub fn shift_region<I: Interner>(cx: I, region: I::Region, amount: u32) -> I::Region {
@@ -535,32 +539,18 @@ where
     }
 
     fn fold_ty(&mut self, t: I::Ty) -> I::Ty {
-        if t.has_type_flags(
-            TypeFlags::HAS_FREE_REGIONS | TypeFlags::HAS_RE_BOUND | TypeFlags::HAS_RE_ERASED,
-        ) {
-            t.super_fold_with(self)
-        } else {
-            t
-        }
+        if t.has_regions() { t.super_fold_with(self) } else { t }
     }
 
     fn fold_const(&mut self, ct: I::Const) -> I::Const {
-        if ct.has_type_flags(
-            TypeFlags::HAS_FREE_REGIONS | TypeFlags::HAS_RE_BOUND | TypeFlags::HAS_RE_ERASED,
-        ) {
-            ct.super_fold_with(self)
-        } else {
-            ct
-        }
+        if ct.has_regions() { ct.super_fold_with(self) } else { ct }
     }
 
     fn fold_predicate(&mut self, p: I::Predicate) -> I::Predicate {
-        if p.has_type_flags(
-            TypeFlags::HAS_FREE_REGIONS | TypeFlags::HAS_RE_BOUND | TypeFlags::HAS_RE_ERASED,
-        ) {
-            p.super_fold_with(self)
-        } else {
-            p
-        }
+        if p.has_regions() { p.super_fold_with(self) } else { p }
+    }
+
+    fn fold_clauses(&mut self, c: I::Clauses) -> I::Clauses {
+        if c.has_regions() { c.super_fold_with(self) } else { c }
     }
 }

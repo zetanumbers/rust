@@ -285,6 +285,10 @@ pub trait TypeVisitableExt<I: Interner>: TypeVisitable<I> {
         self.has_type_flags(TypeFlags::HAS_PARAM - TypeFlags::HAS_RE_PARAM)
     }
 
+    fn has_regions(&self) -> bool {
+        self.has_type_flags(TypeFlags::HAS_REGIONS)
+    }
+
     fn has_infer_regions(&self) -> bool {
         self.has_type_flags(TypeFlags::HAS_RE_INFER)
     }
@@ -363,13 +367,12 @@ pub trait TypeVisitableExt<I: Interner>: TypeVisitable<I> {
 
 impl<I: Interner, T: TypeVisitable<I>> TypeVisitableExt<I> for T {
     fn has_type_flags(&self, flags: TypeFlags) -> bool {
-        let res =
-            self.visit_with(&mut HasTypeFlagsVisitor { flags }) == ControlFlow::Break(FoundFlags);
-        res
+        self.visit_with(&mut HasTypeFlagsVisitor { flags }) == ControlFlow::Break(FoundFlags)
     }
 
     fn has_vars_bound_at_or_above(&self, binder: ty::DebruijnIndex) -> bool {
-        self.visit_with(&mut HasEscapingVarsVisitor { outer_index: binder }).is_break()
+        self.visit_with(&mut HasEscapingVarsVisitor { outer_index: binder })
+            == ControlFlow::Break(FoundEscapingVars)
     }
 
     fn error_reported(&self) -> Result<(), I::ErrorGuaranteed> {
@@ -438,8 +441,7 @@ impl<I: Interner> TypeVisitor<I> for HasTypeFlagsVisitor {
     #[inline]
     fn visit_ty(&mut self, t: I::Ty) -> Self::Result {
         // Note: no `super_visit_with` call.
-        let flags = t.flags();
-        if flags.intersects(self.flags) {
+        if t.flags().intersects(self.flags) {
             ControlFlow::Break(FoundFlags)
         } else {
             ControlFlow::Continue(())
@@ -449,8 +451,7 @@ impl<I: Interner> TypeVisitor<I> for HasTypeFlagsVisitor {
     #[inline]
     fn visit_region(&mut self, r: I::Region) -> Self::Result {
         // Note: no `super_visit_with` call, as usual for `Region`.
-        let flags = r.flags();
-        if flags.intersects(self.flags) {
+        if r.flags().intersects(self.flags) {
             ControlFlow::Break(FoundFlags)
         } else {
             ControlFlow::Continue(())

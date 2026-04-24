@@ -118,6 +118,11 @@ bitflags::bitflags! {
         /// Does this have any `ReErased` regions?
         const HAS_RE_ERASED               = 1 << 21;
 
+        /// Does this have any regions of any kind?
+        const HAS_REGIONS                 = TypeFlags::HAS_FREE_REGIONS.bits()
+                                          | TypeFlags::HAS_RE_BOUND.bits()
+                                          | TypeFlags::HAS_RE_ERASED.bits();
+
         /// Does this value have parameters/placeholders/inference variables which could be
         /// replaced later, in a way that would change the results of `impl` specialization?
         const STILL_FURTHER_SPECIALIZABLE = TypeFlags::HAS_TY_PARAM.bits()
@@ -192,7 +197,7 @@ impl<I: Interner> FlagComputation<I> {
     }
 
     fn add_flags(&mut self, flags: TypeFlags) {
-        self.flags = self.flags | flags;
+        self.flags |= flags;
     }
 
     /// indicates that `self` refers to something at binding level `binder`
