@@ -121,10 +121,6 @@ pub trait TypeSuperFoldable<I: Interner>: TypeFoldable<I> {
 /// default that does an "identity" fold. Implementations of these methods
 /// often fall back to a `super_fold_with` method if the primary argument
 /// doesn't satisfy a particular condition.
-///
-/// A blanket implementation of [`FallibleTypeFolder`] will defer to
-/// the infallible methods of this trait to ensure that the two APIs
-/// are coherent.
 pub trait TypeFolder<I: Interner>: Sized {
     fn cx(&self) -> I;
 
@@ -477,10 +473,10 @@ where
 /// Folds over the substructure of a type, visiting its component
 /// types and all regions that occur *free* within it.
 ///
-/// That is, function pointer types and trait object can introduce
-/// new bound regions which are not visited by this visitors as
+/// That is, function pointer types and trait objects can introduce
+/// new bound regions which are not visited by this visitor as
 /// they are not free; only regions that occur free will be
-/// visited by `fld_r`.
+/// visited by `fold_region_fn`.
 pub struct RegionFolder<I, F> {
     cx: I,
 
@@ -489,7 +485,7 @@ pub struct RegionFolder<I, F> {
     /// binder, it is incremented (via `shift_in`).
     current_index: ty::DebruijnIndex,
 
-    /// Callback invokes for each free region. The `DebruijnIndex`
+    /// Callback invoked for each free region. The `DebruijnIndex`
     /// points to the binder *just outside* the ones we have passed
     /// through.
     fold_region_fn: F,

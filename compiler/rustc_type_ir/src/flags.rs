@@ -139,7 +139,7 @@ bitflags::bitflags! {
         /// Does this type have any coroutines in it?
         const HAS_TY_CORO                 = 1 << 25;
 
-        /// Does this have have a `Bound(BoundVarIndexKind::Canonical, _)`?
+        /// Does this have a `Bound(BoundVarIndexKind::Canonical, _)`?
         const HAS_CANONICAL_BOUND         = 1 << 26;
     }
 }
