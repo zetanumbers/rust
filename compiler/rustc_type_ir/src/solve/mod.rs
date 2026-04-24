@@ -250,7 +250,7 @@ impl<I: Interner> Eq for Response<I> {}
 #[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
 pub struct ExternalConstraintsData<I: Interner> {
-    pub region_constraints: Vec<ty::RegionConstraint<I>>,
+    pub region_constraints: Vec<(ty::RegionConstraint<I>, VisibleForLeakCheck)>,
     pub opaque_types: Vec<(ty::OpaqueTypeKey<I>, I::Ty)>,
     pub normalization_nested_goals: NestedNormalizationGoals<I>,
 }
@@ -262,6 +262,47 @@ impl<I: Interner> ExternalConstraintsData<I> {
         self.region_constraints.is_empty()
             && self.opaque_types.is_empty()
             && self.normalization_nested_goals.is_empty()
+    }
+}
+
+/// Whether the given region constraint should be considered/ignored for
+/// leak check. In most part of the compiler, this should be `Yes`, except
+/// for applying constraints from the nested goals in next-solver.
+/// `Unreachable` is used in places in which leak check isn't done, e.g.
+/// borrowck.
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+pub enum VisibleForLeakCheck {
+    Yes,
+    No,
+    Unreachable,
+}
+
+impl VisibleForLeakCheck {
+    pub fn and(self, other: VisibleForLeakCheck) -> VisibleForLeakCheck {
+        match (self, other) {
+            // Make sure that we never overwrite that constraints shouldn't
+            // be encountered by the leak checked
+            (VisibleForLeakCheck::Unreachable, _) | (_, VisibleForLeakCheck::Unreachable) => {
+                VisibleForLeakCheck::Unreachable
+            }
+            (VisibleForLeakCheck::No, _) | (_, VisibleForLeakCheck::No) => VisibleForLeakCheck::No,
+            (VisibleForLeakCheck::Yes, VisibleForLeakCheck::Yes) => VisibleForLeakCheck::Yes,
+        }
+    }
+
+    pub fn or(self, other: VisibleForLeakCheck) -> VisibleForLeakCheck {
+        match (self, other) {
+            // Make sure that we never overwrite that constraints shouldn't
+            // be encountered by the leak checked
+            (VisibleForLeakCheck::Unreachable, _) | (_, VisibleForLeakCheck::Unreachable) => {
+                VisibleForLeakCheck::Unreachable
+            }
+            (VisibleForLeakCheck::Yes, _) | (_, VisibleForLeakCheck::Yes) => {
+                VisibleForLeakCheck::Yes
+            }
+            (VisibleForLeakCheck::No, VisibleForLeakCheck::No) => VisibleForLeakCheck::No,
+        }
     }
 }
 

@@ -30,7 +30,8 @@ use crate::solve::ty::may_use_unstable_feature;
 use crate::solve::{
     CanonicalInput, CanonicalResponse, Certainty, ExternalConstraintsData, FIXPOINT_STEP_LIMIT,
     Goal, GoalEvaluation, GoalSource, GoalStalledOn, HasChanged, MaybeCause,
-    NestedNormalizationGoals, NoSolution, QueryInput, QueryResult, Response, inspect,
+    NestedNormalizationGoals, NoSolution, QueryInput, QueryResult, Response, VisibleForLeakCheck,
+    inspect,
 };
 
 mod probe;
@@ -484,11 +485,29 @@ where
         let has_changed =
             if !has_only_region_constraints(response) { HasChanged::Yes } else { HasChanged::No };
 
+        // FIXME: We should revisit and consider removing this after
+        // *assumptions on binders* is available, like once we had done in the
+        // stabilization of `-Znext-solver=coherence`(#121848).
+        // We ignore constraints from the nested goals in leak check. This is to match
+        // with the old solver's behavior, which has separated evaluation and fulfillment,
+        // and the former doesn't consider outlives obligations from the later.
+        let vis = match goal.predicate.kind().skip_binder() {
+            ty::PredicateKind::Clause(_)
+            | ty::PredicateKind::DynCompatible(_)
+            | ty::PredicateKind::Subtype(_)
+            | ty::PredicateKind::Coerce(_)
+            | ty::PredicateKind::ConstEquate(_, _)
+            | ty::PredicateKind::Ambiguous
+            | ty::PredicateKind::NormalizesTo(_) => VisibleForLeakCheck::No,
+            ty::PredicateKind::AliasRelate(_, _, _) => VisibleForLeakCheck::Yes,
+        };
+
         let (normalization_nested_goals, certainty) = instantiate_and_apply_query_response(
             self.delegate,
             goal.param_env,
             &orig_values,
             response,
+            vis,
             self.origin_span,
         );
 
@@ -1100,9 +1119,14 @@ where
         self.delegate.register_ty_outlives(ty, lt, self.origin_span);
     }
 
-    pub(super) fn register_region_outlives(&self, a: I::Region, b: I::Region) {
+    pub(super) fn register_region_outlives(
+        &self,
+        a: I::Region,
+        b: I::Region,
+        vis: VisibleForLeakCheck,
+    ) {
         // `'a: 'b` ==> `'b <= 'a`
-        self.delegate.sub_regions(b, a, self.origin_span);
+        self.delegate.sub_regions(b, a, vis, self.origin_span);
     }
 
     /// Computes the list of goals required for `arg` to be well-formed
@@ -1303,7 +1327,7 @@ where
         let mut unique = HashSet::default();
         external_constraints
             .region_constraints
-            .retain(|outlives| !outlives.is_trivial() && unique.insert(*outlives));
+            .retain(|(outlives, _)| !outlives.is_trivial() && unique.insert(*outlives));
 
         let canonical = canonicalize_response(
             self.delegate,
@@ -1533,6 +1557,7 @@ pub(super) fn evaluate_root_goal_for_proof_tree<D: SolverDelegate<Interner = I>,
         goal.param_env,
         &proof_tree.orig_values,
         response,
+        VisibleForLeakCheck::Yes,
         origin_span,
     );
 

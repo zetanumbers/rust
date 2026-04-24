@@ -728,6 +728,7 @@ fn region_known_to_outlive<'tcx>(
             SubregionOrigin::RelateRegionParamBound(DUMMY_SP, None),
             region_b,
             region_a,
+            ty::VisibleForLeakCheck::Unreachable,
         );
     })
 }
