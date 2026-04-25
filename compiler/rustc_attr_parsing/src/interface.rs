@@ -1,4 +1,5 @@
 use std::convert::identity;
+use std::marker::PhantomData;
 
 use rustc_ast as ast;
 use rustc_ast::token::DocFragmentKind;
@@ -10,7 +11,7 @@ use rustc_hir::attrs::AttributeKind;
 use rustc_hir::{AttrArgs, AttrItem, AttrPath, Attribute, HashIgnoredAttrId, Target};
 use rustc_session::Session;
 use rustc_session::lint::LintId;
-use rustc_span::{DUMMY_SP, Span, Symbol, sym, ErrorGuaranteed};
+use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span, Symbol, sym};
 
 use crate::attributes::AttributeSafety;
 use crate::context::{AcceptContext, FinalizeContext, FinalizeFn, SharedContext, Stage};
@@ -34,7 +35,8 @@ pub struct AttributeParser<'sess, S: Stage = Late> {
     pub(crate) tools: Vec<Symbol>,
     pub(crate) features: Option<&'sess Features>,
     pub(crate) sess: &'sess Session,
-    pub(crate) stage: S,
+    pub(crate) stage: PhantomData<S>,
+    pub(crate) should_emit: ShouldEmit,
 
     /// *Only* parse attributes with this symbol.
     ///
@@ -116,10 +118,10 @@ impl<'sess> AttributeParser<'sess, Early> {
         target_span: Span,
         target_node_id: NodeId,
         features: Option<&'sess Features>,
-        emit_errors: ShouldEmit,
+        should_emit: ShouldEmit,
     ) -> Vec<Attribute> {
         let mut p =
-            Self { features, tools: Vec::new(), parse_only, sess, stage: Early { emit_errors } };
+            Self { features, tools: Vec::new(), parse_only, sess, stage: PhantomData, should_emit };
         p.parse_attribute_list(
             attrs,
             target_span,
@@ -196,7 +198,7 @@ impl<'sess> AttributeParser<'sess, Early> {
         target_node_id: NodeId,
         target: Target,
         features: Option<&'sess Features>,
-        emit_errors: ShouldEmit,
+        should_emit: ShouldEmit,
         args: &I,
         parse_fn: fn(cx: &mut AcceptContext<'_, '_, Early>, item: &I) -> T,
         template: &AttributeTemplate,
@@ -206,7 +208,8 @@ impl<'sess> AttributeParser<'sess, Early> {
             tools: Vec::new(),
             parse_only: None,
             sess,
-            stage: Early { emit_errors },
+            stage: PhantomData,
+            should_emit,
         };
         let mut emit_lint = |lint_id: LintId, span: MultiSpan, kind: EmitAttribute| {
             sess.psess.dyn_buffer_lint_sess(lint_id.lint, span, target_node_id, kind.0)
@@ -243,9 +246,16 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
         sess: &'sess Session,
         features: &'sess Features,
         tools: Vec<Symbol>,
-        stage: S,
+        should_emit: ShouldEmit,
     ) -> Self {
-        Self { features: Some(features), tools, parse_only: None, sess, stage }
+        Self {
+            features: Some(features),
+            tools,
+            parse_only: None,
+            sess,
+            should_emit,
+            stage: PhantomData,
+        }
     }
 
     pub(crate) fn sess(&self) -> &'sess Session {
@@ -265,7 +275,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
     }
 
     pub(crate) fn emit_err(&self, diag: impl for<'x> Diagnostic<'x>) -> ErrorGuaranteed {
-        self.stage.should_emit().emit_err(self.sess.dcx().create_err(diag))
+        self.should_emit.emit_err(self.sess.dcx().create_err(diag))
     }
 
     /// Parse a list of attributes.
@@ -353,7 +363,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
                             args,
                             &parts,
                             &self.sess.psess,
-                            self.stage.should_emit(),
+                            self.should_emit,
                             AllowExprMetavar::No,
                         ) else {
                             continue;
@@ -408,7 +418,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
                         (accept.accept_fn)(&mut cx, &args);
                         finalizers.push(accept.finalizer);
 
-                        if !matches!(cx.stage.should_emit(), ShouldEmit::Nothing) {
+                        if !matches!(cx.should_emit, ShouldEmit::Nothing) {
                             Self::check_target(&accept.allowed_targets, target, &mut cx);
                         }
                     } else {
@@ -429,7 +439,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
                             &mut emit_lint,
                         );
 
-                        if !matches!(self.stage.should_emit(), ShouldEmit::Nothing)
+                        if !matches!(self.should_emit, ShouldEmit::Nothing)
                             && target == Target::Crate
                         {
                             self.check_invalid_crate_level_attr_item(&attr, n.item.span());
@@ -462,9 +472,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
             }
         }
 
-        if !matches!(self.stage.should_emit(), ShouldEmit::Nothing)
-            && target == Target::WherePredicate
-        {
+        if !matches!(self.should_emit, ShouldEmit::Nothing) && target == Target::WherePredicate {
             self.check_invalid_where_predicate_attrs(attributes.iter().chain(&dropped_attributes));
         }
 
