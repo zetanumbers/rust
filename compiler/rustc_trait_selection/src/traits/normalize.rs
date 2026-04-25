@@ -34,7 +34,8 @@ impl<'tcx> At<'_, 'tcx> {
     ) -> InferOk<'tcx, T> {
         let value = value.skip_normalization();
         if self.infcx.next_trait_solver() {
-            InferOk { value, obligations: PredicateObligations::new() }
+            let Normalized { value, obligations } = crate::solve::normalize(*self, value);
+            InferOk { value, obligations }
         } else {
             let mut selcx = SelectionContext::new(self.infcx);
             let Normalized { value, obligations } =
