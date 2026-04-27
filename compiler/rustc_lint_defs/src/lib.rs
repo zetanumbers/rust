@@ -656,15 +656,6 @@ pub enum DeprecatedSinceKind {
 pub enum AttributeLintKind {
     UnexpectedCfgName((Symbol, Span), Option<(Symbol, Span)>),
     UnexpectedCfgValue((Symbol, Span), Option<(Symbol, Span)>),
-    MissingOptionsForDiagnosticAttribute { attribute: &'static str, options: &'static str },
-    NonMetaItemDiagnosticAttribute,
-}
-
-#[derive(Debug, Clone, HashStable_Generic)]
-pub enum FormatWarning {
-    PositionalArgument { span: Span, help: String },
-    InvalidSpecifier { name: String, span: Span },
-    DisallowedPlaceholder { span: Span },
 }
 
 pub type RegisteredTools = FxIndexSet<Ident>;
