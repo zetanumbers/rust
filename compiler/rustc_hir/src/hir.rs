@@ -1304,6 +1304,15 @@ impl Attribute {
             Attribute::Unparsed(_) => false,
         }
     }
+
+    pub fn is_prefix_attr_for_suggestions(&self) -> bool {
+        match self {
+            Attribute::Unparsed(attr) => attr.span.desugaring_kind().is_none(),
+            // Other parsed attributes that can appear on expressions originate from source and
+            // should make suggestions treat the expression like a prefixed form.
+            Attribute::Parsed(_) => true,
+        }
+    }
 }
 
 impl AttributeExt for Attribute {
@@ -1411,14 +1420,6 @@ impl AttributeExt for Attribute {
     fn doc_str(&self) -> Option<Symbol> {
         match &self {
             Attribute::Parsed(AttributeKind::DocComment { comment, .. }) => Some(*comment),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    fn deprecation_note(&self) -> Option<Ident> {
-        match &self {
-            Attribute::Parsed(AttributeKind::Deprecated { deprecation, .. }) => deprecation.note,
             _ => None,
         }
     }
