@@ -294,7 +294,7 @@ pub fn eval_config_entry(sess: &Session, cfg_entry: &CfgEntry) -> EvalConfigResu
                 };
             };
             // See https://github.com/rust-lang/rust/issues/64796#issuecomment-640851454 for details
-            let min_version_ok = if sess.psess.assume_incomplete_release {
+            let min_version_ok = if sess.opts.unstable_opts.assume_incomplete_release {
                 RustcVersion::current_overridable() > *min_version
             } else {
                 RustcVersion::current_overridable() >= *min_version

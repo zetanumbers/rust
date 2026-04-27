@@ -1045,8 +1045,7 @@ pub fn build_session(
         None
     };
 
-    let mut psess = ParseSess::with_dcx(dcx, source_map);
-    psess.assume_incomplete_release = sopts.unstable_opts.assume_incomplete_release;
+    let psess = ParseSess::with_dcx(dcx, source_map);
 
     let host_triple = config::host_tuple();
     let target_triple = sopts.target_triple.tuple();

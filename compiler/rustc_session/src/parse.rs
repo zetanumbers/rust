@@ -264,8 +264,6 @@ pub struct ParseSess {
     pub ambiguous_block_expr_parse: Lock<FxIndexMap<Span, Span>>,
     pub gated_spans: GatedSpans,
     pub symbol_gallery: SymbolGallery,
-    /// Whether cfg(version) should treat the current release as incomplete
-    pub assume_incomplete_release: bool,
     /// Spans passed to `proc_macro::quote_span`. Each span has a numerical
     /// identifier represented by its position in the vector.
     proc_macro_quoted_spans: AppendOnlyVec<Span>,
@@ -299,7 +297,6 @@ impl ParseSess {
             ambiguous_block_expr_parse: Lock::new(Default::default()),
             gated_spans: GatedSpans::default(),
             symbol_gallery: SymbolGallery::default(),
-            assume_incomplete_release: false,
             proc_macro_quoted_spans: Default::default(),
             attr_id_generator: AttrIdGenerator::new(),
         }
