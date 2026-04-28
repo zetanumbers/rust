@@ -1,4 +1,5 @@
 //@ edition:2021
+//@ ignore-parallel-frontend diagnostics
 
 //@ check-pass
 #![allow(unreachable_code)]

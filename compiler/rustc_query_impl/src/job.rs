@@ -139,7 +139,9 @@ fn abstracted_waiters_of(job_map: &QueryJobMap<'_>, query: QueryJobId) -> Vec<Ab
 
     // Add the explicit waiters which use condvars and are resumable
     if let Some(latch) = job_map.latch_of(query) {
-        for (i, waiter) in latch.inner.lock().as_ref().unwrap().waiters.iter().enumerate() {
+        for (i, waiter) in
+            latch.inner.try_lock().unwrap().as_ref().unwrap().waiters.iter().enumerate()
+        {
             result.push(AbstractedWaiter {
                 span: waiter.span,
                 parent: waiter.parent,
@@ -321,14 +323,14 @@ fn find_and_process_cycle<'tcx>(
         let (waitee_query, waiter_idx) = resumable.unwrap();
 
         let latch = job_map.latch_of(waitee_query).unwrap();
-        let mut latch_state_lock = latch.inner.lock();
+        let mut latch_state_lock = latch.inner.try_lock().unwrap();
         let latch_state = latch_state_lock.as_mut().expect("non-empty waiters vec");
 
         // Remove the waiter from the list of waiters we want to resume
         let waiter = latch_state.waiters.remove(waiter_idx);
 
         // Set the cycle error so it will be picked up when resumed
-        let old = latch_state.cycle.replace(error);
+        let old = latch_state.cycle.replace((<*const _>::addr(&*waiter.condvar), error));
         assert!(old.is_none(), "expected query cycle to break on a single waiter");
 
         // Put the waiter on the list of things to resume
@@ -345,7 +347,11 @@ fn find_and_process_cycle<'tcx>(
 /// There may be multiple cycles involved in a deadlock, but this only breaks one at a time so
 /// there will be multiple rounds through the deadlock handler if multiple cycles are present.
 #[allow(rustc::potential_query_instability)]
-pub fn break_query_cycle<'tcx>(job_map: QueryJobMap<'tcx>, registry: &rustc_thread_pool::Registry) {
+pub fn break_query_cycle<'tcx>(
+    job_map: QueryJobMap<'tcx>,
+    registry: &rustc_thread_pool::Registry,
+    parent: Option<QueryJobId>,
+) {
     // Look for a cycle starting at each query job
     let waiter = job_map
         .map
@@ -356,7 +362,9 @@ pub fn break_query_cycle<'tcx>(job_map: QueryJobMap<'tcx>, registry: &rustc_thre
     // Mark the thread we're about to wake up as unblocked.
     rustc_thread_pool::mark_unblocked(registry);
 
-    assert!(waiter.condvar.notify_one(), "unable to wake the waiter");
+    if !waiter.condvar.notify_one() {
+        assert_eq!(parent, waiter.parent, "unable to wake the waiter");
+    }
 }
 
 pub fn print_query_stack<'tcx>(
