@@ -1,4 +1,3 @@
-use rustc_errors::Diagnostic;
 use rustc_feature::template;
 use rustc_hir::attrs::AttributeKind;
 use rustc_session::lint::builtin::MISPLACED_DIAGNOSTIC_ATTRIBUTES;
@@ -28,11 +27,7 @@ impl OnMoveParser {
         self.span = Some(span);
 
         if !matches!(cx.target, Target::Enum | Target::Struct | Target::Union) {
-            cx.emit_lint(
-                MISPLACED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| DiagnosticOnMoveOnlyForAdt.into_diag(dcx, level),
-                span,
-            );
+            cx.emit_lint(MISPLACED_DIAGNOSTIC_ATTRIBUTES, DiagnosticOnMoveOnlyForAdt, span);
             return;
         }
 

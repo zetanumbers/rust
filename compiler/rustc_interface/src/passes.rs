@@ -1025,14 +1025,14 @@ pub fn create_and_enter_global_ctxt<T, F: for<'tcx> FnOnce(TyCtxt<'tcx>) -> T>(
     )
 }
 
-struct DiagCallback<'a, 'tcx> {
-    callback: &'a Box<
-        dyn for<'b> Fn(DiagCtxtHandle<'b>, Level, &dyn Any) -> Diag<'b, ()> + DynSend + DynSync,
+struct DiagCallback<'tcx> {
+    callback: Box<
+        dyn for<'b> FnOnce(DiagCtxtHandle<'b>, Level, &dyn Any) -> Diag<'b, ()> + DynSend + DynSync,
     >,
     tcx: TyCtxt<'tcx>,
 }
 
-impl<'a, 'b, 'tcx> Diagnostic<'a, ()> for DiagCallback<'b, 'tcx> {
+impl<'a, 'tcx> Diagnostic<'a, ()> for DiagCallback<'tcx> {
     fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
         (self.callback)(dcx, level, self.tcx.sess)
     }
@@ -1046,7 +1046,7 @@ pub fn emit_delayed_lints(tcx: TyCtxt<'_>) {
                     lint.lint_id.lint,
                     lint.id,
                     lint.span.clone(),
-                    DiagCallback { callback: &lint.callback, tcx },
+                    DiagCallback { callback: lint.callback, tcx },
                 );
             }
         }

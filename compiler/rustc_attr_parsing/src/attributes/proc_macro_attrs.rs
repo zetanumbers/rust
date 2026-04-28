@@ -1,4 +1,3 @@
-use rustc_errors::Diagnostic;
 use rustc_session::lint::builtin::AMBIGUOUS_DERIVE_HELPERS;
 
 use super::prelude::*;
@@ -124,7 +123,7 @@ fn parse_derive_like(
             if rustc_feature::is_builtin_attr_name(ident.name) {
                 cx.emit_lint(
                     AMBIGUOUS_DERIVE_HELPERS,
-                    |dcx, level| crate::errors::AmbiguousDeriveHelpers.into_diag(dcx, level),
+                    crate::errors::AmbiguousDeriveHelpers,
                     ident.span,
                 );
             }
