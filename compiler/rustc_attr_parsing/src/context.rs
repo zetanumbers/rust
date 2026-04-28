@@ -462,7 +462,7 @@ impl<'f, 'sess: 'f, S: Stage> SharedContext<'f, 'sess, S> {
     /// Emit a lint. This method is somewhat special, since lints emitted during attribute parsing
     /// must be delayed until after HIR is built. This method will take care of the details of
     /// that.
-    pub(crate) fn emit_dyn_lint<
+    pub(crate) fn emit_lint<
         F: for<'a> Fn(DiagCtxtHandle<'a>, Level) -> Diag<'a, ()> + DynSend + DynSync + 'static,
     >(
         &mut self,
@@ -477,7 +477,7 @@ impl<'f, 'sess: 'f, S: Stage> SharedContext<'f, 'sess, S> {
         );
     }
 
-    pub(crate) fn emit_dyn_lint_with_sess<
+    pub(crate) fn emit_lint_with_sess<
         F: for<'a> Fn(DiagCtxtHandle<'a>, Level, &Session) -> Diag<'a, ()>
             + DynSend
             + DynSync
@@ -507,7 +507,7 @@ impl<'f, 'sess: 'f, S: Stage> SharedContext<'f, 'sess, S> {
     }
 
     pub(crate) fn warn_unused_duplicate(&mut self, used_span: Span, unused_span: Span) {
-        self.emit_dyn_lint(
+        self.emit_lint(
             rustc_session::lint::builtin::UNUSED_ATTRIBUTES,
             move |dcx, level| {
                 rustc_errors::lints::UnusedDuplicate {
@@ -526,7 +526,7 @@ impl<'f, 'sess: 'f, S: Stage> SharedContext<'f, 'sess, S> {
         used_span: Span,
         unused_span: Span,
     ) {
-        self.emit_dyn_lint(
+        self.emit_lint(
             rustc_session::lint::builtin::UNUSED_ATTRIBUTES,
             move |dcx, level| {
                 rustc_errors::lints::UnusedDuplicate {
@@ -951,7 +951,7 @@ where
     pub(crate) fn warn_empty_attribute(&mut self, span: Span) {
         let attr_path = self.attr_path.to_string();
         let valid_without_list = self.template.word;
-        self.emit_dyn_lint(
+        self.emit_lint(
             rustc_session::lint::builtin::UNUSED_ATTRIBUTES,
             move |dcx, level| {
                 crate::errors::EmptyAttributeList {
@@ -975,7 +975,7 @@ where
     ) {
         let suggestions = self.suggestions();
         let span = self.attr_span;
-        self.emit_dyn_lint(
+        self.emit_lint(
             lint,
             move |dcx, level| {
                 crate::errors::IllFormedAttributeInput::new(&suggestions, None, help.as_deref())

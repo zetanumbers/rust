@@ -28,7 +28,7 @@ impl<S: Stage> AttributeParser<S> for OnConstParser {
             // so non-constness is still checked in check_attr.rs
             if !matches!(cx.target, Target::Impl { of_trait: true }) {
                 let target_span = cx.target_span;
-                cx.emit_dyn_lint(
+                cx.emit_lint(
                     MISPLACED_DIAGNOSTIC_ATTRIBUTES,
                     move |dcx, level| {
                         DiagnosticOnConstOnlyForTraitImpls { target_span }.into_diag(dcx, level)

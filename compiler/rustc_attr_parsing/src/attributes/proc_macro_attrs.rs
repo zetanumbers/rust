@@ -122,7 +122,7 @@ fn parse_derive_like<S: Stage>(
                 return None;
             }
             if rustc_feature::is_builtin_attr_name(ident.name) {
-                cx.emit_dyn_lint(
+                cx.emit_lint(
                     AMBIGUOUS_DERIVE_HELPERS,
                     |dcx, level| crate::errors::AmbiguousDeriveHelpers.into_diag(dcx, level),
                     ident.span,
