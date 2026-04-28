@@ -6,7 +6,6 @@ mod opaque_types;
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::{SolverAdtLangItem, SolverLangItem, SolverTraitLangItem};
-
 use rustc_type_ir::solve::FetchEligibleAssocItemResponse;
 use rustc_type_ir::{
     self as ty, FieldInfo, Interner, MayBeErased, NormalizesTo, PredicateKind, Unnormalized,

@@ -9,7 +9,8 @@ use rustc_type_ir::relate::Relate;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::search_graph::{CandidateHeadUsages, PathKind};
 use rustc_type_ir::solve::{
-    AccessedOpaques, MaybeInfo, FetchEligibleAssocItemResponse, OpaqueTypesJank, RerunCondition, SmallCopyList,
+    AccessedOpaques, FetchEligibleAssocItemResponse, MaybeInfo, OpaqueTypesJank, RerunCondition,
+    SmallCopyList,
 };
 use rustc_type_ir::{
     self as ty, CanonicalVarValues, ClauseKind, InferCtxtLike, Interner, MayBeErased,
@@ -514,6 +515,20 @@ where
                 skip_erased_attempt = true;
             }
 
+            if let PredicateKind::Clause(ClauseKind::Trait(tr)) =
+                goal.predicate.kind().skip_binder()
+                && tr.self_ty().has_coroutines()
+                && self.cx().trait_is_auto(tr.trait_ref.def_id)
+            {
+                // FIXME: this doesn't make a difference now, but with eager normalization it likely will
+                // skip_erased_attempt = true;
+            }
+
+            if skip_erased_attempt && self.typing_mode().is_erased_not_coherence() {
+                self.opaque_accesses.rerun_always("skip erased attempt");
+                return Err(NoSolution);
+            }
+
             if !skip_erased_attempt {
                 debug!("trying without opaques: {goal:?}");
 
@@ -548,7 +563,7 @@ where
             );
             assert!(
                 !accessed_opaques.might_rerun(),
-                "we run without TypingMode::ErasedNotCoherence, so opaques are available, and we don't retry if the outer typing mode is ErasedNotCoherence"
+                "we run without TypingMode::ErasedNotCoherence, so opaques are available, and we don't retry if the outer typing mode is ErasedNotCoherence: {accessed_opaques:?} after {goal:?}"
             );
 
             data

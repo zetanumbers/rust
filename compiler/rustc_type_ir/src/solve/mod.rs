@@ -6,9 +6,9 @@ use std::hash::Hash;
 use derive_where::derive_where;
 #[cfg(feature = "nightly")]
 use rustc_macros::{Decodable_NoContext, Encodable_NoContext, StableHash, StableHash_NoContext};
-use rustc_type_ir_macros::{
-    GenericTypeVisitable, Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic,
-};
+#[cfg(feature = "nightly")]
+use rustc_type_ir_macros::GenericTypeVisitable;
+use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
 use tracing::debug;
 
 use crate::lang_items::SolverTraitLangItem;

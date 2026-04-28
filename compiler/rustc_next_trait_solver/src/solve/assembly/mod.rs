@@ -9,7 +9,9 @@ use derive_where::derive_where;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::SolverTraitLangItem;
 use rustc_type_ir::search_graph::CandidateHeadUsages;
-use rustc_type_ir::solve::{AliasBoundKind, MaybeInfo, NoSolutionOrOpaquesAccessed, SizedTraitKind, StalledOnCoroutines};
+use rustc_type_ir::solve::{
+    AliasBoundKind, MaybeInfo, NoSolutionOrOpaquesAccessed, SizedTraitKind, StalledOnCoroutines,
+};
 use rustc_type_ir::{
     self as ty, AliasTy, Interner, MayBeErased, TypeFlags, TypeFoldable, TypeFolder,
     TypeSuperFoldable, TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
