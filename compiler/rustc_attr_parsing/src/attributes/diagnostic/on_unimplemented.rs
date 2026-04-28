@@ -23,7 +23,7 @@ impl OnUnimplementedParser {
         self.span = Some(span);
 
         if !matches!(cx.target, Target::Trait) {
-            cx.emit_dyn_lint(
+            cx.emit_lint(
                 MISPLACED_DIAGNOSTIC_ATTRIBUTES,
                 move |dcx, level| DiagnosticOnUnimplementedOnlyForTraits.into_diag(dcx, level),
                 span,

@@ -33,7 +33,7 @@ impl OnMoveParser {
         self.span = Some(span);
 
         if !matches!(cx.target, Target::Enum | Target::Struct | Target::Union) {
-            cx.emit_dyn_lint(
+            cx.emit_lint(
                 MISPLACED_DIAGNOSTIC_ATTRIBUTES,
                 move |dcx, level| DiagnosticOnMoveOnlyForAdt.into_diag(dcx, level),
                 span,

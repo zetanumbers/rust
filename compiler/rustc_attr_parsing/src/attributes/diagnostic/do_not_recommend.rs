@@ -24,7 +24,7 @@ impl<S: Stage> SingleAttributeParser<S> for DoNotRecommendParser {
     fn convert(cx: &mut AcceptContext<'_, '_, S>, args: &ArgParser) -> Option<AttributeKind> {
         let attr_span = cx.attr_span;
         if !matches!(args, ArgParser::NoArgs) {
-            cx.emit_dyn_lint(
+            cx.emit_lint(
                 MALFORMED_DIAGNOSTIC_ATTRIBUTES,
                 |dcx, level| crate::errors::DoNotRecommendDoesNotExpectArgs.into_diag(dcx, level),
                 attr_span,
@@ -33,7 +33,7 @@ impl<S: Stage> SingleAttributeParser<S> for DoNotRecommendParser {
 
         if !matches!(cx.target, Target::Impl { of_trait: true }) {
             let target_span = cx.target_span;
-            cx.emit_dyn_lint(
+            cx.emit_lint(
                 MISPLACED_DIAGNOSTIC_ATTRIBUTES,
                 move |dcx, level| {
                     IncorrectDoNotRecommendLocation { target_span }.into_diag(dcx, level)
