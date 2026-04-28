@@ -42,6 +42,12 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.create_next_universe()
     }
 
+    fn get_solve_region_constraint(
+        &self,
+    ) -> rustc_type_ir::region_constraint::RegionConstraint<TyCtxt<'tcx>> {
+        self.inner.borrow().solver_region_constraint_storage.get_constraint()
+    }
+
     fn universe_of_ty(&self, vid: ty::TyVid) -> Option<ty::UniverseIndex> {
         match self.try_resolve_ty_var(vid) {
             Err(universe) => Some(universe),
@@ -292,6 +298,18 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
             b,
             vis,
         );
+    }
+
+    fn register_solver_region_constraint(
+        &self,
+        c: rustc_type_ir::region_constraint::RegionConstraint<TyCtxt<'tcx>>,
+    ) {
+        let mut inner = self.inner.borrow_mut();
+        use rustc_data_structures::undo_log::UndoLogs;
+
+        use crate::infer::UndoLog;
+        inner.undo_log.push(UndoLog::PushSolverRegionConstraint);
+        inner.solver_region_constraint_storage.push(c);
     }
 
     fn register_ty_outlives(&self, ty: Ty<'tcx>, r: ty::Region<'tcx>, span: Span) {

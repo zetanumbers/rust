@@ -342,6 +342,10 @@ pub trait InferCtxtLike: Sized {
         false
     }
 
+    fn get_solve_region_constraint(
+        &self,
+    ) -> crate::region_constraint::RegionConstraint<Self::Interner>;
+
     fn universe_of_ty(&self, ty: ty::TyVid) -> Option<ty::UniverseIndex>;
     fn universe_of_lt(&self, lt: ty::RegionVid) -> Option<ty::UniverseIndex>;
     fn universe_of_ct(&self, ct: ty::ConstVid) -> Option<ty::UniverseIndex>;
@@ -441,6 +445,11 @@ pub trait InferCtxtLike: Sized {
         b: <Self::Interner as Interner>::Region,
         vis: VisibleForLeakCheck,
         span: <Self::Interner as Interner>::Span,
+    );
+
+    fn register_solver_region_constraint(
+        &self,
+        c: crate::region_constraint::RegionConstraint<Self::Interner>,
     );
 
     fn register_ty_outlives(

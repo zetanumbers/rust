@@ -1,10 +1,14 @@
 use std::mem;
 use std::ops::ControlFlow;
 
+use rustc_data_structures::transitive_relation::TransitiveRelationBuilder;
 #[cfg(feature = "nightly")]
 use rustc_macros::StableHash;
-use rustc_type_ir::data_structures::{HashMap, HashSet};
+use rustc_type_ir::data_structures::{HashMap, HashSet, IndexMap};
+use rustc_type_ir::ClauseKind::*;
 use rustc_type_ir::inherent::*;
+use rustc_type_ir::outlives::Component;
+use rustc_type_ir::region_constraint::RegionConstraint;
 use rustc_type_ir::relate::Relate;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::search_graph::{CandidateHeadUsages, PathKind};
@@ -14,9 +18,9 @@ use rustc_type_ir::solve::{
     RerunResultExt, SmallCopyList,
 };
 use rustc_type_ir::{
-    self as ty, CanonicalVarValues, ClauseKind, InferCtxtLike, Interner, MayBeErased,
-    OpaqueTypeKey, PredicateKind, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeSuperVisitable,
-    TypeVisitable, TypeVisitableExt, TypeVisitor, TypingMode,
+    self as ty, AliasTy, Binder, CanonicalVarValues, ClauseKind, InferCtxtLike, Interner, MayBeErased,
+    OpaqueTypeKey, OutlivesPredicate, PredicateKind, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeSuperVisitable,
+    TypeVisitable, TypeVisitableExt, TypeVisitor, TypingMode, UniverseIndex
 };
 use tracing::{Level, debug, instrument, trace, warn};
 
@@ -1366,6 +1370,10 @@ where
         self.delegate.higher_ranked_assumptions_v2()
     }
 
+    pub(super) fn register_solver_region_constraint(&self, c: RegionConstraint<I>) {
+        self.delegate.register_solver_region_constraint(c);
+    }
+
     pub(super) fn register_ty_outlives(&self, ty: I::Ty, lt: I::Region) {
         self.delegate.register_ty_outlives(ty, lt, self.origin_span);
     }
@@ -1615,8 +1623,11 @@ where
             return Ok(self.make_ambiguous_response_no_constraints(maybe_info));
         }
 
-        let external_constraints =
-            self.compute_external_query_constraints(certainty, normalization_nested_goals);
+        let external_constraints = self.compute_external_query_constraints(
+            certainty,
+            normalization_nested_goals,
+            RegionConstraint::new_true(),
+        );
         let (var_values, mut external_constraints) =
             eager_resolve_vars(self.delegate, (self.var_values, external_constraints));
 
@@ -1667,6 +1678,7 @@ where
         &self,
         certainty: Certainty,
         normalization_nested_goals: NestedNormalizationGoals<I>,
+        solver_region_constraint: RegionConstraint<I>,
     ) -> ExternalConstraintsData<I> {
         // We only return region constraints once the certainty is `Yes`. This
         // is necessary as we may drop nested goals on ambiguity, which may result
@@ -1694,7 +1706,12 @@ where
             assert!(opaque_types.is_empty());
         }
 
-        ExternalConstraintsData { region_constraints, opaque_types, normalization_nested_goals }
+        ExternalConstraintsData {
+            solver_region_constraint,
+            region_constraints,
+            opaque_types,
+            normalization_nested_goals,
+        }
     }
 }
 
