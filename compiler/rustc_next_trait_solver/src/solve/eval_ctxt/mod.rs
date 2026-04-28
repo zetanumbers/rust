@@ -1863,12 +1863,11 @@ where
             .map(|u| UniverseIndex::from_usize(u))
             .rev()
             .fold(constraint, |constraint, u| {
-                // rustc_type_ir::region_constraint::eagerly_handle_placeholders_in_universe(
-                //     &**self.delegate,
-                //     constraint,
-                //     u,
-                // )
-                todo!() as RegionConstraint::<I>
+                rustc_type_ir::region_constraint::eagerly_handle_placeholders_in_universe(
+                    &**self.delegate,
+                    constraint,
+                    u,
+                )
             });
 
         if constraint.is_false() {
