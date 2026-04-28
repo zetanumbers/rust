@@ -319,6 +319,16 @@ pub struct InferCtxt<'tcx> {
     /// bound.
     universe: Cell<ty::UniverseIndex>,
 
+    /// List of assumed wellformed types which we can derive implied
+    /// bounds on a `for<...>` from. Only used unstabley and by the
+    /// new solver.
+    universe_assumptions_for_next_solver: RefCell<
+        FxIndexMap<
+            ty::UniverseIndex,
+            Option<rustc_type_ir::region_constraint::Assumptions<TyCtxt<'tcx>>>,
+        >,
+    >,
+
     next_trait_solver: bool,
 
     pub obligation_inspector: Cell<Option<ObligationInspector<'tcx>>>,
@@ -640,6 +650,7 @@ impl<'tcx> InferCtxtBuilder<'tcx> {
             reported_signature_mismatch: Default::default(),
             tainted_by_errors: Cell::new(None),
             universe: Cell::new(ty::UniverseIndex::ROOT),
+            universe_assumptions_for_next_solver: RefCell::new(Default::default()),
             next_trait_solver,
             obligation_inspector: Cell::new(None),
         }

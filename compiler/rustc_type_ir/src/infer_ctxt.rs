@@ -342,6 +342,15 @@ pub trait InferCtxtLike: Sized {
         false
     }
 
+    fn insert_universe_assumptions(
+        &self,
+        u: ty::UniverseIndex,
+        assumptions: Option<crate::region_constraint::Assumptions<Self::Interner>>,
+    );
+    fn get_universe_assumptions(
+        &self,
+        u: ty::UniverseIndex,
+    ) -> Option<crate::region_constraint::Assumptions<Self::Interner>>;
     fn get_solve_region_constraint(
         &self,
     ) -> crate::region_constraint::RegionConstraint<Self::Interner>;

@@ -42,6 +42,21 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.create_next_universe()
     }
 
+    fn insert_universe_assumptions(
+        &self,
+        u: ty::UniverseIndex,
+        assumptions: Option<rustc_type_ir::region_constraint::Assumptions<TyCtxt<'tcx>>>,
+    ) {
+        self.universe_assumptions_for_next_solver.borrow_mut().insert(u, assumptions);
+    }
+
+    fn get_universe_assumptions(
+        &self,
+        u: ty::UniverseIndex,
+    ) -> Option<rustc_type_ir::region_constraint::Assumptions<TyCtxt<'tcx>>> {
+        self.universe_assumptions_for_next_solver.borrow().get(&u).unwrap().as_ref().cloned()
+    }
+
     fn get_solve_region_constraint(
         &self,
     ) -> rustc_type_ir::region_constraint::RegionConstraint<TyCtxt<'tcx>> {
