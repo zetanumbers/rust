@@ -22,9 +22,13 @@ mod search_graph;
 mod trait_goals;
 
 use derive_where::derive_where;
+use rustc_type_ir::data_structures::ensure_sufficient_stack;
 use rustc_type_ir::inherent::*;
 pub use rustc_type_ir::solve::*;
-use rustc_type_ir::{self as ty, Interner, TyVid, TypingMode};
+use rustc_type_ir::{
+    self as ty, FallibleTypeFolder, Interner, TermKind, TyVid, TypeFoldable, TypeSuperFoldable,
+    TypeVisitableExt, TypingMode,
+};
 use tracing::instrument;
 
 pub use self::eval_ctxt::{
@@ -32,6 +36,7 @@ pub use self::eval_ctxt::{
     evaluate_root_goal_for_proof_tree_raw_provider,
 };
 use crate::delegate::SolverDelegate;
+use crate::placeholder::PlaceholderReplacer;
 use crate::solve::assembly::Candidate;
 
 /// How many fixpoint iterations we should attempt inside of the solver before bailing
@@ -94,7 +99,24 @@ where
         goal: Goal<I, ty::OutlivesPredicate<I, I::Ty>>,
     ) -> QueryResultOrRerunNonErased<I> {
         let ty::OutlivesPredicate(ty, lt) = goal.predicate;
-        self.register_ty_outlives(ty, lt);
+
+        if self.higher_ranked_assumptions_v2() {
+            let ty = match self.deeply_normalize_for_outlives(goal.param_env, ty) {
+                Ok(ty) => ty,
+                Err(Ok(cause)) => {
+                    return self.evaluate_added_goals_and_make_canonical_response(
+                        Certainty::Maybe { cause, opaque_types_jank: OpaqueTypesJank::AllGood },
+                    );
+                }
+                Err(Err(e)) => return Err(e),
+            };
+
+            let constraint = self.destructure_type_outlives(ty, lt);
+            self.register_solver_region_constraint(constraint);
+        } else {
+            self.register_ty_outlives(ty, lt);
+        }
+
         self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
     }
 
@@ -104,7 +126,15 @@ where
         goal: Goal<I, ty::OutlivesPredicate<I, I::Region>>,
     ) -> QueryResultOrRerunNonErased<I> {
         let ty::OutlivesPredicate(a, b) = goal.predicate;
-        self.register_region_outlives(a, b, VisibleForLeakCheck::Yes);
+
+        if self.higher_ranked_assumptions_v2() {
+            let constraint =
+                rustc_type_ir::region_constraint::RegionConstraint::RegionOutlives(a, b);
+            self.register_solver_region_constraint(constraint);
+        } else {
+            self.register_region_outlives(a, b, VisibleForLeakCheck::Yes);
+        }
+
         self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
     }
 
