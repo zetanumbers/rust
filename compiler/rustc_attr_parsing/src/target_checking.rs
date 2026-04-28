@@ -142,7 +142,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
                 };
 
                 let attr_span = cx.attr_span;
-                cx.emit_dyn_lint(
+                cx.emit_lint(
                     lint,
                     move |dcx, level| {
                         InvalidTargetLint {
@@ -186,7 +186,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
         let target_span = cx.target_span;
         let attr_span = cx.attr_span;
 
-        cx.emit_dyn_lint(
+        cx.emit_lint(
             rustc_session::lint::builtin::UNUSED_ATTRIBUTES,
             move |dcx, level| {
                 crate::errors::InvalidAttrStyle {

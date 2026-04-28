@@ -67,7 +67,7 @@ impl<S: Stage> CombineAttributeParser<S> for CrateTypeParser {
                     None,
                 );
                 let span = n.value_span;
-                cx.emit_dyn_lint(
+                cx.emit_lint(
                     UNKNOWN_CRATE_TYPES,
                     move |dcx, level| {
                         UnknownCrateTypes {

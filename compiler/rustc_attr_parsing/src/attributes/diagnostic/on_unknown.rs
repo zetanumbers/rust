@@ -35,7 +35,7 @@ impl OnUnknownParser {
 
         if !early && !matches!(cx.target, Target::Use) {
             let target_span = cx.target_span;
-            cx.emit_dyn_lint(
+            cx.emit_lint(
                 MISPLACED_DIAGNOSTIC_ATTRIBUTES,
                 move |dcx, level| {
                     DiagnosticOnUnknownOnlyForImports { target_span }.into_diag(dcx, level)
