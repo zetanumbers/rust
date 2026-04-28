@@ -1,0 +1,49 @@
+error: expected parameter name, found `{`
+  --> $DIR/feature-gate-view-types.rs:8:20
+   |
+LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
+   |                    ^ expected parameter name
+
+error: expected one of `!`, `(`, `)`, `,`, `::`, or `<`, found `.`
+  --> $DIR/feature-gate-view-types.rs:8:19
+   |
+LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
+   |                   ^
+   |                   |
+   |                   expected one of `!`, `(`, `)`, `,`, `::`, or `<`
+   |                   help: missing `,`
+
+error: expected parameter name, found `{`
+  --> $DIR/feature-gate-view-types.rs:8:39
+   |
+LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
+   |                                       ^ expected parameter name
+
+error: expected one of `!`, `(`, `)`, `,`, `::`, or `<`, found `.`
+  --> $DIR/feature-gate-view-types.rs:8:38
+   |
+LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
+   |                                      ^
+   |                                      |
+   |                                      expected one of `!`, `(`, `)`, `,`, `::`, or `<`
+   |                                      help: missing `,`
+
+error[E0061]: this function takes 4 arguments but 2 arguments were supplied
+  --> $DIR/feature-gate-view-types.rs:15:5
+   |
+LL |     bar(&mut foo, &mut foo);
+   |     ^^^-------------------- two arguments are missing
+   |
+note: function defined here
+  --> $DIR/feature-gate-view-types.rs:8:4
+   |
+LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
+   |    ^^^                    -----------------
+help: provide the arguments
+   |
+LL |     bar(&mut foo, &mut foo, /* &mut Foo */, /* _ */);
+   |                           +++++++++++++++++++++++++
+
+error: aborting due to 5 previous errors
+
+For more information about this error, try `rustc --explain E0061`.
