@@ -68,7 +68,6 @@ macro_rules! ast_fragments {
         /// Can also serve as an input and intermediate result for macro expansion operations.
         pub enum AstFragment {
             OptExpr(Option<Box<ast::Expr>>),
-            MethodReceiverExpr(Box<ast::Expr>),
             $($Kind($AstTy),)*
         }
 
@@ -76,7 +75,6 @@ macro_rules! ast_fragments {
         #[derive(Copy, Clone, Debug, PartialEq, Eq)]
         pub enum AstFragmentKind {
             OptExpr,
-            MethodReceiverExpr,
             $($Kind,)*
         }
 
@@ -84,7 +82,6 @@ macro_rules! ast_fragments {
             pub fn name(self) -> &'static str {
                 match self {
                     AstFragmentKind::OptExpr => "expression",
-                    AstFragmentKind::MethodReceiverExpr => "expression",
                     $(AstFragmentKind::$Kind => $kind_name,)*
                 }
             }
@@ -93,8 +90,6 @@ macro_rules! ast_fragments {
                 match self {
                     AstFragmentKind::OptExpr =>
                         result.make_expr().map(Some).map(AstFragment::OptExpr),
-                    AstFragmentKind::MethodReceiverExpr =>
-                        result.make_expr().map(AstFragment::MethodReceiverExpr),
                     $(AstFragmentKind::$Kind => result.$make_ast().map(AstFragment::$Kind),)*
                 }
             }
@@ -121,13 +116,6 @@ macro_rules! ast_fragments {
                 }
             }
 
-            pub(crate) fn make_method_receiver_expr(self) -> Box<ast::Expr> {
-                match self {
-                    AstFragment::MethodReceiverExpr(expr) => expr,
-                    _ => panic!("AstFragment::make_method_receiver_expr called on the wrong kind of fragment"),
-                }
-            }
-
             $(pub fn $make_ast(self) -> $AstTy {
                 match self {
                     AstFragment::$Kind(ast) => ast,
@@ -146,7 +134,6 @@ macro_rules! ast_fragments {
                             *opt_expr = vis.filter_map_expr(expr)
                         }
                     }
-                    AstFragment::MethodReceiverExpr(expr) => vis.visit_method_receiver_expr(expr),
                     $($(AstFragment::$Kind(ast) => vis.$visit_ast(ast),)?)*
                     $($(AstFragment::$Kind(ast) =>
                         ast.flat_map_in_place(|ast| vis.$flat_map_ast_elt(ast, $($args)*)),)?)*
@@ -157,7 +144,6 @@ macro_rules! ast_fragments {
                 match self {
                     AstFragment::OptExpr(Some(expr)) => try_visit!(visitor.visit_expr(expr)),
                     AstFragment::OptExpr(None) => {}
-                    AstFragment::MethodReceiverExpr(expr) => try_visit!(visitor.visit_method_receiver_expr(expr)),
                     $($(AstFragment::$Kind(ast) => try_visit!(visitor.$visit_ast(ast)),)?)*
                     $($(AstFragment::$Kind(ast) => walk_list!(visitor, $visit_ast_elt, &ast[..], $($args)*),)?)*
                 }
@@ -179,6 +165,11 @@ ast_fragments! {
         "expression";
         one fn visit_expr;
         fn make_expr;
+    }
+    MethodReceiverExpr(Box<ast::Expr>) {
+        "expression";
+        one fn visit_method_receiver_expr;
+        fn make_method_receiver_expr;
     }
     Pat(Box<ast::Pat>) {
         "pattern";
