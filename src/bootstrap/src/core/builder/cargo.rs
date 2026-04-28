@@ -1082,6 +1082,8 @@ impl Builder<'_> {
                         // rustc creates absolute paths (in part bc of the `rust-src` unremap
                         // and for working directory) so let's remap the build directory as well.
                         format!("{}={map_to}", self.build.src.display()),
+                        // remap OUT_DIR so they don't leak into artifacs.
+                        format!("{}={map_to}/out", self.build.out.display()),
                     ]
                     .join("\t");
                     cargo.env("RUSTC_DEBUGINFO_MAP", map);
@@ -1102,6 +1104,8 @@ impl Builder<'_> {
                         // rustc creates absolute paths (in part bc of the `rust-src` unremap
                         // and for working directory) so let's remap the build directory as well.
                         format!("{}={map_to}", self.build.src.display()),
+                        // remap OUT_DIR so they don't leak into artifacts.
+                        format!("{}={map_to}/out", self.build.out.display()),
                     ]
                     .join("\t");
                     cargo.env("RUSTC_DEBUGINFO_MAP", map);
