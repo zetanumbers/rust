@@ -854,7 +854,7 @@ where
             },
         );
 
-        match result {
+        match result.map_err(Into::into) {
             Ok(resp) => resp,
             Err(NoSolution) => vec![],
         }

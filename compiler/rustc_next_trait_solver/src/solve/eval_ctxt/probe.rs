@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use rustc_type_ir::search_graph::CandidateHeadUsages;
-use rustc_type_ir::solve::{AccessedOpaques, CanonicalResponse};
+use rustc_type_ir::solve::{AccessedOpaques, CanonicalResponse, NoSolutionOrOpaquesAccessed};
 use rustc_type_ir::{InferCtxtLike, Interner};
 use tracing::{instrument, warn};
 
@@ -31,11 +31,11 @@ where
     pub(in crate::solve) fn enter_single_candidate(
         self,
         f: impl FnOnce(&mut EvalCtxt<'_, D>) -> Result<T, NoSolution>,
-    ) -> (Result<T, NoSolution>, CandidateHeadUsages) {
+    ) -> (Result<T, NoSolutionOrOpaquesAccessed>, CandidateHeadUsages) {
         let mut candidate_usages = CandidateHeadUsages::default();
 
         if self.ecx.opaque_accesses.should_bail() {
-            return (Err(NoSolution), candidate_usages);
+            return (Err(NoSolutionOrOpaquesAccessed::OpaquesAccessed), candidate_usages);
         }
 
         self.ecx.search_graph.enter_single_candidate();
@@ -50,7 +50,7 @@ where
     pub(in crate::solve) fn enter(
         self,
         f: impl FnOnce(&mut EvalCtxt<'_, D>) -> Result<T, NoSolution>,
-    ) -> Result<T, NoSolution> {
+    ) -> Result<T, NoSolutionOrOpaquesAccessed> {
         let nested_goals = self.ecx.nested_goals.clone();
         self.enter_inner(f, nested_goals)
     }
@@ -58,7 +58,7 @@ where
     pub(in crate::solve) fn enter_without_propagated_nested_goals(
         self,
         f: impl FnOnce(&mut EvalCtxt<'_, D>) -> Result<T, NoSolution>,
-    ) -> Result<T, NoSolution> {
+    ) -> Result<T, NoSolutionOrOpaquesAccessed> {
         self.enter_inner(f, Default::default())
     }
 
@@ -66,11 +66,11 @@ where
         self,
         f: impl FnOnce(&mut EvalCtxt<'_, D>) -> Result<T, NoSolution>,
         propagated_nested_goals: Vec<(GoalSource, Goal<I, I::Predicate>, Option<GoalStalledOn<I>>)>,
-    ) -> Result<T, NoSolution> {
+    ) -> Result<T, NoSolutionOrOpaquesAccessed> {
         let ProbeCtxt { ecx: outer, probe_kind, _result } = self;
 
         if outer.opaque_accesses.should_bail() {
-            return Err(NoSolution);
+            return Err(NoSolutionOrOpaquesAccessed::OpaquesAccessed);
         }
 
         let delegate = outer.delegate;
@@ -103,7 +103,7 @@ where
 
         outer.opaque_accesses.update(nested.opaque_accesses);
 
-        r
+        r.map_err(Into::into)
     }
 }
 
@@ -128,7 +128,7 @@ where
         f: impl FnOnce(&mut EvalCtxt<'_, D>) -> QueryResult<I>,
     ) -> Result<Candidate<I>, NoSolution> {
         let (result, head_usages) = self.cx.enter_single_candidate(f);
-        result.map(|result| Candidate { source: self.source, result, head_usages })
+        Ok(Candidate { source: self.source, result: result?, head_usages })
     }
 }
 

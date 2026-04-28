@@ -9,7 +9,7 @@ use derive_where::derive_where;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::SolverTraitLangItem;
 use rustc_type_ir::search_graph::CandidateHeadUsages;
-use rustc_type_ir::solve::{AliasBoundKind, MaybeInfo, SizedTraitKind, StalledOnCoroutines};
+use rustc_type_ir::solve::{AliasBoundKind, MaybeInfo, NoSolutionOrOpaquesAccessed, SizedTraitKind, StalledOnCoroutines};
 use rustc_type_ir::{
     self as ty, AliasTy, Interner, MayBeErased, TypeFlags, TypeFoldable, TypeFolder,
     TypeSuperFoldable, TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
@@ -161,7 +161,7 @@ where
                 })
             });
 
-        match result {
+        match result.map_err(Into::into) {
             Ok(result) => Ok(Candidate { source: source.get(), result, head_usages }),
             Err(NoSolution) => Err(head_usages),
         }
@@ -683,7 +683,7 @@ where
         goal: Goal<I, G>,
         candidates: &mut Vec<Candidate<I>>,
     ) {
-        let _res = self.probe(|_| ProbeKind::NormalizedSelfTyAssembly).enter(|ecx| {
+        let res = self.probe(|_| ProbeKind::NormalizedSelfTyAssembly).enter(|ecx| {
             ecx.assemble_alias_bound_candidates_recur(
                 goal.predicate.self_ty(),
                 goal,
@@ -692,9 +692,14 @@ where
             );
             Ok(())
         });
+
         // always returns Ok
-        // TODO: separate path for probes erroring because of accessing opaques
-        // assert!(res.is_ok());
+        match res {
+            Ok(_) | Err(NoSolutionOrOpaquesAccessed::OpaquesAccessed) => {}
+            Err(NoSolutionOrOpaquesAccessed::NoSolution(NoSolution)) => {
+                unreachable!()
+            }
+        }
     }
 
     /// For some deeply nested `<T>::A::B::C::D` rigid associated type,

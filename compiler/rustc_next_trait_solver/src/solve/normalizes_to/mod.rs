@@ -77,13 +77,17 @@ where
                         None
                     },
                     |ecx| {
-                        ecx.probe(|&result| ProbeKind::RigidAlias { result }).enter(|this| {
-                            this.structurally_instantiate_normalizes_to_term(
-                                goal,
-                                goal.predicate.alias,
-                            );
-                            this.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
-                        })
+                        ecx.probe(|&result| ProbeKind::RigidAlias { result })
+                            .enter(|this| {
+                                this.structurally_instantiate_normalizes_to_term(
+                                    goal,
+                                    goal.predicate.alias,
+                                );
+                                this.evaluate_added_goals_and_make_canonical_response(
+                                    Certainty::Yes,
+                                )
+                            })
+                            .map_err(Into::into)
                     },
                 )
             }

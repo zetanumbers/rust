@@ -32,6 +32,33 @@ pub type QueryResult<I> = Result<CanonicalResponse<I>, NoSolution>;
 #[cfg_attr(feature = "nightly", derive(StableHash))]
 pub struct NoSolution;
 
+pub enum NoSolutionOrOpaquesAccessed {
+    NoSolution(NoSolution),
+    /// A bit like [`NoSolution`], but for functions that normally cannot fail *unless* they accessed
+    /// opaues. (See [`TypingMode::ErasedNotCoherence`]). Getting `OpaquesAccessed` doesn't mean there
+    /// truly is no solution. It just means that we want to bail out of the current query as fast as
+    /// possible, possibly by returning `NoSolution` if that's fastest. This is okay because when you get
+    /// `OpaquesAccessed` we're guaranteed that we're going to retry this query in the original typing
+    /// mode to get the correct answer.
+    OpaquesAccessed,
+}
+
+/// This conversion is sound, because even in we're in `OpaquesAccessed`,
+/// we're going to retry so `NoSolution` is a valid response to give..
+impl From<NoSolutionOrOpaquesAccessed> for NoSolution {
+    fn from(
+        (NoSolutionOrOpaquesAccessed::NoSolution(_) | NoSolutionOrOpaquesAccessed::OpaquesAccessed): NoSolutionOrOpaquesAccessed,
+    ) -> Self {
+        NoSolution
+    }
+}
+
+impl From<NoSolution> for NoSolutionOrOpaquesAccessed {
+    fn from(value: NoSolution) -> Self {
+        Self::NoSolution(value)
+    }
+}
+
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
