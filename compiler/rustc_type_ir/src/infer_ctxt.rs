@@ -338,6 +338,10 @@ pub trait InferCtxtLike: Sized {
     fn universe(&self) -> ty::UniverseIndex;
     fn create_next_universe(&self) -> ty::UniverseIndex;
 
+    fn higher_ranked_assumptions_v2(&self) -> bool {
+        false
+    }
+
     fn universe_of_ty(&self, ty: ty::TyVid) -> Option<ty::UniverseIndex>;
     fn universe_of_lt(&self, lt: ty::RegionVid) -> Option<ty::UniverseIndex>;
     fn universe_of_ct(&self, ct: ty::ConstVid) -> Option<ty::UniverseIndex>;

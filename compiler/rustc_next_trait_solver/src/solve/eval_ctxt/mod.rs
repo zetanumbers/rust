@@ -1362,6 +1362,10 @@ where
         args
     }
 
+    pub(super) fn higher_ranked_assumptions_v2(&self) -> bool {
+        self.delegate.higher_ranked_assumptions_v2()
+    }
+
     pub(super) fn register_ty_outlives(&self, ty: I::Ty, lt: I::Region) {
         self.delegate.register_ty_outlives(ty, lt, self.origin_span);
     }

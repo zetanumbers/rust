@@ -30,6 +30,10 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.typing_mode_raw()
     }
 
+    fn higher_ranked_assumptions_v2(&self) -> bool {
+        self.tcx.sess.opts.unstable_opts.higher_ranked_assumptions_v2
+    }
+
     fn universe(&self) -> ty::UniverseIndex {
         self.universe()
     }
