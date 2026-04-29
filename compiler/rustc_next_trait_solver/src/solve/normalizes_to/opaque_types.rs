@@ -2,7 +2,7 @@
 //! behaves differently depending on the current `TypingMode`.
 
 use rustc_type_ir::inherent::*;
-use rustc_type_ir::solve::{GoalSource, NoSolution};
+use rustc_type_ir::solve::{GoalSource, NoSolution, RerunReason};
 use rustc_type_ir::{self as ty, Interner, MayBeErased, TypingMode, fold_regions};
 
 use crate::delegate::SolverDelegate;
@@ -149,11 +149,13 @@ where
                 // So, if we have one, we register in the EvalCtxt that we may need that defid.
                 // We might then decide to rerun in the correct typing mode.
                 if let Some(def_id) = def_id {
-                    self.opaque_accesses
-                        .rerun_if_opaque_in_opaque_type_storage("normalize opaque type", def_id);
+                    self.opaque_accesses.rerun_if_opaque_in_opaque_type_storage(
+                        RerunReason::NormalizeOpaqueType,
+                        def_id,
+                    );
                 } else {
                     self.opaque_accesses
-                        .rerun_if_in_post_analysis("normalize opaque type non local");
+                        .rerun_if_in_post_analysis(RerunReason::NormalizeOpaqueTypeRemoteCrate);
                 }
                 if self.opaque_accesses.should_bail() {
                     // If we already accessed opaque types once, bail.

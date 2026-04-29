@@ -240,13 +240,29 @@ impl<I: Interner> RerunCondition<I> {
     }
 }
 
+/// Mainly for debugging, to keep track of the source of the rerunning
+/// in [`TypingMode::ErasedNotCoherence`].
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
+pub enum RerunReason {
+    NormalizeOpaqueTypeRemoteCrate,
+    NormalizeOpaqueType,
+    MayUseUnstableFeature,
+    EvaluateConst,
+    SkipErasedAttempt,
+    SelfTyInfer,
+    FetchEligibleAssocItem,
+    AutoTraitLeakage,
+    TryStallCoroutine,
+}
+
 #[derive_where(Copy, Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
 pub struct AccessedOpaques<I: Interner> {
     #[type_visitable(ignore)]
     #[type_foldable(identity)]
-    pub reason: Option<&'static str>,
+    pub reason: Option<RerunReason>,
     pub rerun: RerunCondition<I>,
 }
 
@@ -276,12 +292,12 @@ impl<I: Interner> AccessedOpaques<I> {
         self.rerun.should_bail()
     }
 
-    pub fn rerun_always(&mut self, reason: &'static str) {
+    pub fn rerun_always(&mut self, reason: RerunReason) {
         debug!("set rerun always");
         self.update(AccessedOpaques { reason: Some(reason), rerun: RerunCondition::Always });
     }
 
-    pub fn rerun_if_in_post_analysis(&mut self, reason: &'static str) {
+    pub fn rerun_if_in_post_analysis(&mut self, reason: RerunReason) {
         debug!("set rerun if post analysis");
         self.update(AccessedOpaques {
             reason: Some(reason),
@@ -291,7 +307,7 @@ impl<I: Interner> AccessedOpaques<I> {
 
     pub fn rerun_if_opaque_in_opaque_type_storage(
         &mut self,
-        reason: &'static str,
+        reason: RerunReason,
         defid: I::LocalDefId,
     ) {
         debug!("set rerun if opaque type {defid:?} in storage");
@@ -301,7 +317,7 @@ impl<I: Interner> AccessedOpaques<I> {
         });
     }
 
-    pub fn rerun_if_any_opaque_has_infer_as_hidden_type(&mut self, reason: &'static str) {
+    pub fn rerun_if_any_opaque_has_infer_as_hidden_type(&mut self, reason: RerunReason) {
         debug!("set rerun if any opaque in the storage has a hidden type that is an infer var");
         self.update(AccessedOpaques {
             reason: Some(reason),

@@ -6,7 +6,7 @@ use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::SolverTraitLangItem;
 use rustc_type_ir::solve::{
     AliasBoundKind, CandidatePreferenceMode, CanonicalResponse, MaybeInfo, OpaqueTypesJank,
-    SizedTraitKind,
+    RerunReason, SizedTraitKind,
 };
 use rustc_type_ir::{
     self as ty, FieldInfo, Interner, MayBeErased, Movability, PredicatePolarity, TraitPredicate,
@@ -237,7 +237,7 @@ where
             goal.predicate.self_ty().kind()
         {
             if ecx.opaque_accesses.might_rerun() {
-                ecx.opaque_accesses.rerun_always("auto trait leakage");
+                ecx.opaque_accesses.rerun_always(RerunReason::AutoTraitLeakage);
                 return Err(NoSolution);
             }
 
@@ -1573,7 +1573,7 @@ where
                 }
                 TypingMode::ErasedNotCoherence(MayBeErased) => {
                     // Trying to continue here isn't worth it.
-                    self.opaque_accesses.rerun_always("try stall coroutine");
+                    self.opaque_accesses.rerun_always(RerunReason::TryStallCoroutine);
                     return Some(Err(NoSolution));
                 }
                 TypingMode::Coherence

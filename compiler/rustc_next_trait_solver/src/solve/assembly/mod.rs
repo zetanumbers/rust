@@ -10,7 +10,8 @@ use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::SolverTraitLangItem;
 use rustc_type_ir::search_graph::CandidateHeadUsages;
 use rustc_type_ir::solve::{
-    AliasBoundKind, MaybeInfo, NoSolutionOrOpaquesAccessed, SizedTraitKind, StalledOnCoroutines,
+    AliasBoundKind, MaybeInfo, NoSolutionOrOpaquesAccessed, RerunReason, SizedTraitKind,
+    StalledOnCoroutines,
 };
 use rustc_type_ir::{
     self as ty, AliasTy, Interner, MayBeErased, TypeFlags, TypeFoldable, TypeFolder,
@@ -1038,7 +1039,8 @@ where
             | TypingMode::PostBorrowckAnalysis { .. }
             | TypingMode::PostAnalysis => vec![],
             TypingMode::ErasedNotCoherence(MayBeErased) => {
-                self.opaque_accesses.rerun_if_any_opaque_has_infer_as_hidden_type("self ty infer");
+                self.opaque_accesses
+                    .rerun_if_any_opaque_has_infer_as_hidden_type(RerunReason::SelfTyInfer);
                 Vec::new()
             }
         };
