@@ -141,6 +141,24 @@ fn get_simple_function_f128<'gcc, 'tcx>(
     )
 }
 
+fn generic_f16_builtin<'gcc, 'tcx>(
+    cx: &CodegenCx<'gcc, 'tcx>,
+    name: Symbol,
+    args: &[OperandRef<'tcx, RValue<'gcc>>],
+) -> RValue<'gcc> {
+    let f32_type = cx.type_f32();
+    let builtin_name = match name {
+        sym::fabs => "fabsf",
+        _ => unreachable!(),
+    };
+
+    let func = cx.context.get_builtin_function(builtin_name);
+    let args: Vec<_> =
+        args.iter().map(|arg| cx.context.new_cast(None, arg.immediate(), f32_type)).collect();
+    let result = cx.context.new_call(None, func, &args);
+    cx.context.new_cast(None, result, cx.type_f16())
+}
+
 fn f16_builtin<'gcc, 'tcx>(
     cx: &CodegenCx<'gcc, 'tcx>,
     name: Symbol,
@@ -150,7 +168,6 @@ fn f16_builtin<'gcc, 'tcx>(
     let builtin_name = match name {
         sym::ceilf16 => "__builtin_ceilf",
         sym::copysignf16 => "__builtin_copysignf",
-        sym::fabs => "fabsf",
         sym::expf16 => "expf",
         sym::exp2f16 => "exp2f",
         sym::floorf16 => "__builtin_floorf",
@@ -228,7 +245,6 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
             | sym::copysignf16
             | sym::expf16
             | sym::exp2f16
-            | sym::fabs
             | sym::floorf16
             | sym::fmaf16
             | sym::logf16
@@ -448,7 +464,7 @@ impl<'a, 'gcc, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tc
                     span_bug!(span, "expected float type for fabs intrinsic: {:?}", ty);
                 };
                 let func = match float_ty {
-                    ty::FloatTy::F16 => break 'fabs f16_builtin(self, name, args),
+                    ty::FloatTy::F16 => break 'fabs generic_f16_builtin(self, name, args),
                     ty::FloatTy::F32 => self.context.get_builtin_function("fabsf"),
                     ty::FloatTy::F64 => self.context.get_builtin_function("fabs"),
                     ty::FloatTy::F128 => get_simple_function_f128(span, self, name),
