@@ -47,7 +47,6 @@ tests/ui/sanitizer/cfi/virtual-auto.rs
 tests/ui/sanitizer/cfi/sized-associated-ty.rs
 tests/ui/sanitizer/cfi/can-reveal-opaques.rs
 tests/ui/sanitizer/kcfi-mangling.rs
-tests/ui/backtrace/dylib-dep.rs
 tests/ui/delegation/fn-header.rs
 tests/ui/consts/const-eval/parse_ints.rs
 tests/ui/simd/intrinsic/generic-as.rs
