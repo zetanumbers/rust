@@ -105,3 +105,10 @@ tests/ui/eii/default/call_default_panics.rs
 tests/ui/explicit-tail-calls/indirect.rs
 tests/ui/traits/inheritance/self-in-supertype.rs
 tests/ui/fmt/fmt_debug/shallow.rs
+tests/ui/c-variadic/roundtrip.rs
+tests/ui/eii/eii_impl_with_contract.rs
+tests/ui/eii/static/cross_crate_decl.rs
+tests/ui/eii/static/cross_crate_def.rs
+tests/ui/eii/static/same_address.rs
+tests/ui/eii/static/simple.rs
+tests/ui/explicit-tail-calls/default-trait-method.rs
