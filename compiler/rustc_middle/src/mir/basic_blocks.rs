@@ -21,14 +21,6 @@ pub struct BasicBlocks<'tcx> {
 // Typically 95%+ of basic blocks have 4 or fewer predecessors.
 type Predecessors = IndexVec<BasicBlock, SmallVec<[BasicBlock; 4]>>;
 
-#[derive(Debug, Clone, Copy)]
-pub enum SwitchTargetValue {
-    // A normal switch value.
-    Normal(u128),
-    // The final "otherwise" fallback value.
-    Otherwise,
-}
-
 #[derive(Clone, Default, Debug)]
 struct Cache {
     predecessors: OnceLock<Predecessors>,
