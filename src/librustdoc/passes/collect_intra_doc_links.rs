@@ -2048,13 +2048,13 @@ fn resolution_failure(
                     'outer: loop {
                         // FIXME(jynelson): this might conflict with my `Self` fix in #76467
                         let Some((start, end)) = name.rsplit_once("::") else {
+                            // `name` is now the first path segment, which didn't resolve.
                             // avoid bug that marked [Quux::Z] as missing Z, not Quux
                             if partial_res.is_none() {
                                 *unresolved = name.into();
                             }
                             break;
                         };
-                        name = start;
                         for ns in [TypeNS, ValueNS, MacroNS] {
                             if let Ok(v_res) =
                                 collector.resolve(start, ns, None, item_id, module_id)
@@ -2068,6 +2068,12 @@ fn resolution_failure(
                             }
                         }
                         *unresolved = end.into();
+                        if start.is_empty() && partial_res.is_none() {
+                            // `start` being empty means `path_str` was written like "::path::to::item".
+                            // In this case, `end` is the first path segment that we should report.
+                            break;
+                        }
+                        name = start;
                     }
 
                     let last_found_module = match *partial_res {
