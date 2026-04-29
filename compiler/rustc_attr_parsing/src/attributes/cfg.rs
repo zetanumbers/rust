@@ -222,7 +222,7 @@ pub(crate) fn parse_name_value<S: Stage>(
         }
     };
 
-    match cx.sess.psess.check_config.expecteds.get(&name) {
+    match cx.sess.check_config.expecteds.get(&name) {
         Some(ExpectedValues::Some(values)) if !values.contains(&value.map(|(v, _)| v)) => cx
             .emit_lint_with_sess(
                 UNEXPECTED_CFGS,
@@ -232,7 +232,7 @@ pub(crate) fn parse_name_value<S: Stage>(
                 },
                 span,
             ),
-        None if cx.sess.psess.check_config.exhaustive_names => cx.emit_lint_with_sess(
+        None if cx.sess.check_config.exhaustive_names => cx.emit_lint_with_sess(
             UNEXPECTED_CFGS,
             move |dcx, level, sess| {
                 check_cfg::unexpected_cfg_name(sess, (name, name_span), value).into_diag(dcx, level)
@@ -280,7 +280,7 @@ pub fn eval_config_entry(sess: &Session, cfg_entry: &CfgEntry) -> EvalConfigResu
             }
         }
         CfgEntry::NameValue { name, value, span } => {
-            if sess.psess.config.contains(&(*name, *value)) {
+            if sess.config.contains(&(*name, *value)) {
                 EvalConfigResult::True
             } else {
                 EvalConfigResult::False { reason: cfg_entry.clone(), reason_span: *span }
@@ -294,7 +294,7 @@ pub fn eval_config_entry(sess: &Session, cfg_entry: &CfgEntry) -> EvalConfigResu
                 };
             };
             // See https://github.com/rust-lang/rust/issues/64796#issuecomment-640851454 for details
-            let min_version_ok = if sess.psess.assume_incomplete_release {
+            let min_version_ok = if sess.opts.unstable_opts.assume_incomplete_release {
                 RustcVersion::current_overridable() > *min_version
             } else {
                 RustcVersion::current_overridable() >= *min_version
