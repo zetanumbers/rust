@@ -1,6 +1,5 @@
 use std::io::Write;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 use std::{iter, mem};
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -308,7 +307,7 @@ fn process_cycle<'tcx>(job_map: &QueryJobMap<'tcx>, stack: Vec<(Span, QueryJobId
 fn find_and_process_cycle<'tcx>(
     job_map: &QueryJobMap<'tcx>,
     query: QueryJobId,
-) -> Option<Arc<QueryWaiter<'tcx>>> {
+) -> Option<QueryWaiter<'tcx>> {
     let mut visited = FxHashSet::default();
     let mut stack = Vec::new();
     if let ControlFlow::Break(resumable) =
@@ -350,9 +349,7 @@ pub fn break_query_cycle<'tcx>(job_map: QueryJobMap<'tcx>, registry: &rustc_thre
         .expect("unable to find a query cycle");
 
     // Mark the thread we're about to wake up as unblocked.
-    rustc_thread_pool::mark_unblocked(registry);
-
-    assert!(waiter.condvar.notify_one(), "unable to wake the waiter");
+    assert!(rustc_thread_pool::unpark(registry, waiter.thread_index), "unable to wake the waiter");
 }
 
 pub fn print_query_stack<'tcx>(
