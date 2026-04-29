@@ -258,38 +258,6 @@ ast_fragments! {
     }
 }
 
-impl AstFragment {
-    pub(crate) fn to_string(&self) -> String {
-        match self {
-            AstFragment::OptExpr(Some(expr))
-            | AstFragment::MethodReceiverExpr(expr)
-            | AstFragment::Expr(expr) => pprust::expr_to_string(expr),
-            AstFragment::Pat(ast) => pprust::pat_to_string(ast),
-            AstFragment::Ty(ast) => pprust::ty_to_string(ast),
-            AstFragment::Stmts(ast) => elems_to_string(ast, pprust::stmt_to_string),
-            AstFragment::Items(ast) => elems_to_string(ast, |ast| pprust::item_to_string(ast)),
-            AstFragment::TraitItems(ast)
-            | AstFragment::ImplItems(ast)
-            | AstFragment::TraitImplItems(ast) => {
-                elems_to_string(ast, |ast| pprust::assoc_item_to_string(ast))
-            }
-            AstFragment::ForeignItems(ast) => {
-                elems_to_string(ast, |ast| pprust::foreign_item_to_string(ast))
-            }
-            AstFragment::OptExpr(None)
-            | AstFragment::Crate(_)
-            | AstFragment::Arms(_)
-            | AstFragment::ExprFields(_)
-            | AstFragment::PatFields(_)
-            | AstFragment::GenericParams(_)
-            | AstFragment::Params(_)
-            | AstFragment::FieldDefs(_)
-            | AstFragment::Variants(_)
-            | AstFragment::WherePredicates(_) => unreachable!(),
-        }
-    }
-}
-
 pub enum SupportsMacroExpansion {
     No,
     Yes { supports_inner_attrs: bool },
