@@ -1,49 +1,33 @@
-error: expected parameter name, found `{`
-  --> $DIR/feature-gate-view-types.rs:8:20
+error[E0658]: view types are experimental
+  --> $DIR/feature-gate-view-types.rs:6:19
    |
 LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
-   |                    ^ expected parameter name
+   |                   ^^^^^^
+   |
+   = note: see issue #155938 <https://github.com/rust-lang/rust/issues/155938> for more information
+   = help: add `#![feature(view_types)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
 
-error: expected one of `!`, `(`, `)`, `,`, `::`, or `<`, found `.`
-  --> $DIR/feature-gate-view-types.rs:8:19
+error[E0658]: view types are experimental
+  --> $DIR/feature-gate-view-types.rs:6:38
    |
 LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
-   |                   ^
-   |                   |
-   |                   expected one of `!`, `(`, `)`, `,`, `::`, or `<`
-   |                   help: missing `,`
-
-error: expected parameter name, found `{`
-  --> $DIR/feature-gate-view-types.rs:8:39
+   |                                      ^^^^^^
    |
-LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
-   |                                       ^ expected parameter name
+   = note: see issue #155938 <https://github.com/rust-lang/rust/issues/155938> for more information
+   = help: add `#![feature(view_types)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
 
-error: expected one of `!`, `(`, `)`, `,`, `::`, or `<`, found `.`
-  --> $DIR/feature-gate-view-types.rs:8:38
-   |
-LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
-   |                                      ^
-   |                                      |
-   |                                      expected one of `!`, `(`, `)`, `,`, `::`, or `<`
-   |                                      help: missing `,`
-
-error[E0061]: this function takes 4 arguments but 2 arguments were supplied
-  --> $DIR/feature-gate-view-types.rs:15:5
+error[E0499]: cannot borrow `foo` as mutable more than once at a time
+  --> $DIR/feature-gate-view-types.rs:15:19
    |
 LL |     bar(&mut foo, &mut foo);
-   |     ^^^-------------------- two arguments are missing
-   |
-note: function defined here
-  --> $DIR/feature-gate-view-types.rs:8:4
-   |
-LL | fn bar(a: &mut Foo.{ a }, b: &mut Foo.{ b }) {
-   |    ^^^                    -----------------
-help: provide the arguments
-   |
-LL |     bar(&mut foo, &mut foo, /* &mut Foo */, /* _ */);
-   |                           +++++++++++++++++++++++++
+   |     --- --------  ^^^^^^^^ second mutable borrow occurs here
+   |     |   |
+   |     |   first mutable borrow occurs here
+   |     first borrow later used by call
 
-error: aborting due to 5 previous errors
+error: aborting due to 3 previous errors
 
-For more information about this error, try `rustc --explain E0061`.
+Some errors have detailed explanations: E0499, E0658.
+For more information about an error, try `rustc --explain E0499`.
