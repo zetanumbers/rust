@@ -37,6 +37,15 @@ impl<'tcx> Deref for SolverDelegate<'tcx> {
     }
 }
 
+impl<'tcx> SolverDelegate<'tcx> {
+    fn known_no_opaque_types_in_storage(&self) -> bool {
+        self.inner.borrow_mut().opaque_types().is_empty()
+            // in erased mode, observing that opaques are empty aren't enough to give a result
+            // here, so let's try the slow path instead.
+            && !self.typing_mode_raw().is_erased_not_coherence()
+    }
+}
+
 impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<'tcx> {
     type Infcx = InferCtxt<'tcx>;
     type Interner = TyCtxt<'tcx>;
@@ -70,15 +79,9 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
                 // eventually use opaques to incompletely guide inference via ty var
                 // self types.
                 // FIXME: Properly consider opaques here.
-                && self.inner.borrow_mut().opaque_types().is_empty()
+                && self.known_no_opaque_types_in_storage()
             {
-                // in erased mode, observing that opaques are empty aren't enough to giv a result
-                // here, so let's try the slow path instead.
-                if self.typing_mode_raw().is_erased_not_coherence() {
-                    return None;
-                } else {
-                    return Some(Certainty::AMBIGUOUS);
-                }
+                return Some(Certainty::AMBIGUOUS);
             }
 
             if trait_pred.polarity() == ty::PredicatePolarity::Positive {
