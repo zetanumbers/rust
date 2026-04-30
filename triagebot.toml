@@ -940,14 +940,12 @@ Issue #{number} "{title}" has been added.
 # Mentions
 # ------------------------------------------------------------------------------
 
-[mentions."triagebot.toml"]
-message = "`triagebot.toml` has been modified, there may have been changes to the review queue."
-cc = ["@davidtwco", "@wesleywiser"]
-
 [mentions."compiler/rustc_codegen_cranelift"]
+message = "The Cranelift subtree was changed"
 cc = ["@bjorn3"]
 
 [mentions."compiler/rustc_codegen_gcc"]
+message = "The GCC codegen subtree was changed"
 cc = ["@antoyo", "@GuillaumeGomez"]
 
 [mentions."compiler/rustc_const_eval/src/"]
@@ -1051,7 +1049,7 @@ cc = ["@Nadrieril"]
 message = "Some changes occurred in cfg and check-cfg configuration"
 cc = ["@Urgau"]
 
-[mentions."compiler/rustc_lint/src/early/diagnostics/check_cfg.rs"]
+[mentions."compiler/rustc_attr_parsing/src/attributes/diagnostic/check_cfg.rs"]
 message = "Some changes occurred in check-cfg diagnostics"
 cc = ["@Urgau"]
 
@@ -1149,6 +1147,7 @@ cc = [
 cc = ["@ehuss"]
 
 [mentions."src/tools/clippy"]
+message = "The Clippy subtree was changed"
 cc = ["@rust-lang/clippy"]
 
 [mentions."src/tools/compiletest"]
@@ -1178,6 +1177,7 @@ this change to [rust-lang/rust-analyzer] instead.
 cc = ["@rust-lang/rust-analyzer"]
 
 [mentions."src/tools/rustfmt"]
+message = "The Rustfmt subtree was changed"
 cc = ["@rust-lang/rustfmt"]
 
 [mentions."compiler/rustc_middle/src/mir/syntax.rs"]
@@ -1489,6 +1489,7 @@ libs = [
     "@tgross35",
     "@thomcc",
     "@joboet",
+    "@nia-e",
 ]
 infra-ci = [
     "@Mark-Simulacrum",
@@ -1589,7 +1590,7 @@ dep-bumps = [
 "/compiler/rustc_codegen_llvm/src/debuginfo" =           ["compiler", "debuginfo"]
 "/compiler/rustc_codegen_ssa" =                          ["compiler", "codegen"]
 "/compiler/rustc_middle/src/dep_graph" =                 ["compiler", "incremental", "query-system"]
-"/compiler/rustc_middle/src/ich" =                       ["compiler", "incremental", "query-system"]
+"/compiler/rustc_middle/src/ich.rs" =                    ["compiler", "incremental", "query-system"]
 "/compiler/rustc_middle/src/mir" =                       ["compiler", "mir"]
 "/compiler/rustc_middle/src/traits" =                    ["compiler", "types"]
 "/compiler/rustc_middle/src/query" =                     ["compiler", "query-system"]
