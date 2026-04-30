@@ -78,7 +78,7 @@ impl<'tcx> QueryLatch<'tcx> {
             return Ok(()); // already complete
         };
 
-        let cycle = Arc::new(Mutex::new(None));
+        let mut cycle = Arc::new(Mutex::new(None));
         let waiter = QueryWaiter { parent: query, span, cycle: Arc::clone(&cycle), thread_index };
 
         // We push the waiter on to the `waiters` list. It can be accessed inside
@@ -93,11 +93,9 @@ impl<'tcx> QueryLatch<'tcx> {
         // getting the self.info lock.
         rustc_thread_pool::park(waiters_guard);
 
-        // FIXME: Get rid of this lock. We have ownership of the QueryWaiter
-        // although another thread may still have a Arc reference so we cannot
-        // use Arc::get_mut
-        let mut cycle_lock = cycle.lock();
-        match cycle_lock.take() {
+        // We make sure to drop waiter before unparking a worker thread
+        let cycle = Arc::get_mut(&mut cycle).unwrap().get_mut();
+        match cycle.take() {
             None => Ok(()),
             Some(cycle) => Err(cycle),
         }
@@ -109,7 +107,11 @@ impl<'tcx> QueryLatch<'tcx> {
         let waiters = waiters_guard.take().unwrap(); // mark the latch as complete
         let registry = rustc_thread_pool::Registry::current();
         for waiter in waiters {
-            rustc_thread_pool::unpark(&registry, waiter.thread_index);
+            // Return waiter thread's index to resume and drop `waiter` for resumed thread
+            // to use `Arc::get_mut` on its cycle arc pointer.
+            let waiter_thread = waiter.thread_index;
+            drop(waiter);
+            rustc_thread_pool::unpark(&registry, waiter_thread);
         }
     }
 
