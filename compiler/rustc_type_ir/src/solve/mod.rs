@@ -4,7 +4,7 @@ use std::hash::Hash;
 
 use derive_where::derive_where;
 #[cfg(feature = "nightly")]
-use rustc_macros::{Decodable_NoContext, Encodable_NoContext, HashStable_NoContext};
+use rustc_macros::{Decodable_NoContext, Encodable_NoContext, HashStable, HashStable_NoContext};
 use rustc_type_ir_macros::{
     GenericTypeVisitable, Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic,
 };
@@ -25,7 +25,7 @@ pub type CanonicalResponse<I> = Canonical<I, Response<I>>;
 pub type QueryResult<I> = Result<CanonicalResponse<I>, NoSolution>;
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(HashStable))]
 pub struct NoSolution;
 
 /// A goal is a statement, i.e. `predicate`, we want to prove
@@ -67,7 +67,7 @@ impl<I: Interner, P> Goal<I, P> {
 ///
 /// It is also used by proof tree visitors, e.g. for diagnostics purposes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(HashStable))]
 pub enum GoalSource {
     Misc,
     /// A nested goal required to prove that types are equal/subtypes.
@@ -217,10 +217,7 @@ pub enum AliasBoundKind {
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(HashStable_NoContext, Encodable_NoContext, Decodable_NoContext)
-)]
+#[cfg_attr(feature = "nightly", derive(HashStable, Encodable_NoContext, Decodable_NoContext))]
 pub enum BuiltinImplSource {
     /// A built-in impl that is considered trivial, without any nested requirements. They
     /// are preferred over where-clauses, and we want to track them explicitly.
@@ -286,10 +283,42 @@ impl<I: Interner> NestedNormalizationGoals<I> {
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(HashStable))]
 pub enum Certainty {
     Yes,
-    Maybe { cause: MaybeCause, opaque_types_jank: OpaqueTypesJank },
+    Maybe(MaybeInfo),
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+pub struct MaybeInfo {
+    pub cause: MaybeCause,
+    pub opaque_types_jank: OpaqueTypesJank,
+    pub stalled_on_coroutines: StalledOnCoroutines,
+}
+
+impl MaybeInfo {
+    pub const AMBIGUOUS: MaybeInfo = MaybeInfo {
+        cause: MaybeCause::Ambiguity,
+        opaque_types_jank: OpaqueTypesJank::AllGood,
+        stalled_on_coroutines: StalledOnCoroutines::No,
+    };
+
+    fn and(self, other: MaybeInfo) -> MaybeInfo {
+        MaybeInfo {
+            cause: self.cause.and(other.cause),
+            opaque_types_jank: self.opaque_types_jank.and(other.opaque_types_jank),
+            stalled_on_coroutines: self.stalled_on_coroutines.and(other.stalled_on_coroutines),
+        }
+    }
+
+    pub fn or(self, other: MaybeInfo) -> MaybeInfo {
+        MaybeInfo {
+            cause: self.cause.or(other.cause),
+            opaque_types_jank: self.opaque_types_jank.or(other.opaque_types_jank),
+            stalled_on_coroutines: self.stalled_on_coroutines.or(other.stalled_on_coroutines),
+        }
+    }
 }
 
 /// Supporting not-yet-defined opaque types in HIR typeck is somewhat
@@ -321,7 +350,7 @@ pub enum Certainty {
 /// a goal. It is good enough for now and only matters for very rare type inference
 /// edge cases. We can improve this later on if necessary.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(HashStable))]
 pub enum OpaqueTypesJank {
     AllGood,
     ErrorIfRigidSelfTy,
@@ -348,11 +377,33 @@ impl OpaqueTypesJank {
     }
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+pub enum StalledOnCoroutines {
+    Yes,
+    No,
+}
+
+impl StalledOnCoroutines {
+    fn and(self, other: StalledOnCoroutines) -> StalledOnCoroutines {
+        match (self, other) {
+            (StalledOnCoroutines::No, StalledOnCoroutines::No) => StalledOnCoroutines::No,
+            (StalledOnCoroutines::Yes, _) | (_, StalledOnCoroutines::Yes) => {
+                StalledOnCoroutines::Yes
+            }
+        }
+    }
+
+    pub fn or(self, other: StalledOnCoroutines) -> StalledOnCoroutines {
+        // `StalledOnCoroutines::Yes` is contagious: obtaining `Certainty::Maybe`
+        // while a candidate is stalled on a coroutine might have been
+        // `Certainty::Yes` or `NoSolution` if it were not stalled.
+        StalledOnCoroutines::and(self, other)
+    }
+}
+
 impl Certainty {
-    pub const AMBIGUOUS: Certainty = Certainty::Maybe {
-        cause: MaybeCause::Ambiguity,
-        opaque_types_jank: OpaqueTypesJank::AllGood,
-    };
+    pub const AMBIGUOUS: Certainty = Certainty::Maybe(MaybeInfo::AMBIGUOUS);
 
     /// Use this function to merge the certainty of multiple nested subgoals.
     ///
@@ -371,27 +422,24 @@ impl Certainty {
             (Certainty::Yes, Certainty::Yes) => Certainty::Yes,
             (Certainty::Yes, Certainty::Maybe { .. }) => other,
             (Certainty::Maybe { .. }, Certainty::Yes) => self,
-            (
-                Certainty::Maybe { cause: a_cause, opaque_types_jank: a_jank },
-                Certainty::Maybe { cause: b_cause, opaque_types_jank: b_jank },
-            ) => Certainty::Maybe {
-                cause: a_cause.and(b_cause),
-                opaque_types_jank: a_jank.and(b_jank),
-            },
+            (Certainty::Maybe(a_maybe), Certainty::Maybe(b_maybe)) => {
+                Certainty::Maybe(a_maybe.and(b_maybe))
+            }
         }
     }
 
     pub const fn overflow(suggest_increasing_limit: bool) -> Certainty {
-        Certainty::Maybe {
+        Certainty::Maybe(MaybeInfo {
             cause: MaybeCause::Overflow { suggest_increasing_limit, keep_constraints: false },
             opaque_types_jank: OpaqueTypesJank::AllGood,
-        }
+            stalled_on_coroutines: StalledOnCoroutines::No,
+        })
     }
 }
 
 /// Why we failed to evaluate a goal.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(HashStable))]
 pub enum MaybeCause {
     /// We failed due to ambiguity. This ambiguity can either
     /// be a true ambiguity, i.e. there are multiple different answers,
@@ -464,7 +512,7 @@ pub enum AdtDestructorKind {
 /// Which sizedness trait - `Sized`, `MetaSized`? `PointeeSized` is omitted as it is removed during
 /// lowering.
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(HashStable))]
 pub enum SizedTraitKind {
     /// `Sized` trait
     Sized,
