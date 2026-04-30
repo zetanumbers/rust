@@ -95,12 +95,13 @@ pub(crate) fn clean_doc_module<'tcx>(doc: &DocModule<'tcx>, cx: &mut DocContext<
     // This covers the case where somebody does an import which should pull in an item,
     // but there's already an item with the same namespace and same name. Rust gives
     // priority to the not-imported one, so we should, too.
-    items.extend(doc.items.values().flat_map(|(item, renamed, import_ids)| {
+    items.extend(doc.items.values().flat_map(|entry| {
         // First, lower everything other than glob imports.
+        let item = entry.item;
         if matches!(item.kind, hir::ItemKind::Use(_, hir::UseKind::Glob)) {
             return Vec::new();
         }
-        let v = clean_maybe_renamed_item(cx, item, *renamed, import_ids);
+        let v = clean_maybe_renamed_item(cx, item, entry.renamed, &entry.import_ids);
         for item in &v {
             if let Some(name) = item.name
                 && (cx.document_hidden() || !item.is_doc_hidden())
@@ -130,10 +131,11 @@ pub(crate) fn clean_doc_module<'tcx>(doc: &DocModule<'tcx>, cx: &mut DocContext<
             _ => unreachable!(),
         }
     }));
-    items.extend(doc.items.values().flat_map(|(item, renamed, _)| {
+    items.extend(doc.items.values().flat_map(|entry| {
         // Now we actually lower the imports, skipping everything else.
+        let item = entry.item;
         if let hir::ItemKind::Use(path, hir::UseKind::Glob) = item.kind {
-            clean_use_statement(item, *renamed, path, hir::UseKind::Glob, cx, &mut inserted)
+            clean_use_statement(item, entry.renamed, path, hir::UseKind::Glob, cx, &mut inserted)
         } else {
             // skip everything else
             Vec::new()
