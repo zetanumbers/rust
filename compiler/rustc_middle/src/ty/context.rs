@@ -539,14 +539,14 @@ pub struct FreeRegionInfo {
 
 /// This struct should only be created by `create_def`.
 #[derive(Copy, Clone)]
-pub struct TyCtxtFeed<'tcx, KEY: Copy> {
+pub struct TyCtxtFeed<'tcx, K: Copy> {
     pub tcx: TyCtxt<'tcx>,
     // Do not allow direct access, as downstream code must not mutate this field.
-    key: KEY,
+    key: K,
 }
 
 /// Only queries that create a `DefId` are allowed to feed queries for that `DefId`.
-impl<KEY: Copy> !HashStable for TyCtxtFeed<'_, KEY> {}
+impl<K: Copy> !HashStable for TyCtxtFeed<'_, K> {}
 
 /// Some workarounds to use cases that cannot use `create_def`.
 /// Do not add new ways to create `TyCtxtFeed` without consulting
@@ -600,9 +600,9 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 }
 
-impl<'tcx, KEY: Copy> TyCtxtFeed<'tcx, KEY> {
+impl<'tcx, K: Copy> TyCtxtFeed<'tcx, K> {
     #[inline(always)]
-    pub fn key(&self) -> KEY {
+    pub fn key(&self) -> K {
         self.key
     }
 }
