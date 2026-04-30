@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::env::VarError;
 use std::ffi::OsStr;
 use std::hash::{Hash, Hasher};
-use std::marker::{PhantomData, PointeeSized};
+use std::marker::PointeeSized;
 use std::ops::{Bound, Deref};
 use std::sync::{Arc, OnceLock};
 use std::{fmt, iter, mem};
@@ -545,30 +545,8 @@ pub struct TyCtxtFeed<'tcx, KEY: Copy> {
     key: KEY,
 }
 
-/// Never return a `Feed` from a query. Only queries that create a `DefId` are
-/// allowed to feed queries for that `DefId`.
+/// Only queries that create a `DefId` are allowed to feed queries for that `DefId`.
 impl<KEY: Copy> !HashStable for TyCtxtFeed<'_, KEY> {}
-
-/// The same as `TyCtxtFeed`, but does not contain a `TyCtxt`.
-/// Use this to pass around when you have a `TyCtxt` elsewhere.
-/// Just an optimization to save space and not store hundreds of
-/// `TyCtxtFeed` in the resolver.
-#[derive(Copy, Clone)]
-pub struct Feed<'tcx, KEY: Copy> {
-    _tcx: PhantomData<TyCtxt<'tcx>>,
-    // Do not allow direct access, as downstream code must not mutate this field.
-    key: KEY,
-}
-
-/// Never return a `Feed` from a query. Only queries that create a `DefId` are
-/// allowed to feed queries for that `DefId`.
-impl<KEY: Copy> !HashStable for Feed<'_, KEY> {}
-
-impl<T: fmt::Debug + Copy> fmt::Debug for Feed<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.key.fmt(f)
-    }
-}
 
 /// Some workarounds to use cases that cannot use `create_def`.
 /// Do not add new ways to create `TyCtxtFeed` without consulting
@@ -626,23 +604,6 @@ impl<'tcx, KEY: Copy> TyCtxtFeed<'tcx, KEY> {
     #[inline(always)]
     pub fn key(&self) -> KEY {
         self.key
-    }
-
-    #[inline(always)]
-    pub fn downgrade(self) -> Feed<'tcx, KEY> {
-        Feed { _tcx: PhantomData, key: self.key }
-    }
-}
-
-impl<'tcx, KEY: Copy> Feed<'tcx, KEY> {
-    #[inline(always)]
-    pub fn key(&self) -> KEY {
-        self.key
-    }
-
-    #[inline(always)]
-    pub fn upgrade(self, tcx: TyCtxt<'tcx>) -> TyCtxtFeed<'tcx, KEY> {
-        TyCtxtFeed { tcx, key: self.key }
     }
 }
 
