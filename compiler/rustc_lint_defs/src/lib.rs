@@ -12,7 +12,7 @@ use rustc_hir_id::{HirId, ItemLocalId};
 use rustc_macros::{Decodable, Encodable, HashStable_Generic};
 use rustc_span::def_id::DefPathHash;
 pub use rustc_span::edition::Edition;
-use rustc_span::{HashStableContext, Ident, Span, Symbol, sym};
+use rustc_span::{HashStableContext, Ident, Symbol, sym};
 use serde::{Deserialize, Serialize};
 
 pub use self::Level::*;
@@ -650,21 +650,6 @@ pub enum DeprecatedSinceKind {
     InEffect,
     InFuture,
     InVersion(String),
-}
-
-#[derive(Debug)]
-pub enum AttributeLintKind {
-    UnexpectedCfgName((Symbol, Span), Option<(Symbol, Span)>),
-    UnexpectedCfgValue((Symbol, Span), Option<(Symbol, Span)>),
-    MissingOptionsForDiagnosticAttribute { attribute: &'static str, options: &'static str },
-    NonMetaItemDiagnosticAttribute,
-}
-
-#[derive(Debug, Clone, HashStable_Generic)]
-pub enum FormatWarning {
-    PositionalArgument { span: Span, help: String },
-    InvalidSpecifier { name: String, span: Span },
-    DisallowedPlaceholder { span: Span },
 }
 
 pub type RegisteredTools = FxIndexSet<Ident>;
