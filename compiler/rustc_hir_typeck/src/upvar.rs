@@ -207,8 +207,15 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             fake_reads: Default::default(),
         };
 
+        // First collect the captures implied by the operations in the closure
+        // body. This records how each place is actually used: borrowed, modified,
+        // moved, and so on.
         let _ = euv::ExprUseVisitor::new(&closure_fcx, &mut delegate).consume_body(body);
 
+        // `consume_body` only sees how the lowered closure body uses those
+        // places. For `move(foo).clone()`, the body may only borrow the
+        // synthetic local for `foo`, but the source `move(...)` still requires
+        // capturing that local by value.
         let explicit_captures = match self.tcx.hir_node(closure_hir_id).expect_expr().kind {
             hir::ExprKind::Closure(closure) => closure.explicit_captures,
             _ => bug!("expected closure expr for {:?}", closure_hir_id),

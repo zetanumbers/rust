@@ -158,6 +158,9 @@ struct LoweringContext<'a, 'hir> {
     allow_async_fn_traits: Arc<[Symbol]>,
 
     delayed_lints: Vec<DelayedLint>,
+    /// Stack of per-closure `move(...)` substitution maps. Each map is keyed by
+    /// the AST `NodeId` of a `move(...)` occurrence and points to the synthetic
+    /// local used while lowering that closure body.
     move_expr_bindings: Vec<NodeMap<(Ident, HirId)>>,
 
     attribute_parser: AttributeParser<'hir>,
