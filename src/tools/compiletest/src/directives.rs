@@ -6,7 +6,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use semver::Version;
 use tracing::*;
 
-use crate::common::{CodegenBackend, Config, Debugger, FailMode, PassFailMode, PassMode, TestMode};
+use crate::common::{CodegenBackend, Config, Debugger, PassFailMode, TestMode};
 use crate::debuggers::{extract_cdb_version, extract_gdb_version};
 use crate::directives::auxiliary::parse_and_update_aux;
 pub(crate) use crate::directives::auxiliary::{AuxCrate, AuxProps};
@@ -171,7 +171,7 @@ pub(crate) struct TestProps {
     /// None for non-UI tests, and for auxiliary crates used by UI tests.
     pub(crate) pass_fail_mode: Option<PassFailMode>,
     // Ignore `--pass` overrides from the command line for this test.
-    ignore_pass: bool,
+    pub(crate) ignore_pass: bool,
     // rustdoc will test the output of the `--test` option
     pub(crate) check_test_line_numbers_match: bool,
     // customized normalization rules
@@ -418,26 +418,6 @@ impl TestProps {
         self.pass_fail_mode = Some(mode);
     }
 
-    pub(crate) fn fail_mode(&self) -> Option<FailMode> {
-        self.pass_fail_mode?.fail_mode()
-    }
-
-    pub(crate) fn pass_mode(&self, config: &Config) -> Option<PassMode> {
-        let declared = self.local_pass_mode()?;
-        if let Some(force_pass_mode) = config.force_pass_mode
-            && !self.ignore_pass
-        {
-            Some(force_pass_mode)
-        } else {
-            Some(declared)
-        }
-    }
-
-    // does not consider CLI override for pass mode
-    pub(crate) fn local_pass_mode(&self) -> Option<PassMode> {
-        self.pass_fail_mode?.pass_mode()
-    }
-
     fn update_add_minicore(&mut self, ln: &DirectiveLine<'_>, config: &Config) {
         let add_minicore = config.parse_name_directive(ln, directives::ADD_MINICORE);
         if add_minicore {
@@ -452,7 +432,7 @@ impl TestProps {
 
             // FIXME(jieyouxu): this check is currently order-dependent, but we should probably
             // collect all directives in one go then perform a validation pass after that.
-            if self.local_pass_mode().is_some_and(|pm| pm == PassMode::Run) {
+            if self.pass_fail_mode == Some(PassFailMode::RunPass) {
                 // `minicore` can only be used with non-run modes, because it's `core` prelude stubs
                 // and can't run.
                 panic!("`add-minicore` cannot be used to run the test binary");

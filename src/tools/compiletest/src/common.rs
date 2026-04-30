@@ -88,44 +88,67 @@ string_enum! {
         CheckPass => "check-pass",
         BuildFail => "build-fail",
         BuildPass => "build-pass",
+        /// Running the program must make it exit with a regular failure exit code
+        /// in the range `1..=127`. If the program is terminated by e.g. a signal
+        /// the test will fail.
         RunFail => "run-fail",
+        /// Running the program must result in a crash, e.g. by `SIGABRT` or
+        /// `SIGSEGV` on Unix or on Windows by having an appropriate NTSTATUS high
+        /// bit in the exit code.
         RunCrash => "run-crash",
+        /// Running the program must either fail or crash. Useful for e.g. sanitizer
+        /// tests since some sanitizer implementations exit the process with code 1
+        /// to in the face of memory errors while others abort (crash) the process
+        /// in the face of memory errors.
         RunFailOrCrash => "run-fail-or-crash",
         RunPass => "run-pass",
     }
 }
 
 impl PassFailMode {
-    pub(crate) fn fail_mode(&self) -> Option<FailMode> {
+    pub(crate) fn is_pass(&self) -> bool {
         match self {
-            PassFailMode::CheckFail => Some(FailMode::Check),
-            PassFailMode::BuildFail => Some(FailMode::Build),
-            PassFailMode::RunFail => Some(FailMode::Run(RunFailMode::Fail)),
-            PassFailMode::RunCrash => Some(FailMode::Run(RunFailMode::Crash)),
-            PassFailMode::RunFailOrCrash => Some(FailMode::Run(RunFailMode::FailOrCrash)),
-
-            PassFailMode::CheckPass | PassFailMode::BuildPass | PassFailMode::RunPass => None,
-        }
-    }
-
-    pub(crate) fn pass_mode(&self) -> Option<PassMode> {
-        match self {
-            PassFailMode::CheckPass => Some(PassMode::Check),
-            PassFailMode::BuildPass => Some(PassMode::Build),
-            PassFailMode::RunPass => Some(PassMode::Run),
+            PassFailMode::CheckPass | PassFailMode::BuildPass | PassFailMode::RunPass => true,
 
             PassFailMode::CheckFail
             | PassFailMode::BuildFail
             | PassFailMode::RunFail
             | PassFailMode::RunCrash
-            | PassFailMode::RunFailOrCrash => None,
+            | PassFailMode::RunFailOrCrash => false,
+        }
+    }
+
+    pub(crate) fn is_check(&self) -> bool {
+        match self {
+            PassFailMode::CheckFail | PassFailMode::CheckPass => true,
+
+            PassFailMode::BuildFail
+            | PassFailMode::BuildPass
+            | PassFailMode::RunFail
+            | PassFailMode::RunCrash
+            | PassFailMode::RunFailOrCrash
+            | PassFailMode::RunPass => false,
+        }
+    }
+
+    pub(crate) fn is_run(&self) -> bool {
+        match self {
+            PassFailMode::CheckFail
+            | PassFailMode::CheckPass
+            | PassFailMode::BuildFail
+            | PassFailMode::BuildPass => false,
+
+            PassFailMode::RunFail
+            | PassFailMode::RunCrash
+            | PassFailMode::RunFailOrCrash
+            | PassFailMode::RunPass => true,
         }
     }
 }
 
 string_enum! {
     #[derive(Clone, Copy, PartialEq, Debug, Hash)]
-    pub(crate) enum PassMode {
+    pub(crate) enum ForcePassMode {
         Check => "check",
         Build => "build",
         Run => "run",
@@ -139,30 +162,6 @@ string_enum! {
         Fail => "run-fail",
         Crash => "run-crash",
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-pub(crate) enum RunFailMode {
-    /// Running the program must make it exit with a regular failure exit code
-    /// in the range `1..=127`. If the program is terminated by e.g. a signal
-    /// the test will fail.
-    Fail,
-    /// Running the program must result in a crash, e.g. by `SIGABRT` or
-    /// `SIGSEGV` on Unix or on Windows by having an appropriate NTSTATUS high
-    /// bit in the exit code.
-    Crash,
-    /// Running the program must either fail or crash. Useful for e.g. sanitizer
-    /// tests since some sanitizer implementations exit the process with code 1
-    /// to in the face of memory errors while others abort (crash) the process
-    /// in the face of memory errors.
-    FailOrCrash,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-pub(crate) enum FailMode {
-    Check,
-    Build,
-    Run(RunFailMode),
 }
 
 string_enum! {
@@ -512,7 +511,7 @@ pub(crate) struct Config {
     /// FIXME: make it even more obvious (especially in PR CI where `--pass=check` is used) when a
     /// pass mode is forced when the test fails, because it can be very non-obvious when e.g. an
     /// error is emitted only when `//@ build-pass` but not `//@ check-pass`.
-    pub(crate) force_pass_mode: Option<PassMode>,
+    pub(crate) force_pass_mode: Option<ForcePassMode>,
 
     /// Explicitly enable or disable running of the target test binary.
     ///
@@ -549,7 +548,7 @@ pub(crate) struct Config {
     /// may override this setting.
     ///
     /// FIXME: this flag / config option is somewhat misleading. For instance, in ui tests, it's
-    /// *only* applied to the [`PassMode::Run`] test crate and not its auxiliaries.
+    /// *only* applied to the [`PassFailMode::RunPass`] test crate and not its auxiliaries.
     pub(crate) optimize_tests: bool,
 
     /// Target platform tuple.

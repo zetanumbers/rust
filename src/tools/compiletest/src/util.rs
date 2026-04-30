@@ -99,6 +99,7 @@ macro_rules! string_enum {
         $(#[$meta:meta])*
         $vis:vis enum $name:ident {
             $(
+                $(#[$variant_meta:meta])*
                 $variant:ident => $repr:expr,
             )*
         }
@@ -106,6 +107,7 @@ macro_rules! string_enum {
         $(#[$meta])*
         $vis enum $name {
             $(
+                $(#[$variant_meta])*
                 $variant,
             )*
         }
