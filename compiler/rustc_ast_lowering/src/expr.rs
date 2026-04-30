@@ -252,6 +252,9 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     if !self.tcx.features().move_expr() {
                         return self.expr_err(*move_kw_span, self.dcx().has_errors().unwrap());
                     }
+                    // `last()` selects the binding map for the closure body currently
+                    // being lowered. The map is keyed by the AST `NodeId`, so `e.id`
+                    // selects the synthetic local for this exact `move(...)` occurrence.
                     if let Some((ident, binding)) = self
                         .move_expr_bindings
                         .last()
@@ -1165,6 +1168,9 @@ impl<'hir> LoweringContext<'_, 'hir> {
             lowered_occurrences.push((occurrence, pat, binding));
         }
 
+        // During body lowering, replace each `move(...)` occurrence with the
+        // synthetic local recorded in this closure's binding map. Nested closures
+        // push their own maps.
         self.move_expr_bindings.push(bindings);
         let mut stmts = Vec::with_capacity(lowered_occurrences.len());
         for (occurrence, pat, _) in &lowered_occurrences {
@@ -1201,6 +1207,8 @@ impl<'hir> LoweringContext<'_, 'hir> {
             ),
             span: self.lower_span(whole_span),
         });
+        // Restore the enclosing closure's substitution map before lowering the
+        // block that contains the synthetic `let`s.
         self.move_expr_bindings.pop();
 
         let stmts = self.arena.alloc_from_iter(stmts);
