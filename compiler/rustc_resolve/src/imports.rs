@@ -787,6 +787,29 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 let resolution = resolution.borrow();
                 let Some(binding) = resolution.best_decl() else { continue };
 
+                // Report "cannot reexport" errors for exotic cases involving macros 2.0
+                // privacy bending or invariant-breaking code under deprecation lints.
+                for decl in [resolution.non_glob_decl, resolution.glob_decl] {
+                    if let Some(decl) = decl
+                        && let DeclKind::Import { source_decl, import } = decl.kind
+                    {
+                        // The source entity is too private to be reexported
+                        // with the given import declaration's visibility.
+                        let ord = source_decl.vis().partial_cmp(decl.vis(), self.tcx);
+                        if matches!(ord, None | Some(Ordering::Less)) {
+                            let ident = match import.kind {
+                                ImportKind::Single { source, .. } => source,
+                                _ => key.ident.orig(resolution.orig_ident_span),
+                            };
+                            if let Some(lint) =
+                                self.report_cannot_reexport(import, source_decl, ident, key.ns)
+                            {
+                                self.lint_buffer.add_early_lint(lint);
+                            }
+                        }
+                    }
+                }
+
                 if let DeclKind::Import { import, .. } = binding.kind
                     && let Some(amb_binding) = binding.ambiguity.get()
                     && binding.res() != Res::Err
@@ -1519,18 +1542,20 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let mut reexport_error = None;
         let mut any_successful_reexport = false;
         self.per_ns(|this, ns| {
-            let Some(binding) = bindings[ns].get().decl().map(|b| b.import_source()) else {
+            let Some(binding) = bindings[ns].get().decl() else {
                 return;
             };
 
             if import.vis.greater_than(binding.vis(), this.tcx) {
-                reexport_error = Some((ns, binding));
+                // In isolation, a declaration like this is not an error, but if *all* 1-3
+                // declarations introduced by the import are more private than the import item's
+                // nominal visibility, then it's an error.
+                reexport_error = Some((ns, binding.import_source()));
             } else {
                 any_successful_reexport = true;
             }
         });
 
-        // All namespaces must be re-exported with extra visibility for an error to occur.
         if !any_successful_reexport {
             let (ns, binding) = reexport_error.unwrap();
             if let Some(lint) = self.report_cannot_reexport(import, binding, ident, ns) {
