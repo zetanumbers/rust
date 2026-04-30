@@ -1,5 +1,4 @@
 //@ check-fail
-//@ ignore-parallel-frontend diagnostics
 #![deny(unused)]
 #![allow(dead_code)]
 

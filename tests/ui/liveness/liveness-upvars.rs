@@ -1,6 +1,5 @@
 //@ edition:2018
 //@ check-pass
-//@ ignore-parallel-frontend diagnostics
 #![feature(coroutines, stmt_expr_attributes)]
 #![warn(unused)]
 #![allow(unreachable_code)]

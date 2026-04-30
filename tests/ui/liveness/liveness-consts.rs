@@ -1,5 +1,4 @@
 //@ check-pass
-//@ ignore-parallel-frontend diagnostics
 #![warn(unused)]
 #![allow(unreachable_code)]
 
