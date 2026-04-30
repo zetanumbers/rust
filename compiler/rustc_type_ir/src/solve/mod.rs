@@ -271,7 +271,7 @@ impl<I: Interner> ExternalConstraintsData<I> {
 /// `Unreachable` is used in places in which leak check isn't done, e.g.
 /// borrowck.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub enum VisibleForLeakCheck {
     Yes,
     No,
