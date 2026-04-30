@@ -220,7 +220,7 @@ impl<'tcx> Ty<'tcx> {
 impl<'tcx> TyCtxt<'tcx> {
     pub fn string_with_limit<T>(self, t: T, length_limit: usize, ns: hir::def::Namespace) -> String
     where
-        T: Copy + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<'b, FmtPrinter<'a, 'b>>>,
+        T: Copy + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<FmtPrinter<'a, 'b>>>,
     {
         let mut type_limit = 50;
         let regular = FmtPrinter::print_string(self, ns, |p| self.lift(t).print(p))
@@ -250,7 +250,7 @@ impl<'tcx> TyCtxt<'tcx> {
     /// where we wrote the file to is only printed once. The path will use the type namespace.
     pub fn short_string<T>(self, t: T, path: &mut Option<PathBuf>) -> String
     where
-        T: Copy + Hash + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<'b, FmtPrinter<'a, 'b>>>,
+        T: Copy + Hash + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<FmtPrinter<'a, 'b>>>,
     {
         self.short_string_namespace(t, path, hir::def::Namespace::TypeNS)
     }
@@ -266,7 +266,7 @@ impl<'tcx> TyCtxt<'tcx> {
         namespace: hir::def::Namespace,
     ) -> String
     where
-        T: Copy + Hash + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<'b, FmtPrinter<'a, 'b>>>,
+        T: Copy + Hash + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<FmtPrinter<'a, 'b>>>,
     {
         let regular = FmtPrinter::print_string(self, namespace, |p| self.lift(t).print(p))
             .expect("could not write to `String`");
