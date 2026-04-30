@@ -82,6 +82,48 @@ string_enum! {
 }
 
 string_enum! {
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub(crate) enum PassFailMode {
+        CheckFail => "check-fail",
+        CheckPass => "check-pass",
+        BuildFail => "build-fail",
+        BuildPass => "build-pass",
+        RunFail => "run-fail",
+        RunCrash => "run-crash",
+        RunFailOrCrash => "run-fail-or-crash",
+        RunPass => "run-pass",
+    }
+}
+
+impl PassFailMode {
+    pub(crate) fn fail_mode(&self) -> Option<FailMode> {
+        match self {
+            PassFailMode::CheckFail => Some(FailMode::Check),
+            PassFailMode::BuildFail => Some(FailMode::Build),
+            PassFailMode::RunFail => Some(FailMode::Run(RunFailMode::Fail)),
+            PassFailMode::RunCrash => Some(FailMode::Run(RunFailMode::Crash)),
+            PassFailMode::RunFailOrCrash => Some(FailMode::Run(RunFailMode::FailOrCrash)),
+
+            PassFailMode::CheckPass | PassFailMode::BuildPass | PassFailMode::RunPass => None,
+        }
+    }
+
+    pub(crate) fn pass_mode(&self) -> Option<PassMode> {
+        match self {
+            PassFailMode::CheckPass => Some(PassMode::Check),
+            PassFailMode::BuildPass => Some(PassMode::Build),
+            PassFailMode::RunPass => Some(PassMode::Run),
+
+            PassFailMode::CheckFail
+            | PassFailMode::BuildFail
+            | PassFailMode::RunFail
+            | PassFailMode::RunCrash
+            | PassFailMode::RunFailOrCrash => None,
+        }
+    }
+}
+
+string_enum! {
     #[derive(Clone, Copy, PartialEq, Debug, Hash)]
     pub(crate) enum PassMode {
         Check => "check",

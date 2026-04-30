@@ -13,11 +13,11 @@ use crate::runtest::{
 
 impl TestCx<'_> {
     pub(super) fn run_ui_test(&self) {
-        if let Some(FailMode::Build) = self.props.fail_mode {
+        if let Some(FailMode::Build) = self.props.fail_mode() {
             // Make sure a build-fail test cannot fail due to failing analysis (e.g. typeck).
             let proc_res = self.compile_test(WillExecute::No, Emit::Metadata);
             self.check_if_test_should_compile(
-                self.props.fail_mode,
+                self.props.fail_mode(),
                 Some(PassMode::Check),
                 &proc_res,
             );
@@ -27,7 +27,7 @@ impl TestCx<'_> {
         let should_run = self.should_run(pm);
         let emit_metadata = self.should_emit_metadata(pm);
         let proc_res = self.compile_test(should_run, emit_metadata);
-        self.check_if_test_should_compile(self.props.fail_mode, pm, &proc_res);
+        self.check_if_test_should_compile(self.props.fail_mode(), pm, &proc_res);
         if matches!(proc_res.truncated, Truncated::Yes)
             && !self.props.dont_check_compiler_stdout
             && !self.props.dont_check_compiler_stderr
@@ -167,7 +167,7 @@ impl TestCx<'_> {
                         &proc_res,
                     );
                 }
-            } else if self.props.fail_mode == Some(FailMode::Run(RunFailMode::Fail)) {
+            } else if self.props.fail_mode() == Some(FailMode::Run(RunFailMode::Fail)) {
                 // If the test is marked as `run-fail` but do not support
                 // unwinding we allow it to crash, since a panic will trigger an
                 // abort (crash) instead of unwind (exit with code 101).
@@ -183,11 +183,11 @@ impl TestCx<'_> {
                     };
                     self.fatal_proc_rec(&err, &proc_res);
                 }
-            } else if self.props.fail_mode == Some(FailMode::Run(RunFailMode::Crash)) {
+            } else if self.props.fail_mode() == Some(FailMode::Run(RunFailMode::Crash)) {
                 if run_result != RunResult::Crash {
                     self.fatal_proc_rec(&format!("test did not crash! {pass_hint}"), &proc_res);
                 }
-            } else if self.props.fail_mode == Some(FailMode::Run(RunFailMode::FailOrCrash)) {
+            } else if self.props.fail_mode() == Some(FailMode::Run(RunFailMode::FailOrCrash)) {
                 if run_result != RunResult::Fail && run_result != RunResult::Crash {
                     self.fatal_proc_rec(
                         &format!("test did not exit with failure or crash! {pass_hint}"),

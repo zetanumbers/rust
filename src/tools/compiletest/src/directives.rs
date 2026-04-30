@@ -6,7 +6,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use semver::Version;
 use tracing::*;
 
-use crate::common::{CodegenBackend, Config, Debugger, FailMode, PassMode, RunFailMode, TestMode};
+use crate::common::{CodegenBackend, Config, Debugger, FailMode, PassFailMode, PassMode, TestMode};
 use crate::debuggers::{extract_cdb_version, extract_gdb_version};
 use crate::directives::auxiliary::parse_and_update_aux;
 pub(crate) use crate::directives::auxiliary::{AuxCrate, AuxProps};
@@ -165,12 +165,13 @@ pub(crate) struct TestProps {
     // error annotations are needed, but this may be updated in the future to
     // include other relaxations.
     pub(crate) known_bug: bool,
-    // How far should the test proceed while still passing.
-    pass_mode: Option<PassMode>,
+    /// Whether this is a check, build, or build-and-run test, and whether the
+    /// final step should succeed or fail.
+    ///
+    /// None for non-UI tests, and for auxiliary crates used by UI tests.
+    pub(crate) pass_fail_mode: Option<PassFailMode>,
     // Ignore `--pass` overrides from the command line for this test.
     ignore_pass: bool,
-    // How far this test should proceed to start failing.
-    pub(crate) fail_mode: Option<FailMode>,
     // rustdoc will test the output of the `--test` option
     pub(crate) check_test_line_numbers_match: bool,
     // customized normalization rules
@@ -296,8 +297,7 @@ impl TestProps {
             incremental_dir: None,
             incremental: false,
             known_bug: false,
-            pass_mode: None,
-            fail_mode: None,
+            pass_fail_mode: None,
             ignore_pass: false,
             check_test_line_numbers_match: false,
             normalize_stdout: vec![],
@@ -343,10 +343,9 @@ impl TestProps {
         props.load_from(testfile, revision, config);
         props.exec_env.push(("RUSTC".to_string(), config.rustc_path.to_string()));
 
-        match (props.pass_mode, props.fail_mode) {
-            (None, None) if config.mode == TestMode::Ui => props.fail_mode = Some(FailMode::Check),
-            (Some(_), Some(_)) => panic!("cannot use a *-fail and *-pass mode together"),
-            _ => {}
+        // UI tests default to `//@ check-fail` if unspecified.
+        if config.mode == TestMode::Ui && props.pass_fail_mode.is_none() {
+            props.pass_fail_mode = Some(PassFailMode::CheckFail);
         }
 
         props
@@ -406,73 +405,37 @@ impl TestProps {
         }
     }
 
-    fn update_fail_mode(&mut self, ln: &DirectiveLine<'_>, config: &Config) {
-        let check_ui = |mode: &str| {
-            if config.mode != TestMode::Ui {
-                panic!("`{}-fail` directive is only supported in UI tests", mode);
-            }
-        };
-        let fail_mode = if config.parse_name_directive(ln, "check-fail") {
-            check_ui("check");
-            Some(FailMode::Check)
-        } else if config.parse_name_directive(ln, "build-fail") {
-            check_ui("build");
-            Some(FailMode::Build)
-        } else if config.parse_name_directive(ln, "run-fail") {
-            check_ui("run");
-            Some(FailMode::Run(RunFailMode::Fail))
-        } else if config.parse_name_directive(ln, "run-crash") {
-            check_ui("run");
-            Some(FailMode::Run(RunFailMode::Crash))
-        } else if config.parse_name_directive(ln, "run-fail-or-crash") {
-            check_ui("run");
-            Some(FailMode::Run(RunFailMode::FailOrCrash))
-        } else {
-            None
-        };
-        match (self.fail_mode, fail_mode) {
-            (None, Some(_)) => self.fail_mode = fail_mode,
-            (Some(_), Some(_)) => panic!("multiple `*-fail` directives in a single test"),
-            (_, None) => {}
+    fn update_pass_fail_mode(&mut self, ln: &DirectiveLine<'_>, config: &Config) {
+        let name = ln.name;
+        if config.mode != TestMode::Ui {
+            panic!("`{name}` directive is only supported in UI tests");
         }
+        if self.pass_fail_mode.is_some() {
+            panic!("multiple `*-fail` or `*-pass` directives in a single test");
+        }
+
+        let mode = ln.name.parse::<PassFailMode>().unwrap();
+        self.pass_fail_mode = Some(mode);
     }
 
-    fn update_pass_mode(&mut self, ln: &DirectiveLine<'_>, config: &Config) {
-        let check_no_run = |s| match (config.mode, s) {
-            (TestMode::Ui, _) => (),
-            (mode, _) => panic!("`{s}` directive is not supported in `{mode}` tests"),
-        };
-        let pass_mode = if config.parse_name_directive(ln, "check-pass") {
-            check_no_run("check-pass");
-            Some(PassMode::Check)
-        } else if config.parse_name_directive(ln, "build-pass") {
-            check_no_run("build-pass");
-            Some(PassMode::Build)
-        } else if config.parse_name_directive(ln, "run-pass") {
-            check_no_run("run-pass");
-            Some(PassMode::Run)
-        } else {
-            None
-        };
-        match (self.pass_mode, pass_mode) {
-            (None, Some(_)) => self.pass_mode = pass_mode,
-            (Some(_), Some(_)) => panic!("multiple `*-pass` directives in a single test"),
-            (_, None) => {}
-        }
+    pub(crate) fn fail_mode(&self) -> Option<FailMode> {
+        self.pass_fail_mode?.fail_mode()
     }
 
     pub(crate) fn pass_mode(&self, config: &Config) -> Option<PassMode> {
-        if !self.ignore_pass && self.fail_mode.is_none() {
-            if let mode @ Some(_) = config.force_pass_mode {
-                return mode;
-            }
+        let declared = self.local_pass_mode()?;
+        if let Some(force_pass_mode) = config.force_pass_mode
+            && !self.ignore_pass
+        {
+            Some(force_pass_mode)
+        } else {
+            Some(declared)
         }
-        self.pass_mode
     }
 
     // does not consider CLI override for pass mode
     pub(crate) fn local_pass_mode(&self) -> Option<PassMode> {
-        self.pass_mode
+        self.pass_fail_mode?.pass_mode()
     }
 
     fn update_add_minicore(&mut self, ln: &DirectiveLine<'_>, config: &Config) {

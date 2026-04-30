@@ -296,7 +296,8 @@ impl<'test> TestCx<'test> {
     fn should_run(&self, pm: Option<PassMode>) -> WillExecute {
         let test_should_run = match self.config.mode {
             TestMode::Ui => {
-                pm == Some(PassMode::Run) || matches!(self.props.fail_mode, Some(FailMode::Run(_)))
+                pm == Some(PassMode::Run)
+                    || matches!(self.props.fail_mode(), Some(FailMode::Run(_)))
             }
             mode => panic!("unimplemented for mode {:?}", mode),
         };
@@ -317,7 +318,7 @@ impl<'test> TestCx<'test> {
     fn should_compile_successfully(&self, pm: Option<PassMode>) -> bool {
         match self.config.mode {
             TestMode::RustdocJs => true,
-            TestMode::Ui => pm.is_some() || self.props.fail_mode > Some(FailMode::Build),
+            TestMode::Ui => pm.is_some() || self.props.fail_mode() > Some(FailMode::Build),
             TestMode::Crashes => false,
             mode => panic!("unimplemented for mode {:?}", mode),
         }
@@ -907,7 +908,7 @@ impl<'test> TestCx<'test> {
     }
 
     fn should_emit_metadata(&self, pm: Option<PassMode>) -> Emit {
-        match (pm, self.props.fail_mode, self.config.mode) {
+        match (pm, self.props.fail_mode(), self.config.mode) {
             (Some(PassMode::Check), ..) | (_, Some(FailMode::Check), TestMode::Ui) => {
                 Emit::Metadata
             }
