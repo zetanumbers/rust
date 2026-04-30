@@ -276,6 +276,8 @@ impl<'ra> ImportData<'ra> {
             vis: self.vis,
             nearest_parent_mod: self.parent_scope.module.nearest_parent_mod().expect_local(),
             is_single: matches!(self.kind, ImportKind::Single { .. }),
+            priv_macro_use: matches!(self.kind, ImportKind::MacroUse { warn_private: true }),
+            span: self.span,
         }
     }
 }
@@ -384,9 +386,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     ) -> Visibility {
         assert!(import.vis.is_accessible_from(import.nearest_parent_mod, self.tcx));
         let decl_vis = if min { decl.min_vis() } else { decl.vis() };
-        if decl_vis.partial_cmp(import.vis, self.tcx) == Some(Ordering::Less)
+        let ord = decl_vis.partial_cmp(import.vis, self.tcx);
+        let extern_crate_hack = pub_use_of_private_extern_crate_hack(import, decl).is_some();
+        if ord == Some(Ordering::Less)
             && decl_vis.is_accessible_from(import.nearest_parent_mod, self.tcx)
-            && pub_use_of_private_extern_crate_hack(import, decl).is_none()
+            && !extern_crate_hack
         {
             // Imported declaration is less visible than the import, but is still visible
             // from the current module, use the declaration's visibility.
@@ -394,12 +398,19 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         } else {
             // Good case - imported declaration is more visible than the import, or the same,
             // use the import's visibility.
+            //
             // Bad case - imported declaration is too private for the current module.
             // It doesn't matter what visibility we choose here (except in the `PRIVATE_MACRO_USE`
-            // and `PUB_USE_OF_PRIVATE_EXTERN_CRATE` cases), because either some error will be
-            // reported, or the import declaration will be thrown away (unfortunately cannot use
-            // delayed bug here for this reason).
+            // and `PUB_USE_OF_PRIVATE_EXTERN_CRATE` cases), because an error will be reported.
             // Use import visibility to keep the all declaration visibilities in a module ordered.
+            if !min
+                && matches!(ord, None | Some(Ordering::Less))
+                && !extern_crate_hack
+                && !import.priv_macro_use
+            {
+                let msg = format!("cannot extend visibility from {decl_vis:?} to {:?}", import.vis);
+                self.dcx().span_delayed_bug(import.span, msg);
+            }
             import.vis
         }
     }
