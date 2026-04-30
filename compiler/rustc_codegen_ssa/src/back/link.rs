@@ -729,9 +729,10 @@ fn report_linker_output(sess: &Session, levels: CodegenLintLevels, stdout: &[u8]
         escaped_stdout = for_each(&stdout, |line, output| {
             // Hide some progress messages from link.exe that we don't care about.
             // See https://github.com/chromium/chromium/blob/bfa41e41145ffc85f041384280caf2949bb7bd72/build/toolchain/win/tool_wrapper.py#L144-L146
-            if line.starts_with("   Creating library")
-                || line.starts_with("Generating code")
-                || line.starts_with("Finished generating code")
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("Creating library")
+                || trimmed.starts_with("Generating code")
+                || trimmed.starts_with("Finished generating code")
             {
                 linker_info += line;
                 linker_info += "\r\n";
