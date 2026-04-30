@@ -10,7 +10,7 @@ use std::slice;
 
 use rustc_abi::ExternAbi;
 use rustc_ast::{AttrStyle, MetaItemKind, ast};
-use rustc_attr_parsing::{AttributeParser, Late};
+use rustc_attr_parsing::AttributeParser;
 use rustc_data_structures::thin_vec::ThinVec;
 use rustc_data_structures::unord::UnordMap;
 use rustc_errors::{DiagCtxtHandle, IntoDiagArg, MultiSpan, msg};
@@ -201,9 +201,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 },
                 Attribute::Parsed(AttributeKind::OnUnimplemented{directive,..}) => {self.check_diagnostic_on_unimplemented(hir_id, directive.as_deref())},
                 Attribute::Parsed(AttributeKind::OnConst{span, ..}) => {self.check_diagnostic_on_const(*span, hir_id, target, item)},
-                Attribute::Parsed(AttributeKind::OnUnmatchArgs { directive, .. }) => {
-                    self.check_diagnostic_on_unmatch_args(hir_id, directive.as_deref())
-                },
                 Attribute::Parsed(AttributeKind::OnMove { directive , .. }) => {
                     self.check_diagnostic_on_move(hir_id, directive.as_deref())
                 },
@@ -256,6 +253,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::NoMangle(..)
                     | AttributeKind::NoStd { .. }
                     | AttributeKind::OnUnknown { .. }
+                    | AttributeKind::OnUnmatchArgs { .. }
                     | AttributeKind::Optimize(..)
                     | AttributeKind::PanicRuntime
                     | AttributeKind::PatchableFunctionEntry { .. }
@@ -383,7 +381,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                         [name, rest@..] => {
                             match BUILTIN_ATTRIBUTE_MAP.get(name) {
                                 Some(_) => {
-                                    if rest.len() > 0 && AttributeParser::<Late>::is_parsed_attribute(slice::from_ref(name)) {
+                                    if rest.len() > 0 && AttributeParser::is_parsed_attribute(slice::from_ref(name)) {
                                         // Check if we tried to use a builtin attribute as an attribute namespace, like `#[must_use::skip]`.
                                         // This check is here to solve https://github.com/rust-lang/rust/issues/137590
                                         // An error is already produced for this case elsewhere
@@ -497,7 +495,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
     fn check_diagnostic_on_unimplemented(&self, hir_id: HirId, directive: Option<&Directive>) {
         if let Some(directive) = directive {
             if let Node::Item(Item {
-                kind: ItemKind::Trait(_, _, _, _, trait_name, generics, _, _),
+                kind: ItemKind::Trait { ident: trait_name, generics, .. },
                 ..
             }) = self.tcx.hir_node(hir_id)
             {
@@ -560,20 +558,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         // FIXME(#155570) Can we do something with generic args here?
         // regardless, we don't check the validity of generic args here
         // ...whose generics would that be, anyway? The traits' or the impls'?
-    }
-
-    /// Checks use of generic formatting parameters in `#[diagnostic::on_unmatch_args]`.
-    fn check_diagnostic_on_unmatch_args(&self, hir_id: HirId, directive: Option<&Directive>) {
-        if let Some(directive) = directive {
-            directive.visit_params(&mut |argument_name, span| {
-                self.tcx.emit_node_span_lint(
-                    MALFORMED_DIAGNOSTIC_FORMAT_LITERALS,
-                    hir_id,
-                    span,
-                    errors::OnUnmatchArgsMalformedFormatLiterals { name: argument_name },
-                )
-            });
-        }
     }
 
     /// Checks use of generic formatting parameters in `#[diagnostic::on_move]`
@@ -931,7 +915,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         match item.kind {
             ItemKind::Enum(_, generics, _) | ItemKind::Struct(_, generics, _)
                 if generics.params.len() != 0 => {}
-            ItemKind::Trait(_, _, _, _, _, generics, _, items)
+            ItemKind::Trait { generics, items, .. }
                 if generics.params.len() != 0
                     || items.iter().any(|item| {
                         matches!(self.tcx.def_kind(item.owner_id), DefKind::AssocTy)
@@ -1043,6 +1027,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
     /// [`check_doc_inline`]: Self::check_doc_inline
     fn check_doc_attrs(&self, attr: &DocAttribute, hir_id: HirId, target: Target) {
         let DocAttribute {
+            first_span: _,
             aliases,
             // valid pretty much anywhere, not checked here?
             // FIXME: should we?
