@@ -54,6 +54,7 @@ use tracing::{debug, instrument};
 
 use super::FnCtxt;
 use crate::expr_use_visitor as euv;
+use crate::expr_use_visitor::Delegate as _;
 
 /// Describe the relationship between the paths of two places
 /// eg:
@@ -214,14 +215,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
         for capture in explicit_captures {
             let place = closure_fcx.place_for_root_variable(closure_def_id, capture.var_hir_id);
-            delegate.capture_information.push((
-                place,
-                ty::CaptureInfo {
-                    capture_kind_expr_id: Some(closure_hir_id),
-                    path_expr_id: Some(closure_hir_id),
-                    capture_kind: UpvarCapture::ByValue,
-                },
-            ));
+            delegate.consume(&PlaceWithHirId { hir_id: capture.var_hir_id, place }, closure_hir_id);
         }
 
         // There are several curious situations with coroutine-closures where
