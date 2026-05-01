@@ -212,7 +212,7 @@ impl<'tcx> FnCtxt<'_, 'tcx> {
             .diverging_type_vars
             .borrow()
             .items()
-            .map(|&ty| self.shallow_resolve(ty))
+            .map(|&ty_id| self.shallow_resolve(Ty::new_var(self.tcx, ty_id)))
             .filter_map(|ty| ty.ty_vid())
             .map(|vid| self.root_var(vid))
             .collect();

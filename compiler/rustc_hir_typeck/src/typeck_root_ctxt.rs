@@ -6,7 +6,7 @@ use rustc_hir::def_id::LocalDefId;
 use rustc_hir::{self as hir, HirId, HirIdMap};
 use rustc_infer::infer::{InferCtxt, InferOk, OpaqueTypeStorageEntries, TyCtxtInferExt};
 use rustc_middle::span_bug;
-use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitableExt, TypingMode};
+use rustc_middle::ty::{self, Ty, TyCtxt, TyVid, TypeVisitableExt, TypingMode};
 use rustc_span::Span;
 use rustc_span::def_id::LocalDefIdMap;
 use rustc_trait_selection::traits::{self, FulfillmentError, TraitEngine, TraitEngineExt as _};
@@ -66,7 +66,7 @@ pub(crate) struct TypeckRootCtxt<'tcx> {
     /// Whenever we introduce an adjustment from `!` into a type variable,
     /// we record that type variable here. This is later used to inform
     /// fallback. See the `fallback` module for details.
-    pub(super) diverging_type_vars: RefCell<UnordSet<Ty<'tcx>>>,
+    pub(super) diverging_type_vars: RefCell<UnordSet<TyVid>>,
 }
 
 impl<'tcx> Deref for TypeckRootCtxt<'tcx> {
