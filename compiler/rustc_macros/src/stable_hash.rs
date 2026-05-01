@@ -38,16 +38,16 @@ fn parse_attributes(field: &syn::Field) -> Attributes {
 }
 
 pub(crate) fn stable_hash_derive(s: synstructure::Structure<'_>) -> proc_macro2::TokenStream {
-    stable_hash_derive_with_mode(s, HashStableMode::Normal)
+    stable_hash_derive_with_mode(s, StableHashMode::Normal)
 }
 
 pub(crate) fn stable_hash_no_context_derive(
     s: synstructure::Structure<'_>,
 ) -> proc_macro2::TokenStream {
-    stable_hash_derive_with_mode(s, HashStableMode::NoContext)
+    stable_hash_derive_with_mode(s, StableHashMode::NoContext)
 }
 
-enum HashStableMode {
+enum StableHashMode {
     // Do a normal derive, where any generic type parameter gets a `StableHash` bound.
     // For example, in `struct Abc<T, U>(T, U)` the added bounds are `T: StableHash` and
     // `U: StableHash`.
@@ -66,11 +66,11 @@ enum HashStableMode {
 
 fn stable_hash_derive_with_mode(
     mut s: synstructure::Structure<'_>,
-    mode: HashStableMode,
+    mode: StableHashMode,
 ) -> proc_macro2::TokenStream {
     let add_bounds = match mode {
-        HashStableMode::Normal => synstructure::AddBounds::Generics,
-        HashStableMode::NoContext => synstructure::AddBounds::Fields,
+        StableHashMode::Normal => synstructure::AddBounds::Generics,
+        StableHashMode::NoContext => synstructure::AddBounds::Fields,
     };
 
     s.add_bounds(add_bounds);
