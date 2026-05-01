@@ -1,4 +1,3 @@
-use rustc_errors::Diagnostic;
 use rustc_hir::attrs::{CrateType, WindowsSubsystemKind};
 use rustc_session::lint::builtin::UNKNOWN_CRATE_TYPES;
 use rustc_span::Symbol;
@@ -61,12 +60,8 @@ impl CombineAttributeParser for CrateTypeParser {
                 let span = n.value_span;
                 cx.emit_lint(
                     UNKNOWN_CRATE_TYPES,
-                    move |dcx, level| {
-                        UnknownCrateTypes {
-                            sugg: candidate
-                                .map(|s| UnknownCrateTypesSuggestion { span, snippet: s }),
-                        }
-                        .into_diag(dcx, level)
+                    UnknownCrateTypes {
+                        sugg: candidate.map(|s| UnknownCrateTypesSuggestion { span, snippet: s }),
                     },
                     span,
                 );

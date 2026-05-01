@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use rustc_errors::{Diagnostic, E0232};
+use rustc_errors::E0232;
 use rustc_hir::AttrPath;
 use rustc_hir::attrs::diagnostic::{
     Directive, FilterFormatString, Flag, FormatArg, FormatString, LitOrArg, Name, NameValue,
@@ -142,10 +142,7 @@ fn merge<T>(
             let first_span = *first_span;
             cx.emit_lint(
                 MALFORMED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| {
-                    IgnoredDiagnosticOption { first_span, later_span, option_name }
-                        .into_diag(dcx, level)
-                },
+                IgnoredDiagnosticOption { first_span, later_span, option_name },
                 later_span,
             );
         }
@@ -169,19 +166,16 @@ fn parse_list<'p>(
             // if the user used non-metaitem syntax. See `ArgParser::from_attr_args`.
             cx.emit_lint(
                 MALFORMED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| NonMetaItemDiagnosticAttribute.into_diag(dcx, level),
+                NonMetaItemDiagnosticAttribute,
                 list.span,
             );
         }
         ArgParser::NoArgs => {
             cx.emit_lint(
                 MALFORMED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| {
-                    MissingOptionsForDiagnosticAttribute {
-                        attribute: mode.as_str(),
-                        options: mode.expected_options(),
-                    }
-                    .into_diag(dcx, level)
+                MissingOptionsForDiagnosticAttribute {
+                    attribute: mode.as_str(),
+                    options: mode.expected_options(),
                 },
                 span,
             );
@@ -189,13 +183,10 @@ fn parse_list<'p>(
         ArgParser::NameValue(_) => {
             cx.emit_lint(
                 MALFORMED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| {
-                    MalFormedDiagnosticAttributeLint {
-                        attribute: mode.as_str(),
-                        options: mode.allowed_options(),
-                        span,
-                    }
-                    .into_diag(dcx, level)
+                MalFormedDiagnosticAttributeLint {
+                    attribute: mode.as_str(),
+                    options: mode.allowed_options(),
+                    span,
                 },
                 span,
             );
@@ -223,13 +214,10 @@ fn parse_directive_items<'p>(
         macro malformed() {{
             cx.emit_lint(
                 MALFORMED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| {
-                    MalFormedDiagnosticAttributeLint {
-                        attribute: mode.as_str(),
-                        options: mode.allowed_options(),
-                        span,
-                    }
-                    .into_diag(dcx, level)
+                MalFormedDiagnosticAttributeLint {
+                    attribute: mode.as_str(),
+                    options: mode.allowed_options(),
+                    span,
                 },
                 span,
             );
@@ -251,11 +239,11 @@ fn parse_directive_items<'p>(
             let first_span = $($first_span)*;
             cx.emit_lint(
                 MALFORMED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| IgnoredDiagnosticOption {
+                IgnoredDiagnosticOption {
                     first_span,
                     later_span: span,
                     option_name: $name,
-                }.into_diag(dcx, level),
+                },
                 span,
             );
         }}
@@ -285,11 +273,7 @@ fn parse_directive_items<'p>(
                         | FormatWarning::PositionalArgument { span }
                         | FormatWarning::IndexedArgument { span }
                         | FormatWarning::DisallowedPlaceholder { span, .. }) = warning;
-                        cx.emit_lint(
-                            MALFORMED_DIAGNOSTIC_FORMAT_LITERALS,
-                            move |dcx, level| warning.into_diag(dcx, level),
-                            span,
-                        );
+                        cx.emit_lint(MALFORMED_DIAGNOSTIC_FORMAT_LITERALS, warning, span);
                     }
 
                     f
@@ -297,13 +281,10 @@ fn parse_directive_items<'p>(
                 Err(e) => {
                     cx.emit_lint(
                         MALFORMED_DIAGNOSTIC_FORMAT_LITERALS,
-                        move |dcx, level| {
-                            WrappedParserError {
-                                description: &e.description,
-                                label: &e.label,
-                                span: slice_span(input.span, e.span.clone(), is_snippet),
-                            }
-                            .into_diag(dcx, level)
+                        WrappedParserError {
+                            description: e.description,
+                            label: e.label,
+                            span: slice_span(input.span, e.span.clone(), is_snippet),
                         },
                         input.span,
                     );
