@@ -23,7 +23,7 @@ use crate::{OmitDoc, ShouldEmit};
 
 pub struct EmitAttribute(
     pub  Box<
-        dyn for<'a> Fn(DiagCtxtHandle<'a>, Level, &Session) -> Diag<'a, ()>
+        dyn for<'a> FnOnce(DiagCtxtHandle<'a>, Level, &Session) -> Diag<'a, ()>
             + DynSend
             + DynSync
             + 'static,

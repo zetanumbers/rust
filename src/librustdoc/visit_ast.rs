@@ -32,7 +32,7 @@ pub(crate) struct Module<'hir> {
     pub(crate) def_id: LocalDefId,
     pub(crate) renamed: Option<Symbol>,
     pub(crate) import_id: Option<LocalDefId>,
-    /// The key is the item `ItemId` and the value is: (item, renamed, Vec<import_id>).
+    /// The key is the item `ItemId`.
     /// We use `FxIndexMap` to keep the insert order.
     ///
     /// `import_id` needs to be a `Vec` because we live in a dark world where you can have code
@@ -52,10 +52,7 @@ pub(crate) struct Module<'hir> {
     /// So in this case, we don't want to have two items but just one with attributes from all
     /// non-glob imports to be merged. Glob imports attributes are always ignored, whether they're
     /// shadowed or not.
-    pub(crate) items: FxIndexMap<
-        (LocalDefId, Option<Symbol>),
-        (&'hir hir::Item<'hir>, Option<Symbol>, Vec<LocalDefId>),
-    >,
+    pub(crate) items: FxIndexMap<(LocalDefId, Option<Symbol>), ItemEntry<'hir>>,
 
     /// (def_id, renamed) -> (res, local_import_id)
     ///
@@ -68,6 +65,13 @@ pub(crate) struct Module<'hir> {
     pub(crate) inlined_foreigns: FxIndexMap<(DefId, Option<Symbol>), (Res, LocalDefId)>,
     /// (item, renamed, import_id)
     pub(crate) foreigns: Vec<(&'hir hir::ForeignItem<'hir>, Option<Symbol>, Option<LocalDefId>)>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ItemEntry<'hir> {
+    pub(crate) item: &'hir hir::Item<'hir>,
+    pub(crate) renamed: Option<Symbol>,
+    pub(crate) import_ids: Vec<LocalDefId>,
 }
 
 impl Module<'_> {
@@ -172,9 +176,10 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
             {
                 let item = self.cx.tcx.hir_expect_item(local_def_id);
                 let (ident, _, _) = item.expect_macro();
-                top_level_module
-                    .items
-                    .insert((local_def_id, Some(ident.name)), (item, None, Vec::new()));
+                top_level_module.items.insert(
+                    (local_def_id, Some(ident.name)),
+                    ItemEntry { item, renamed: None, import_ids: Vec::new() },
+                );
             }
         }
 
@@ -413,10 +418,14 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                     .unwrap()
                     .items
                     .entry(key)
-                    .and_modify(|v| v.2.push(import_id))
-                    .or_insert_with(|| (item, renamed, vec![import_id]));
+                    .and_modify(|v| v.import_ids.push(import_id))
+                    .or_insert_with(|| ItemEntry { item, renamed, import_ids: vec![import_id] });
             } else {
-                self.modules.last_mut().unwrap().items.insert(key, (item, renamed, Vec::new()));
+                self.modules
+                    .last_mut()
+                    .unwrap()
+                    .items
+                    .insert(key, ItemEntry { item, renamed, import_ids: Vec::new() });
             }
         }
     }

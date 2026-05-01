@@ -1,4 +1,3 @@
-use rustc_errors::Diagnostic;
 use rustc_hir::attrs::diagnostic::Directive;
 use rustc_session::lint::builtin::MISPLACED_DIAGNOSTIC_ATTRIBUTES;
 
@@ -32,9 +31,7 @@ impl OnUnknownParser {
             let target_span = cx.target_span;
             cx.emit_lint(
                 MISPLACED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| {
-                    DiagnosticOnUnknownOnlyForImports { target_span }.into_diag(dcx, level)
-                },
+                DiagnosticOnUnknownOnlyForImports { target_span },
                 span,
             );
             return;
