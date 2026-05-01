@@ -20,7 +20,7 @@ enum CachingSourceMap<'a> {
 /// enough information to transform `DefId`s and `HirId`s into stable `DefPath`s (i.e.,
 /// a reference to the `TyCtxt`) and it holds a few caches for speeding up various
 /// things (e.g., each `DefId`/`DefPath` is only hashed once).
-pub struct StableHashingContext<'a> {
+pub struct StableHashState<'a> {
     untracked: &'a Untracked,
     // The value of `-Z incremental-ignore-spans`.
     // This field should only be used by `unstable_opts_incremental_ignore_span`
@@ -29,12 +29,12 @@ pub struct StableHashingContext<'a> {
     hashing_controls: HashingControls,
 }
 
-impl<'a> StableHashingContext<'a> {
+impl<'a> StableHashState<'a> {
     #[inline]
     pub fn new(sess: &'a Session, untracked: &'a Untracked) -> Self {
         let hash_spans_initial = !sess.opts.unstable_opts.incremental_ignore_spans;
 
-        StableHashingContext {
+        StableHashState {
             untracked,
             incremental_ignore_spans: sess.opts.unstable_opts.incremental_ignore_spans,
             caching_source_map: CachingSourceMap::Unused(sess.source_map()),
@@ -72,7 +72,7 @@ impl<'a> StableHashingContext<'a> {
     }
 }
 
-impl<'a> StableHashCtxt for StableHashingContext<'a> {
+impl<'a> StableHashCtxt for StableHashState<'a> {
     /// Hashes a span in a stable way. We can't directly hash the span's `BytePos` fields (that
     /// would be similar to hashing pointers, since those are just offsets into the `SourceMap`).
     /// Instead, we hash the (file name, line, column) triple, which stays the same even if the

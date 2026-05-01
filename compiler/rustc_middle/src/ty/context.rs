@@ -52,7 +52,7 @@ use tracing::{debug, instrument};
 use crate::arena::Arena;
 use crate::dep_graph::dep_node::make_metadata;
 use crate::dep_graph::{DepGraph, DepKindVTable, DepNodeIndex};
-use crate::ich::StableHashingContext;
+use crate::ich::StableHashState;
 use crate::infer::canonical::{CanonicalParamEnvCache, CanonicalVarKind};
 use crate::lint::emit_lint_base;
 use crate::metadata::ModChild;
@@ -1404,11 +1404,8 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     #[inline(always)]
-    pub fn with_stable_hashing_context<R>(
-        self,
-        f: impl FnOnce(StableHashingContext<'_>) -> R,
-    ) -> R {
-        f(StableHashingContext::new(self.sess, &self.untracked))
+    pub fn with_stable_hashing_context<R>(self, f: impl FnOnce(StableHashState<'_>) -> R) -> R {
+        f(StableHashState::new(self.sess, &self.untracked))
     }
 
     #[inline]
