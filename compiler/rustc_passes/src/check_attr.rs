@@ -199,9 +199,9 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 Attribute::Parsed(AttributeKind::RustcMustImplementOneOf { attr_span, fn_names }) => {
                     self.check_rustc_must_implement_one_of(*attr_span, fn_names, hir_id,target)
                 },
-                Attribute::Parsed(AttributeKind::OnUnimplemented{directive,..}) => {self.check_diagnostic_on_unimplemented(hir_id, directive.as_deref())},
+                Attribute::Parsed(AttributeKind::OnUnimplemented{directive}) => {self.check_diagnostic_on_unimplemented(hir_id, directive.as_deref())},
                 Attribute::Parsed(AttributeKind::OnConst{span, ..}) => {self.check_diagnostic_on_const(*span, hir_id, target, item)},
-                Attribute::Parsed(AttributeKind::OnMove { directive , .. }) => {
+                Attribute::Parsed(AttributeKind::OnMove { directive }) => {
                     self.check_diagnostic_on_move(hir_id, directive.as_deref())
                 },
                 Attribute::Parsed(
