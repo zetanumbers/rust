@@ -1609,6 +1609,11 @@ impl Location {
             dominators.dominates(self.block, other.block)
         }
     }
+
+    #[inline]
+    pub fn strictly_dominates(&self, other: Location, dominators: &Dominators<BasicBlock>) -> bool {
+        self.block != other.block && dominators.strictly_dominates(self.block, other.block)
+    }
 }
 
 /// `DefLocation` represents the location of a definition - either an argument or an assignment
