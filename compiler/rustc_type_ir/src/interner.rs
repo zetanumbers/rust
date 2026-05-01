@@ -285,6 +285,8 @@ pub trait Interner:
     type Features: Features<Self>;
     fn features(self) -> Self::Features;
 
+    fn assumptions_on_binders(self) -> bool;
+
     fn coroutine_hidden_types(
         self,
         def_id: Self::CoroutineId,

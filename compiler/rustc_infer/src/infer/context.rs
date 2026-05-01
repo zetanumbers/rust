@@ -30,8 +30,8 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.typing_mode_raw()
     }
 
-    fn higher_ranked_assumptions_v2(&self) -> bool {
-        self.tcx.sess.opts.unstable_opts.higher_ranked_assumptions_v2
+    fn assumptions_on_binders(&self) -> bool {
+        self.tcx.sess.opts.unstable_opts.assumptions_on_binders
     }
 
     fn universe(&self) -> ty::UniverseIndex {
@@ -42,25 +42,38 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.create_next_universe()
     }
 
-    fn insert_universe_assumptions(
+    fn insert_placeholder_assumptions(
         &self,
         u: ty::UniverseIndex,
         assumptions: Option<rustc_type_ir::region_constraint::Assumptions<TyCtxt<'tcx>>>,
     ) {
-        self.universe_assumptions_for_next_solver.borrow_mut().insert(u, assumptions);
+        self.placeholder_assumptions_for_next_solver.borrow_mut().insert(u, assumptions);
     }
 
-    fn get_universe_assumptions(
+    fn get_placeholder_assumptions(
         &self,
         u: ty::UniverseIndex,
     ) -> Option<rustc_type_ir::region_constraint::Assumptions<TyCtxt<'tcx>>> {
-        self.universe_assumptions_for_next_solver.borrow().get(&u).unwrap().as_ref().cloned()
+        self.placeholder_assumptions_for_next_solver.borrow().get(&u).unwrap().as_ref().cloned()
     }
 
-    fn get_solve_region_constraint(
+    fn get_solver_region_constraint(
         &self,
     ) -> rustc_type_ir::region_constraint::RegionConstraint<TyCtxt<'tcx>> {
         self.inner.borrow().solver_region_constraint_storage.get_constraint()
+    }
+
+    fn overwrite_solver_region_constraint(
+        &self,
+        constraint: rustc_type_ir::region_constraint::RegionConstraint<TyCtxt<'tcx>>,
+    ) {
+        let mut inner = self.inner.borrow_mut();
+        use rustc_data_structures::undo_log::UndoLogs;
+
+        use crate::infer::UndoLog;
+        let old_constraint = inner.solver_region_constraint_storage.get_constraint();
+        inner.undo_log.push(UndoLog::OverwriteSolverRegionConstraint { old_constraint });
+        inner.solver_region_constraint_storage.overwrite_solver_region_constraint(constraint);
     }
 
     fn universe_of_ty(&self, vid: ty::TyVid) -> Option<ty::UniverseIndex> {

@@ -247,10 +247,10 @@ pub fn compute_alias_components_recursive<I: Interner>(
 /// }
 /// ```
 ///
-/// If we were given <T as Foo<'b>>::Bar`, we would return
+/// If we were given `<T as Foo<'b>>::Bar`, we would return
 /// `'b`. This doesn't work for higher-ranked bounds such as:
 ///
-/// ```ignore(this does compile today, previously was marked as `compile_fail,E0311`)
+/// ```ignore (this does compile today, previously was marked as compile_fail,E0311)
 /// trait Foo<'a, 'b>
 /// where for<'x> <Self as Foo<'x, 'b>>::Bar: 'x
 /// {

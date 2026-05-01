@@ -81,7 +81,9 @@ impl<'tcx> InferCtxt<'tcx> {
             reported_signature_mismatch: self.reported_signature_mismatch.clone(),
             tainted_by_errors: self.tainted_by_errors.clone(),
             universe: self.universe.clone(),
-            universe_assumptions_for_next_solver: self.universe_assumptions_for_next_solver.clone(),
+            placeholder_assumptions_for_next_solver: self
+                .placeholder_assumptions_for_next_solver
+                .clone(),
             next_trait_solver: self.next_trait_solver,
             obligation_inspector: self.obligation_inspector.clone(),
         }
@@ -107,7 +109,9 @@ impl<'tcx> InferCtxt<'tcx> {
             reported_signature_mismatch: self.reported_signature_mismatch.clone(),
             tainted_by_errors: self.tainted_by_errors.clone(),
             universe: self.universe.clone(),
-            universe_assumptions_for_next_solver: self.universe_assumptions_for_next_solver.clone(),
+            placeholder_assumptions_for_next_solver: self
+                .placeholder_assumptions_for_next_solver
+                .clone(),
             next_trait_solver: self.next_trait_solver,
             obligation_inspector: self.obligation_inspector.clone(),
         };

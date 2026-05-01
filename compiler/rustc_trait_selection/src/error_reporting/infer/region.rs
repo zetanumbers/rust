@@ -292,6 +292,13 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 RegionOriginNote::Plain { span, msg: msg!("...so that the where clause holds") }
                     .add_to_diag(err);
             }
+            SubregionOrigin::SolverRegionConstraint(span) => {
+                RegionOriginNote::Plain {
+                    span,
+                    msg: msg!("this diagnostic is currently WIP while -Zassumptions-on-binders is incomplete"),
+                }
+                .add_to_diag(err);
+            }
         }
     }
 
@@ -559,6 +566,14 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     span,
                     notes: instantiated.into_iter().chain(must_outlive).collect(),
                 })
+            }
+            SubregionOrigin::SolverRegionConstraint(span) => {
+                let mut d = self.dcx().struct_span_err(
+                    span,
+                    "unsatisfied lifetime constraint from -Zassumptions-on-binders :3",
+                );
+                d.note("meoow :c");
+                d
             }
         };
         if sub.is_error() || sup.is_error() {

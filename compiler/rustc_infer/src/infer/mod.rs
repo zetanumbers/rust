@@ -322,7 +322,10 @@ pub struct InferCtxt<'tcx> {
     /// List of assumed wellformed types which we can derive implied
     /// bounds on a `for<...>` from. Only used unstabley and by the
     /// new solver.
-    universe_assumptions_for_next_solver: RefCell<
+    //
+    // FIXME(-Zassumptions-on-binders): This and `universe` should probably be
+    // in `InferCtxtInner` so they can participate in rollbacks and whatnot
+    placeholder_assumptions_for_next_solver: RefCell<
         FxIndexMap<
             ty::UniverseIndex,
             Option<rustc_type_ir::region_constraint::Assumptions<TyCtxt<'tcx>>>,
@@ -440,6 +443,10 @@ pub enum SubregionOrigin<'tcx> {
     },
 
     AscribeUserTypeProvePredicate(Span),
+
+    // FIXME(-Zassumptions-on-binders): this is a temporary hack until we support
+    // proper diagnostics for solver region constraints.
+    SolverRegionConstraint(Span),
 }
 
 // `SubregionOrigin` is used a lot. Make sure it doesn't unintentionally get bigger.
@@ -451,6 +458,7 @@ impl<'tcx> SubregionOrigin<'tcx> {
         match self {
             Self::Subtype(type_trace) => type_trace.cause.to_constraint_category(),
             Self::AscribeUserTypeProvePredicate(span) => ConstraintCategory::Predicate(*span),
+            Self::SolverRegionConstraint(span) => ConstraintCategory::SolverRegionConstraint(*span),
             _ => ConstraintCategory::BoringNoLocation,
         }
     }
@@ -650,7 +658,7 @@ impl<'tcx> InferCtxtBuilder<'tcx> {
             reported_signature_mismatch: Default::default(),
             tainted_by_errors: Cell::new(None),
             universe: Cell::new(ty::UniverseIndex::ROOT),
-            universe_assumptions_for_next_solver: RefCell::new(Default::default()),
+            placeholder_assumptions_for_next_solver: RefCell::new(Default::default()),
             next_trait_solver,
             obligation_inspector: Cell::new(None),
         }
@@ -1705,6 +1713,7 @@ impl<'tcx> SubregionOrigin<'tcx> {
             SubregionOrigin::CompareImplItemObligation { span, .. } => span,
             SubregionOrigin::AscribeUserTypeProvePredicate(span) => span,
             SubregionOrigin::CheckAssociatedTypeBounds { ref parent, .. } => parent.span(),
+            SubregionOrigin::SolverRegionConstraint(a) => a,
         }
     }
 
@@ -1834,6 +1843,15 @@ impl<'tcx> SolverRegionConstraintStorage<'tcx> {
                 self.0 = SolverRegionConstraint::And(and);
             }
             _ => unreachable!(),
+        }
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    fn overwrite_solver_region_constraint(&mut self, constraint: SolverRegionConstraint<'tcx>) {
+        if !constraint.is_and() {
+            self.0 = SolverRegionConstraint::And(vec![constraint].into_boxed_slice())
+        } else {
+            self.0 = constraint;
         }
     }
 }

@@ -69,7 +69,7 @@ use rustc_middle::ty::{
     self, GenericArgKind, GenericArgsRef, PolyTypeOutlivesPredicate, Region, RegionVid, Ty, TyCtxt,
     TypeFoldable as _, TypeVisitableExt,
 };
-use rustc_span::DUMMY_SP;
+use rustc_span::Span;
 use smallvec::smallvec;
 use tracing::{debug, instrument};
 
@@ -147,7 +147,7 @@ impl<'tcx> InferCtxt<'tcx> {
         sub_region: Region<'tcx>,
         cause: &ObligationCause<'tcx>,
     ) {
-        assert!(!self.tcx.sess.opts.unstable_opts.higher_ranked_assumptions_v2);
+        assert!(!self.tcx.sess.opts.unstable_opts.assumptions_on_binders);
 
         // `is_global` means the type has no params, infer, placeholder, or non-`'static`
         // free regions. If the type has none of these things, then we can skip registering
@@ -206,12 +206,13 @@ impl<'tcx> InferCtxt<'tcx> {
     pub fn destructure_solver_region_constraints_for_regionck(
         &self,
         outlives_env: &OutlivesEnvironment<'tcx>,
+        span: Span,
     ) {
         let assumptions = rustc_type_ir::region_constraint::Assumptions::new(
             outlives_env.known_type_outlives().into_iter().cloned().collect(),
             outlives_env.free_region_map().relation.clone(),
         );
-        self.destructure_solve_region_constraints(assumptions, self);
+        self.destructure_solver_region_constraints(assumptions, self, span);
     }
 
     pub fn destructure_solver_region_constraints_for_borrowck(
@@ -220,38 +221,38 @@ impl<'tcx> InferCtxt<'tcx> {
         conversion: impl TypeOutlivesDelegate<'tcx>,
         known_type_outlives: &[PolyTypeOutlivesPredicate<'tcx>],
         region_outlives: TransitiveRelation<RegionVid>,
+        span: Span,
     ) {
         let assumptions = rustc_type_ir::region_constraint::Assumptions::new(
             known_type_outlives.into_iter().cloned().collect(),
             region_outlives.maybe_map(|r| Some(Region::new_var(self.tcx, r))).unwrap(),
         );
-        self.destructure_solve_region_constraints(assumptions, conversion);
+        self.destructure_solver_region_constraints(assumptions, conversion, span);
     }
 
     #[instrument(level = "debug", skip(self, conversion))]
-    pub fn destructure_solve_region_constraints(
+    pub fn destructure_solver_region_constraints(
         &self,
         assumptions: rustc_type_ir::region_constraint::Assumptions<TyCtxt<'tcx>>,
         mut conversion: impl TypeOutlivesDelegate<'tcx>,
+        span: Span,
     ) {
-        if !self.tcx.sess.opts.unstable_opts.higher_ranked_assumptions_v2 {
+        if !self.tcx.sess.opts.unstable_opts.assumptions_on_binders {
             return;
         }
 
         assert!(self.next_trait_solver());
 
-        // FIXME(-Zhigher-ranked-assumptions-v2): Implement diagnostics
-        let origin = SubregionOrigin::Reborrow(DUMMY_SP);
+        let origin = SubregionOrigin::SolverRegionConstraint(span);
         let category = origin.to_constraint_category();
 
         let constraint = self.inner.borrow().solver_region_constraint_storage.get_constraint();
         debug!(?constraint);
         let constraint =
-            rustc_type_ir::region_constraint::destructure_type_outlives_constraints_in_universe(
+            rustc_type_ir::region_constraint::destructure_type_outlives_constraints_in_root(
                 self,
                 constraint,
-                None,
-                &Some(assumptions),
+                &assumptions,
             );
         debug!(?constraint);
         let constraint = rustc_type_ir::region_constraint::evaluate_solver_constraint(&constraint);
@@ -274,9 +275,9 @@ impl<'tcx> InferCtxt<'tcx> {
                         category,
                     );
                 }
-                // FIXME(-Zhigher-ranked-assumptions-v2): actually implement OR as an  OR
+                // FIXME(-Zassumptions-on-binders): actually implement OR as an  OR
                 And(nested) | Or(nested) => constraints.extend(nested),
-                AliasTyOutlivesFromEnv(..) => unreachable!(),
+                AliasTyOutlivesViaEnv(..) => unreachable!(),
                 PlaceholderTyOutlives(..) => unreachable!(),
             }
         }
@@ -300,10 +301,11 @@ impl<'tcx> InferCtxt<'tcx> {
             SubregionOrigin<'tcx>,
         )
             -> Result<PolyTypeOutlivesPredicate<'tcx>, NoSolution>,
+        span: Span,
     ) -> Result<(), (PolyTypeOutlivesPredicate<'tcx>, SubregionOrigin<'tcx>)> {
         assert!(!self.in_snapshot(), "cannot process registered region obligations in a snapshot");
 
-        self.destructure_solver_region_constraints_for_regionck(outlives_env);
+        self.destructure_solver_region_constraints_for_regionck(outlives_env, span);
 
         // Must loop since the process of normalizing may itself register region obligations.
         for iteration in 0.. {

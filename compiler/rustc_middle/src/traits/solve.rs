@@ -50,10 +50,6 @@ impl<'tcx> TypeFoldable<TyCtxt<'tcx>> for ExternalConstraints<'tcx> {
         }
 
         Ok(FallibleTypeFolder::cx(folder).mk_external_constraints(ExternalConstraintsData {
-            solver_region_constraint: self
-                .solver_region_constraint
-                .clone()
-                .try_fold_with(folder)?,
             region_constraints: self.region_constraints.clone().try_fold_with(folder)?,
             opaque_types: self
                 .opaque_types
@@ -76,7 +72,6 @@ impl<'tcx> TypeFoldable<TyCtxt<'tcx>> for ExternalConstraints<'tcx> {
         }
 
         TypeFolder::cx(folder).mk_external_constraints(ExternalConstraintsData {
-            solver_region_constraint: self.solver_region_constraint.clone().fold_with(folder),
             region_constraints: self.region_constraints.clone().fold_with(folder),
             opaque_types: self.opaque_types.iter().map(|opaque| opaque.fold_with(folder)).collect(),
             normalization_nested_goals: self.normalization_nested_goals.clone().fold_with(folder),
@@ -86,8 +81,14 @@ impl<'tcx> TypeFoldable<TyCtxt<'tcx>> for ExternalConstraints<'tcx> {
 
 impl<'tcx> TypeVisitable<TyCtxt<'tcx>> for ExternalConstraints<'tcx> {
     fn visit_with<V: TypeVisitor<TyCtxt<'tcx>>>(&self, visitor: &mut V) -> V::Result {
-        try_visit!(self.region_constraints.visit_with(visitor));
-        try_visit!(self.opaque_types.visit_with(visitor));
-        self.normalization_nested_goals.visit_with(visitor)
+        let ExternalConstraintsData {
+            region_constraints,
+            opaque_types,
+            normalization_nested_goals,
+        } = &**self;
+
+        try_visit!(region_constraints.visit_with(visitor));
+        try_visit!(opaque_types.visit_with(visitor));
+        normalization_nested_goals.visit_with(visitor)
     }
 }

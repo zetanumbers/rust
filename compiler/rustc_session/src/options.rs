@@ -2203,6 +2203,8 @@ options! {
          either `loaded` or `not-loaded`."),
     assume_incomplete_release: bool = (false, parse_bool, [TRACKED],
         "make cfg(version) treat the current version as incomplete (default: no)"),
+    assumptions_on_binders: bool = (false, parse_bool, [TRACKED],
+        "allow deducing higher-ranked outlives assumptions from all binders (`for<'a>`)"),
     autodiff: Vec<crate::config::AutoDiff> = (Vec::new(), parse_autodiff, [TRACKED],
         "a list of autodiff flags to enable
         Mandatory setting:
@@ -2355,8 +2357,6 @@ options! {
     help: bool = (false, parse_no_value, [UNTRACKED], "Print unstable compiler options"),
     higher_ranked_assumptions: bool = (false, parse_bool, [TRACKED],
         "allow deducing higher-ranked outlives assumptions from coroutines when proving auto traits"),
-    higher_ranked_assumptions_v2: bool = (false, parse_bool, [TRACKED],
-        "allow deducing higher-ranked outlives assumptions from all binders (`for<'a>`)"),
     hint_mostly_unused: bool = (false, parse_bool, [TRACKED],
         "hint that most of this crate will go unused, to minimize work for uncalled functions"),
     human_readable_cgu_names: bool = (false, parse_bool, [TRACKED],
