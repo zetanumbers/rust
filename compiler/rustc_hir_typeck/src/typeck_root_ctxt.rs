@@ -1,7 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::ops::Deref;
 
-use rustc_data_structures::unord::UnordSet;
 use rustc_hir::def_id::LocalDefId;
 use rustc_hir::{self as hir, HirId, HirIdMap};
 use rustc_infer::infer::{InferCtxt, InferOk, OpaqueTypeStorageEntries, TyCtxtInferExt};
@@ -66,7 +65,7 @@ pub(crate) struct TypeckRootCtxt<'tcx> {
     /// Whenever we introduce an adjustment from `!` into a type variable,
     /// we record that type variable here. This is later used to inform
     /// fallback. See the `fallback` module for details.
-    pub(super) diverging_type_vars: RefCell<UnordSet<TyVid>>,
+    pub(super) diverging_type_vars: RefCell<Vec<TyVid>>,
 }
 
 impl<'tcx> Deref for TypeckRootCtxt<'tcx> {

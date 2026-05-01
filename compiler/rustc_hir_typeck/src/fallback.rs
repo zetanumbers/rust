@@ -211,7 +211,7 @@ impl<'tcx> FnCtxt<'_, 'tcx> {
         let diverging_roots: UnordSet<ty::TyVid> = self
             .diverging_type_vars
             .borrow()
-            .items()
+            .iter()
             .map(|&ty_id| self.shallow_resolve(Ty::new_var(self.tcx, ty_id)))
             .filter_map(|ty| ty.ty_vid())
             .map(|vid| self.root_var(vid))
