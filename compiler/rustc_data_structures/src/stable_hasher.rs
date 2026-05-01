@@ -26,12 +26,12 @@ pub trait StableHashCtxt {
     /// Compute a `DefPathHash`.
     fn def_path_hash(&self, def_id: RawDefId) -> RawDefPathHash;
 
-    /// Get the hashing controls.
-    fn hashing_controls(&self) -> HashingControls;
+    /// Get the stable hash controls.
+    fn stable_hash_controls(&self) -> StableHashControls;
 
     /// Assert that the provided `StableHashCtxt` is configured with the default
-    /// `HashingControls`. We should always have bailed out before getting to here with a
-    fn assert_default_hashing_controls(&self, msg: &str);
+    /// `StableHashControls`. We should always have bailed out before getting to here with a
+    fn assert_default_stable_hash_controls(&self, msg: &str);
 }
 
 // A type used to work around `Span` not being visible in this crate. It is the same layout as
@@ -612,12 +612,12 @@ where
 
 /// Controls what data we do or do not hash.
 /// Whenever a `StableHash` implementation caches its
-/// result, it needs to include `HashingControls` as part
+/// result, it needs to include `StableHashControls` as part
 /// of the key, to ensure that it does not produce an incorrect
 /// result (for example, using a `Fingerprint` produced while
 /// hashing `Span`s when a `Fingerprint` without `Span`s is
 /// being requested)
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
-pub struct HashingControls {
+pub struct StableHashControls {
     pub hash_spans: bool,
 }

@@ -14,10 +14,10 @@ impl StableHashCtxt for () {
     fn def_path_hash(&self, _: RawDefId) -> RawDefPathHash {
         panic!();
     }
-    fn hashing_controls(&self) -> HashingControls {
+    fn stable_hash_controls(&self) -> StableHashControls {
         panic!();
     }
-    fn assert_default_hashing_controls(&self, _: &str) {
+    fn assert_default_stable_hash_controls(&self, _: &str) {
         panic!();
     }
 }
