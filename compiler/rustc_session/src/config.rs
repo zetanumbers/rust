@@ -1133,7 +1133,7 @@ pub struct OutputFilenames {
     /// preserved with a flag like `-C save-temps`, since these files may be
     /// hard linked.
     // This does not affect incr comp outputs, only where temp files are stored.
-    #[stable_hasher(ignore)]
+    #[stable_hash(ignore)]
     invocation_temp: Option<String>,
 
     explicit_dwo_out_directory: Option<PathBuf>,

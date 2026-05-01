@@ -10,7 +10,7 @@ fn parse_attributes(field: &syn::Field) -> Attributes {
     let mut attrs = Attributes { ignore: false, project: None };
     for attr in &field.attrs {
         let meta = &attr.meta;
-        if !meta.path().is_ident("stable_hasher") {
+        if !meta.path().is_ident("stable_hash") {
             continue;
         }
         let mut any_attr = false;
@@ -31,20 +31,20 @@ fn parse_attributes(field: &syn::Field) -> Attributes {
             Ok(())
         });
         if !any_attr {
-            panic!("error parsing stable_hasher");
+            panic!("error parsing stable_hash");
         }
     }
     attrs
 }
 
-pub(crate) fn hash_stable_derive(s: synstructure::Structure<'_>) -> proc_macro2::TokenStream {
-    hash_stable_derive_with_mode(s, HashStableMode::Normal)
+pub(crate) fn stable_hash_derive(s: synstructure::Structure<'_>) -> proc_macro2::TokenStream {
+    stable_hash_derive_with_mode(s, HashStableMode::Normal)
 }
 
-pub(crate) fn hash_stable_no_context_derive(
+pub(crate) fn stable_hash_no_context_derive(
     s: synstructure::Structure<'_>,
 ) -> proc_macro2::TokenStream {
-    hash_stable_derive_with_mode(s, HashStableMode::NoContext)
+    stable_hash_derive_with_mode(s, HashStableMode::NoContext)
 }
 
 enum HashStableMode {
@@ -64,7 +64,7 @@ enum HashStableMode {
     NoContext,
 }
 
-fn hash_stable_derive_with_mode(
+fn stable_hash_derive_with_mode(
     mut s: synstructure::Structure<'_>,
     mode: HashStableMode,
 ) -> proc_macro2::TokenStream {
@@ -75,8 +75,8 @@ fn hash_stable_derive_with_mode(
 
     s.add_bounds(add_bounds);
 
-    let discriminant = hash_stable_discriminant(&mut s);
-    let body = hash_stable_body(&mut s);
+    let discriminant = stable_hash_discriminant(&mut s);
+    let body = stable_hash_body(&mut s);
 
     s.bound_impl(
         quote!(::rustc_data_structures::stable_hash::StableHash),
@@ -94,7 +94,7 @@ fn hash_stable_derive_with_mode(
     )
 }
 
-fn hash_stable_discriminant(s: &mut synstructure::Structure<'_>) -> proc_macro2::TokenStream {
+fn stable_hash_discriminant(s: &mut synstructure::Structure<'_>) -> proc_macro2::TokenStream {
     match s.ast().data {
         syn::Data::Enum(_) => quote! {
             ::std::mem::discriminant(self).stable_hash(__hcx, __hasher);
@@ -104,7 +104,7 @@ fn hash_stable_discriminant(s: &mut synstructure::Structure<'_>) -> proc_macro2:
     }
 }
 
-fn hash_stable_body(s: &mut synstructure::Structure<'_>) -> proc_macro2::TokenStream {
+fn stable_hash_body(s: &mut synstructure::Structure<'_>) -> proc_macro2::TokenStream {
     s.each(|bi| {
         let attrs = parse_attributes(bi.ast());
         if attrs.ignore {

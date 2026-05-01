@@ -59,10 +59,10 @@ pub fn extension(attr: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 decl_derive!(
-    [StableHash, attributes(stable_hasher)] => stable_hash::hash_stable_derive
+    [StableHash, attributes(stable_hash)] => stable_hash::stable_hash_derive
 );
 decl_derive!(
-    [StableHash_NoContext, attributes(stable_hasher)] => stable_hash::hash_stable_no_context_derive
+    [StableHash_NoContext, attributes(stable_hash)] => stable_hash::stable_hash_no_context_derive
 );
 
 // Encoding and Decoding derives
