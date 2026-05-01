@@ -21,7 +21,7 @@ pub use rustc_stable_hash::{
 /// visible.
 pub trait StableHashCtxt {
     /// The main event: stable hashing of a span.
-    fn span_hash_stable(&mut self, span: RawSpan, hasher: &mut StableHasher);
+    fn stable_hash_span(&mut self, span: RawSpan, hasher: &mut StableHasher);
 
     /// Compute a `DefPathHash`.
     fn def_path_hash(&self, def_id: RawDefId) -> RawDefPathHash;

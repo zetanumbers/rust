@@ -8,7 +8,7 @@ use super::*;
 // need to be updated whenever StableHasher changes its hashing algorithm.
 
 impl StableHashCtxt for () {
-    fn span_hash_stable(&mut self, _: RawSpan, _: &mut StableHasher) {
+    fn stable_hash_span(&mut self, _: RawSpan, _: &mut StableHasher) {
         panic!();
     }
     fn def_path_hash(&self, _: RawDefId) -> RawDefPathHash {
