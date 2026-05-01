@@ -167,18 +167,18 @@ impl<T: StableOrd> StableCompare for T {
 /// Use `#[derive(StableHash)]` instead.
 macro_rules! impl_stable_traits_for_trivial_type {
     ($t:ty) => {
-        impl $crate::stable_hasher::StableHash for $t {
+        impl $crate::stable_hash::StableHash for $t {
             #[inline]
             fn stable_hash<Hcx>(
                 &self,
                 _: &mut Hcx,
-                hasher: &mut $crate::stable_hasher::StableHasher,
+                hasher: &mut $crate::stable_hash::StableHasher,
             ) {
                 ::std::hash::Hash::hash(self, hasher);
             }
         }
 
-        impl $crate::stable_hasher::StableOrd for $t {
+        impl $crate::stable_hash::StableOrd for $t {
             const CAN_USE_UNSTABLE_SORT: bool = true;
 
             // Encoding and decoding doesn't change the bytes of trivial types

@@ -1,7 +1,7 @@
 use std::debug_assert_matches;
 
 use rustc_abi::IntegerType;
-use rustc_data_structures::stable_hasher::StableHasher;
+use rustc_data_structures::stable_hash::StableHasher;
 use rustc_hashes::Hash128;
 use rustc_hir::def::DefKind;
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt};

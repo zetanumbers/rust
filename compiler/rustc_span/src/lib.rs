@@ -31,7 +31,7 @@
 extern crate self as rustc_span;
 
 use derive_where::derive_where;
-use rustc_data_structures::stable_hasher::StableHashCtxt;
+use rustc_data_structures::stable_hash::StableHashCtxt;
 use rustc_data_structures::{AtomicRef, outline};
 use rustc_macros::{Decodable, Encodable, StableHash};
 use rustc_serialize::opaque::{FileEncoder, MemDecoder};
@@ -81,7 +81,7 @@ use std::sync::Arc;
 use std::{fmt, iter};
 
 use md5::{Digest, Md5};
-use rustc_data_structures::stable_hasher::{StableHash, StableHasher};
+use rustc_data_structures::stable_hash::{StableHash, StableHasher};
 use rustc_data_structures::sync::{FreezeLock, FreezeWriteGuard, Lock};
 use rustc_data_structures::unord::UnordMap;
 use rustc_hashes::{Hash64, Hash128};

@@ -79,13 +79,13 @@ fn hash_stable_derive_with_mode(
     let body = hash_stable_body(&mut s);
 
     s.bound_impl(
-        quote!(::rustc_data_structures::stable_hasher::StableHash),
+        quote!(::rustc_data_structures::stable_hash::StableHash),
         quote! {
             #[inline]
-            fn stable_hash<__Hcx: ::rustc_data_structures::stable_hasher::StableHashCtxt>(
+            fn stable_hash<__Hcx: ::rustc_data_structures::stable_hash::StableHashCtxt>(
                 &self,
                 __hcx: &mut __Hcx,
-                __hasher: &mut ::rustc_data_structures::stable_hasher::StableHasher
+                __hasher: &mut ::rustc_data_structures::stable_hash::StableHasher
             ) {
                 #discriminant
                 match *self { #body }

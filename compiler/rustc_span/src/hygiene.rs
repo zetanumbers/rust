@@ -30,7 +30,7 @@ use std::{fmt, iter, mem};
 
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_data_structures::stable_hasher::{
+use rustc_data_structures::stable_hash::{
     StableHash, StableHashCtxt, StableHasher, ToStableHashKey,
 };
 use rustc_data_structures::sync::Lock;

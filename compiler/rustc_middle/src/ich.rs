@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use rustc_data_structures::stable_hasher::{
+use rustc_data_structures::stable_hash::{
     RawDefId, RawDefPathHash, RawSpan, StableHash, StableHashControls, StableHashCtxt, StableHasher,
 };
 use rustc_hir::def_id::{DefId, LocalDefId};
