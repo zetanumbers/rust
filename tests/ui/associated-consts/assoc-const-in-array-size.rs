@@ -1,6 +1,6 @@
 //@ run-pass
-// #24947 ICE using a trait-associated const in an array size
-
+// Regression test for https://github.com/rust-lang/rust/issues/24947
+// ICE using a trait-associated const in an array size
 
 struct Foo;
 

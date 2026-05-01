@@ -1,5 +1,5 @@
 error[E0599]: no associated function or constant named `BYTES` found for type `usize` in the current scope
-  --> $DIR/issue-28586.rs:4:26
+  --> $DIR/no-assoc-item-bytes-on-usize.rs:4:26
    |
 LL | impl Foo for [u8; usize::BYTES] {}
    |                          ^^^^^ associated function or constant not found in `usize`
