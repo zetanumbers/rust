@@ -2046,6 +2046,7 @@ symbols! {
         thumb2,
         thumb_mode: "thumb-mode",
         tmm_reg,
+        to_owned_method,
         to_string,
         to_vec,
         tool_attributes,
