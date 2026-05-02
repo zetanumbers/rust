@@ -1,5 +1,5 @@
 error: `#[inline]` attribute cannot be used on statements
-  --> $DIR/issue-43988.rs:5:5
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:7:5
    |
 LL |     #[inline]
    |     ^^^^^^^^^
@@ -7,7 +7,7 @@ LL |     #[inline]
    = help: `#[inline]` can only be applied to functions
 
 error[E0539]: malformed `inline` attribute input
-  --> $DIR/issue-43988.rs:10:5
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:12:5
    |
 LL |     #[inline(XYZ)]
    |     ^^^^^^^^^---^^
@@ -28,7 +28,7 @@ LL +     #[inline]
    |
 
 error: `#[inline]` attribute cannot be used on statements
-  --> $DIR/issue-43988.rs:10:5
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:12:5
    |
 LL |     #[inline(XYZ)]
    |     ^^^^^^^^^^^^^^
@@ -36,7 +36,7 @@ LL |     #[inline(XYZ)]
    = help: `#[inline]` can only be applied to functions
 
 error[E0552]: unrecognized representation hint
-  --> $DIR/issue-43988.rs:15:12
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:17:12
    |
 LL |     #[repr(nothing)]
    |            ^^^^^^^
@@ -45,7 +45,7 @@ LL |     #[repr(nothing)]
    = note: for more information, visit <https://doc.rust-lang.org/reference/type-layout.html?highlight=repr#representations>
 
 error[E0552]: unrecognized representation hint
-  --> $DIR/issue-43988.rs:19:12
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:21:12
    |
 LL |     #[repr(something_not_real)]
    |            ^^^^^^^^^^^^^^^^^^
@@ -54,7 +54,7 @@ LL |     #[repr(something_not_real)]
    = note: for more information, visit <https://doc.rust-lang.org/reference/type-layout.html?highlight=repr#representations>
 
 error[E0539]: malformed `repr` attribute input
-  --> $DIR/issue-43988.rs:25:5
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:27:5
    |
 LL |     #[repr]
    |     ^^^^^^^ expected this to be a list
@@ -62,7 +62,7 @@ LL |     #[repr]
    = note: for more information, visit <https://doc.rust-lang.org/reference/type-layout.html#representations>
 
 error[E0539]: malformed `inline` attribute input
-  --> $DIR/issue-43988.rs:31:5
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:33:5
    |
 LL |     #[inline(ABC)]
    |     ^^^^^^^^^---^^
@@ -83,7 +83,7 @@ LL +     #[inline]
    |
 
 error: `#[inline]` attribute cannot be used on expressions
-  --> $DIR/issue-43988.rs:31:5
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:33:5
    |
 LL |     #[inline(ABC)]
    |     ^^^^^^^^^^^^^^
@@ -91,7 +91,7 @@ LL |     #[inline(ABC)]
    = help: `#[inline]` can only be applied to functions
 
 error[E0539]: malformed `repr` attribute input
-  --> $DIR/issue-43988.rs:36:14
+  --> $DIR/attribute-on-wrong-item-inline-repr.rs:38:14
    |
 LL |     let _z = #[repr] 1;
    |              ^^^^^^^ expected this to be a list

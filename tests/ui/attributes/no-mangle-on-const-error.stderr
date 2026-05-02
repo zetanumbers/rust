@@ -1,5 +1,5 @@
 error: const items should never be `#[no_mangle]`
-  --> $DIR/issue-45562.rs:5:14
+  --> $DIR/no-mangle-on-const-error.rs:7:14
    |
 LL | #[no_mangle] pub const RAH: usize = 5;
    |              ----------^^^^^^^^^^^^^^^
