@@ -484,7 +484,11 @@ impl<'a, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'tcx> {
 
                 ty::PredicateKind::Clause(ty::ClauseKind::RegionOutlives(data)) => {
                     if infcx.considering_regions {
-                        infcx.register_region_outlives_constraint(data, &obligation.cause);
+                        infcx.register_region_outlives_constraint(
+                            data,
+                            ty::VisibleForLeakCheck::Yes,
+                            &obligation.cause,
+                        );
                     }
 
                     ProcessResult::Changed(Default::default())
