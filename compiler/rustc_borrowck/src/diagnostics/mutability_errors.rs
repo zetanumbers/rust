@@ -736,33 +736,35 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
                         let index_ty =
                             self.infcx.tcx.typeck(val.hir_id.owner.def_id).expr_ty(index);
 
-                        let count_refs_diff: isize =
-                            count_ty_refs(index_ty) as isize - count_ty_refs(key_ty) as isize;
-
                         let (borrowed_prefix, borrowed_index);
 
-                        // only suggest `insert` and `entry` if index is of type K or &{n}K.
+                        // only suggest `insert` and `entry` if index is of type K or &{n}K or *{n}K (when there is a Borrow impl for this case).
                         // We use `peel_refs` because borrow lifetimes may differ in both index and
                         // key. I.e, if they are of the same base type:
                         if index_ty.peel_refs() == key_ty.peel_refs() {
-                            assert!(
-                                count_refs_diff >= 0,
-                                "compiler bug I think, please report this"
-                            );
-                            // if base type is same, borrowed depth must be exact.
-                            let (deref_prefix, deref_index) =
-                                strip_n_refs(index, count_refs_diff as usize)
+                            let (index_refs, key_refs) =
+                                (count_ty_refs(index_ty), count_ty_refs(key_ty));
+
+                            let (deref_prefix, deref_index) = if index_refs >= key_refs {
+                                // index is &{n}K
+                                strip_n_refs(index, index_refs - key_refs)
                                     .map(|val| ("".to_string(), val))
                                     .unwrap_or_else(|(depth, val)| {
                                         (
-                                            "*".repeat(
-                                                usize::try_from(count_refs_diff)
-                                                    .expect("passed assert")
-                                                    - depth,
-                                            ),
+                                            if key_refs == 0 {
+                                                "*".repeat(
+                                                    (index_refs-key_refs).checked_sub(depth).expect("return depth from strip_n_refs should be smaller than the input")
+                                                )
+                                            } else {
+                                                String::new() //if key K is a ref, autoderef finish this for us.
+                                            },
                                             val,
                                         )
-                                    });
+                                    })
+                            } else {
+                                // in this case the minimal ref addition works for all subcases
+                                ("&".repeat(key_refs - index_refs), index)
+                            };
 
                             self.err.multipart_suggestion(
                                 format!("use `.insert()` to insert a value into a `{}`", self.ty),
@@ -803,13 +805,17 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
 
                             // we can make the next suggestions nicer by stripping as many leading `&` as
                             // we can, autoderef will do the rest
-                            (borrowed_prefix, borrowed_index) =
-                                match strip_n_refs(index, 0.max(count_refs_diff - 1) as usize) {
-                                    Ok(val) => (String::new(), val),
-                                    // even if we tried to strip more, we can stop there thanks to
-                                    // autoderef
-                                    Err((_depth, val)) => (String::new(), val),
-                                };
+                            (borrowed_prefix, borrowed_index) = (
+                                String::new(),
+                                if index_refs > key_refs {
+                                    strip_n_refs(index, index_refs - key_refs - 1)
+                                        .unwrap_or_else(|(_depth, val)| val)
+                                    // even if we tried to strip more, we can stop there thanks to autoderef
+                                } else {
+                                    // when the diff is negative or zero, we already are in the index=&Q case.
+                                    index
+                                },
+                            );
                         } else {
                             (borrowed_prefix, borrowed_index) = (String::new(), index)
                         }

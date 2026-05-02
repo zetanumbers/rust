@@ -103,7 +103,6 @@ fn test_b() {
     } // passes
 }
 
-
 /// In this test the key type is C.
 /// The `Borrow<C> for D` implementation changes nothing here, same error as for test_a.
 fn test_c() {
@@ -138,6 +137,30 @@ fn test_d() {
     if let Some(val) = map.get_mut(****index) {
         *val = 23;
     } // passes
+}
+
+#[derive(Hash, PartialEq, Eq)]
+struct S {}
+// it is possible to have a Borrowed version of a type be of the same type but less borrowed.
+// here, a borrowed version of `&&&S` is  `&S`.
+impl Borrow<S> for &&&S {
+    fn borrow(&self) -> &S {
+        self
+    }
+}
+
+/// In this test, the index type is the same base type as the key, but because of a peculiar Borrow
+/// impl, it is of a lesser ref depth than the key.
+/// There are some E0716 errors that result from the suggestion, but they already have diagnostics
+fn test_s() {
+    let mut map = HashMap::<&&&S, usize>::new();
+    let index = &S{};
+    map[index] = 12; //~ ERROR E0594
+    map.insert(&&index, 12); //~ ERROR E0716
+    let val = map.entry(&&index).insert_entry(12);  //~ ERROR E0716
+    if let Some(val) = map.get_mut(index) {
+        *val = 12;
+    };
 }
 
 fn main() {
