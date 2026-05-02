@@ -1,4 +1,4 @@
-// Regression test for issue #28586
+// Regression test for issue https://github.com/rust-lang/rust/issues/28586
 
 pub trait Foo {}
 impl Foo for [u8; usize::BYTES] {}
