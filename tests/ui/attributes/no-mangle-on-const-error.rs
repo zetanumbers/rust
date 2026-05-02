@@ -1,3 +1,5 @@
+//! Regression test for https://github.com/rust-lang/rust/issues/45562
+
 //@ run-rustfix
 
 #![deny(unused_attributes)]

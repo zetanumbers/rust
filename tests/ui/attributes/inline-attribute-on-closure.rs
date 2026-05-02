@@ -1,3 +1,5 @@
+//! Regression test for https://github.com/rust-lang/rust/issues/49632
+
 //@ run-pass
 #![feature(stmt_expr_attributes)]
 
