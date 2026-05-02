@@ -1,3 +1,5 @@
+//! Regression test for https://github.com/rust-lang/rust/issues/43988
+
 #![feature(stmt_expr_attributes)]
 
 fn main() {

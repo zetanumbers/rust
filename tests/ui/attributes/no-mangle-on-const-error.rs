@@ -1,8 +1,10 @@
+//! Regression test for https://github.com/rust-lang/rust/issues/45562
+
 //@ run-rustfix
 
 #![deny(unused_attributes)]
 
-#[no_mangle] pub static RAH: usize = 5;
+#[no_mangle] pub const RAH: usize = 5;
 //~^ ERROR const items should never be `#[no_mangle]`
 
 fn main() {}
