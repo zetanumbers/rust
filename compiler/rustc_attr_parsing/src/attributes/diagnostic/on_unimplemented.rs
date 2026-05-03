@@ -1,4 +1,3 @@
-use rustc_errors::Diagnostic;
 use rustc_hir::attrs::diagnostic::Directive;
 use rustc_session::lint::builtin::MISPLACED_DIAGNOSTIC_ATTRIBUTES;
 
@@ -20,7 +19,7 @@ impl OnUnimplementedParser {
         if !matches!(cx.target, Target::Trait) {
             cx.emit_lint(
                 MISPLACED_DIAGNOSTIC_ATTRIBUTES,
-                move |dcx, level| DiagnosticOnUnimplementedOnlyForTraits.into_diag(dcx, level),
+                DiagnosticOnUnimplementedOnlyForTraits,
                 span,
             );
             return;

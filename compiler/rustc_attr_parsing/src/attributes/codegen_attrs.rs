@@ -1,5 +1,5 @@
 use rustc_hir::attrs::{CoverageAttrKind, OptimizeAttr, RtsanSetting, SanitizerSet, UsedBy};
-use rustc_session::parse::feature_err;
+use rustc_session::errors::feature_err;
 use rustc_span::edition::Edition::Edition2024;
 
 use super::prelude::*;
@@ -195,10 +195,9 @@ pub(crate) struct NakedParser {
 impl AttributeParser for NakedParser {
     const ATTRIBUTES: AcceptMapping<Self> =
         &[(&[sym::naked], template!(Word), |this, cx, args| {
-            if let Err(span) = args.no_args() {
-                cx.adcx().expected_no_args(span);
+            let Some(()) = cx.expect_no_args(args) else {
                 return;
-            }
+            };
 
             if let Some(earlier) = this.span {
                 let span = cx.attr_span;
