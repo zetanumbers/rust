@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::env::VarError;
 use std::ffi::OsStr;
 use std::hash::{Hash, Hasher};
-use std::marker::{PhantomData, PointeeSized};
+use std::marker::PointeeSized;
 use std::ops::{Bound, Deref};
 use std::sync::{Arc, OnceLock};
 use std::{fmt, iter, mem};
@@ -23,7 +23,7 @@ use rustc_data_structures::intern::Interned;
 use rustc_data_structures::jobserver::Proxy;
 use rustc_data_structures::profiling::SelfProfilerRef;
 use rustc_data_structures::sharded::{IntoPointer, ShardedHashMap};
-use rustc_data_structures::stable_hasher::HashStable;
+use rustc_data_structures::stable_hasher::StableHash;
 use rustc_data_structures::steal::Steal;
 use rustc_data_structures::sync::{
     self, DynSend, DynSync, FreezeReadGuard, Lock, RwLock, WorkerLocal,
@@ -539,36 +539,14 @@ pub struct FreeRegionInfo {
 
 /// This struct should only be created by `create_def`.
 #[derive(Copy, Clone)]
-pub struct TyCtxtFeed<'tcx, KEY: Copy> {
+pub struct TyCtxtFeed<'tcx, K: Copy> {
     pub tcx: TyCtxt<'tcx>,
     // Do not allow direct access, as downstream code must not mutate this field.
-    key: KEY,
+    key: K,
 }
 
-/// Never return a `Feed` from a query. Only queries that create a `DefId` are
-/// allowed to feed queries for that `DefId`.
-impl<KEY: Copy, Hcx> !HashStable<Hcx> for TyCtxtFeed<'_, KEY> {}
-
-/// The same as `TyCtxtFeed`, but does not contain a `TyCtxt`.
-/// Use this to pass around when you have a `TyCtxt` elsewhere.
-/// Just an optimization to save space and not store hundreds of
-/// `TyCtxtFeed` in the resolver.
-#[derive(Copy, Clone)]
-pub struct Feed<'tcx, KEY: Copy> {
-    _tcx: PhantomData<TyCtxt<'tcx>>,
-    // Do not allow direct access, as downstream code must not mutate this field.
-    key: KEY,
-}
-
-/// Never return a `Feed` from a query. Only queries that create a `DefId` are
-/// allowed to feed queries for that `DefId`.
-impl<KEY: Copy, Hcx> !HashStable<Hcx> for Feed<'_, KEY> {}
-
-impl<T: fmt::Debug + Copy> fmt::Debug for Feed<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.key.fmt(f)
-    }
-}
+/// Only queries that create a `DefId` are allowed to feed queries for that `DefId`.
+impl<K: Copy> !StableHash for TyCtxtFeed<'_, K> {}
 
 /// Some workarounds to use cases that cannot use `create_def`.
 /// Do not add new ways to create `TyCtxtFeed` without consulting
@@ -622,27 +600,10 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 }
 
-impl<'tcx, KEY: Copy> TyCtxtFeed<'tcx, KEY> {
+impl<'tcx, K: Copy> TyCtxtFeed<'tcx, K> {
     #[inline(always)]
-    pub fn key(&self) -> KEY {
+    pub fn key(&self) -> K {
         self.key
-    }
-
-    #[inline(always)]
-    pub fn downgrade(self) -> Feed<'tcx, KEY> {
-        Feed { _tcx: PhantomData, key: self.key }
-    }
-}
-
-impl<'tcx, KEY: Copy> Feed<'tcx, KEY> {
-    #[inline(always)]
-    pub fn key(&self) -> KEY {
-        self.key
-    }
-
-    #[inline(always)]
-    pub fn upgrade(self, tcx: TyCtxt<'tcx>) -> TyCtxtFeed<'tcx, KEY> {
-        TyCtxtFeed { tcx, key: self.key }
     }
 }
 
@@ -958,7 +919,7 @@ impl<'tcx> TyCtxt<'tcx> {
         (start, end)
     }
 
-    pub fn lift<T: Lift<TyCtxt<'tcx>>>(self, value: T) -> Option<T::Lifted> {
+    pub fn lift<T: Lift<TyCtxt<'tcx>>>(self, value: T) -> T::Lifted {
         value.lift_to_interner(self)
     }
 
@@ -1689,7 +1650,8 @@ macro_rules! nop_lift {
     ($set:ident; $ty:ty => $lifted:ty) => {
         impl<'a, 'tcx> Lift<TyCtxt<'tcx>> for $ty {
             type Lifted = $lifted;
-            fn lift_to_interner(self, tcx: TyCtxt<'tcx>) -> Option<Self::Lifted> {
+            #[track_caller]
+            fn lift_to_interner(self, tcx: TyCtxt<'tcx>) -> Self::Lifted {
                 // Assert that the set has the right type.
                 // Given an argument that has an interned type, the return type has the type of
                 // the corresponding interner set. This won't actually return anything, we're
@@ -1709,12 +1671,10 @@ macro_rules! nop_lift {
                     _type_eq(&interner, &tcx.interners.$set);
                 }
 
-                tcx.interners
-                    .$set
-                    .contains_pointer_to(&InternedInSet(&*self.0.0))
-                    // SAFETY: `self` is interned and therefore valid
-                    // for the entire lifetime of the `TyCtxt`.
-                    .then(|| unsafe { mem::transmute(self) })
+                assert!(tcx.interners.$set.contains_pointer_to(&InternedInSet(&*self.0.0)));
+                // SAFETY: we just checked that `self` is interned and therefore is valid for the
+                // entire lifetime of the `TyCtxt`.
+                unsafe { mem::transmute(self) }
             }
         }
     };
@@ -1724,19 +1684,19 @@ macro_rules! nop_list_lift {
     ($set:ident; $ty:ty => $lifted:ty) => {
         impl<'a, 'tcx> Lift<TyCtxt<'tcx>> for &'a List<$ty> {
             type Lifted = &'tcx List<$lifted>;
-            fn lift_to_interner(self, tcx: TyCtxt<'tcx>) -> Option<Self::Lifted> {
+            fn lift_to_interner(self, tcx: TyCtxt<'tcx>) -> Self::Lifted {
                 // Assert that the set has the right type.
                 if false {
                     let _x: &InternedSet<'tcx, List<$lifted>> = &tcx.interners.$set;
                 }
 
                 if self.is_empty() {
-                    return Some(List::empty());
+                    return List::empty();
                 }
-                tcx.interners
-                    .$set
-                    .contains_pointer_to(&InternedInSet(self))
-                    .then(|| unsafe { mem::transmute(self) })
+                assert!(tcx.interners.$set.contains_pointer_to(&InternedInSet(self)));
+                // SAFETY: we just checked that `self` is interned and therefore is valid for the
+                // entire lifetime of the `TyCtxt`.
+                unsafe { mem::transmute(self) }
             }
         }
     };

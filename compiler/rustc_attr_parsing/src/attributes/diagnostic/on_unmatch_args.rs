@@ -1,4 +1,3 @@
-use rustc_errors::Diagnostic;
 use rustc_hir::attrs::diagnostic::Directive;
 use rustc_session::lint::builtin::MISPLACED_DIAGNOSTIC_ATTRIBUTES;
 
@@ -27,7 +26,7 @@ impl AttributeParser for OnUnmatchArgsParser {
             if !matches!(cx.target, Target::MacroDef) {
                 cx.emit_lint(
                     MISPLACED_DIAGNOSTIC_ATTRIBUTES,
-                    move |dcx, level| DiagnosticOnUnmatchArgsOnlyForMacros.into_diag(dcx, level),
+                    DiagnosticOnUnmatchArgsOnlyForMacros,
                     span,
                 );
                 return;
