@@ -19,6 +19,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRPrinter/IRPrintingPasses.h"
 #include "llvm/LTO/LTO.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ObjectFile.h"
@@ -94,6 +95,25 @@ extern "C" bool LLVMRustHasFeature(LLVMTargetMachineRef TM,
   return MCInfo->checkFeatures(std::string("+") + Feature);
 }
 
+/// Check whether the target has a specific assembly mnemonic like `ret` or
+/// `nop`.
+/// This should be fast enough but if its not we have to look into another
+/// method of checking.
+extern "C" bool LLVMRustTargetHasMnemonic(LLVMTargetMachineRef TM,
+                                          const char *Mnemonic) {
+  TargetMachine *Target = unwrap(TM);
+  const MCInstrInfo *MII = Target->getMCInstrInfo();
+  StringRef MnemonicRef(Mnemonic);
+
+  for (unsigned i = 0; i < MII->getNumOpcodes(); i++) {
+    StringRef Name = MII->getName(i);
+    if (Name.equals_insensitive(MnemonicRef)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 enum class LLVMRustCodeModel {
   Tiny,
   Small,
@@ -165,10 +185,17 @@ static OptimizationLevel fromRust(LLVMRustPassBuilderOptLevel Level) {
     return OptimizationLevel::O2;
   case LLVMRustPassBuilderOptLevel::O3:
     return OptimizationLevel::O3;
+#if LLVM_VERSION_GE(23, 0)
+  case LLVMRustPassBuilderOptLevel::Os:
+    return OptimizationLevel::O2;
+  case LLVMRustPassBuilderOptLevel::Oz:
+    return OptimizationLevel::O2;
+#else
   case LLVMRustPassBuilderOptLevel::Os:
     return OptimizationLevel::Os;
   case LLVMRustPassBuilderOptLevel::Oz:
     return OptimizationLevel::Oz;
+#endif
   default:
     report_fatal_error("Bad PassBuilderOptLevel.");
   }

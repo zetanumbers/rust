@@ -8,7 +8,6 @@ use arrayvec::ArrayVec;
 use itertools::Either;
 use rustc_abi::{ExternAbi, VariantIdx};
 use rustc_ast as ast;
-use rustc_ast::attr::AttributeExt;
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap, FxIndexSet};
 use rustc_data_structures::thin_vec::ThinVec;
 use rustc_hir as hir;
@@ -26,6 +25,7 @@ use rustc_resolve::rustdoc::{
     DocFragment, add_doc_fragment, attrs_to_doc_fragments, inner_docs, span_of_fragments,
 };
 use rustc_session::Session;
+use rustc_span::def_id::CRATE_DEF_ID;
 use rustc_span::hygiene::MacroKind;
 use rustc_span::symbol::{Symbol, kw, sym};
 use rustc_span::{DUMMY_SP, FileName, Ident, Loc, RemapPathScopeComponents};
@@ -406,6 +406,23 @@ fn is_field_vis_inherited(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
 }
 
 impl Item {
+    pub(crate) fn cfg_parent_ids_for_detached_item(&self, tcx: TyCtxt<'_>) -> Vec<LocalDefId> {
+        let Some(def_id) = self.inline_stmt_id.or(self.item_id.as_local_def_id()) else {
+            return Vec::new();
+        };
+        let mut ids = Vec::new();
+        let mut next = def_id;
+        while let Some(parent) = tcx.opt_local_parent(next) {
+            if parent == CRATE_DEF_ID {
+                break;
+            }
+            ids.push(parent);
+            next = parent;
+        }
+        ids.reverse();
+        ids
+    }
+
     /// Returns the effective stability of the item.
     ///
     /// This method should only be called after the `propagate-stability` pass has been run.
@@ -501,11 +518,7 @@ impl Item {
     }
 
     pub(crate) fn attr_span(&self, tcx: TyCtxt<'_>) -> rustc_span::Span {
-        let deprecation_notes = self
-            .attrs
-            .other_attrs
-            .iter()
-            .filter_map(|attr| attr.deprecation_note().map(|note| note.span));
+        let deprecation_notes = find_attr!(&self.attrs.other_attrs, Deprecated { deprecation, .. } => deprecation.note.map(|note| note.span)).flatten();
 
         span_of_fragments(&self.attrs.doc_strings)
             .into_iter()
@@ -1097,6 +1110,12 @@ impl Attributes {
             }
         }
         aliases.into_iter().collect::<Vec<_>>().into()
+    }
+
+    pub(crate) fn merge_with(&mut self, other: Self) {
+        let Self { doc_strings, other_attrs } = other;
+        self.doc_strings.extend(doc_strings);
+        self.other_attrs.extend(other_attrs);
     }
 }
 

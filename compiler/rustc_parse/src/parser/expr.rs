@@ -18,6 +18,7 @@ use rustc_ast::{
     FnRetTy, Guard, Label, MacCall, MetaItemLit, MgcaDisambiguation, Movability, Param,
     RangeLimits, StmtKind, Ty, TyKind, UnOp, UnsafeBinderCastKind, YieldKind,
 };
+use rustc_ast_pretty::pprust;
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_errors::{Applicability, Diag, PResult, StashKey, Subdiagnostic};
 use rustc_literal_escaper::unescape_char;
@@ -352,7 +353,7 @@ impl<'a> Parser<'a> {
     fn error_found_expr_would_be_stmt(&self, lhs: &Expr) {
         self.dcx().emit_err(errors::FoundExprWouldBeStmt {
             span: self.token.span,
-            token: self.token,
+            token: pprust::token_to_string(&self.token),
             suggestion: ExprParenthesesNeeded::surrounding(lhs.span),
         });
     }
@@ -729,7 +730,7 @@ impl<'a> Parser<'a> {
                             token::Lt => {
                                 self.dcx().emit_err(errors::ComparisonInterpretedAsGeneric {
                                     comparison: self.token.span,
-                                    r#type: path,
+                                    r#type: pprust::path_to_string(&path),
                                     args: args_span,
                                     suggestion: errors::ComparisonInterpretedAsGenericSugg {
                                         left: expr.span.shrink_to_lo(),
@@ -739,7 +740,7 @@ impl<'a> Parser<'a> {
                             }
                             token::Shl => self.dcx().emit_err(errors::ShiftInterpretedAsGeneric {
                                 shift: self.token.span,
-                                r#type: path,
+                                r#type: pprust::path_to_string(&path),
                                 args: args_span,
                                 suggestion: errors::ShiftInterpretedAsGenericSugg {
                                     left: expr.span.shrink_to_lo(),
@@ -866,7 +867,7 @@ impl<'a> Parser<'a> {
             // `raw [ const | mut ]`.
             let found_raw = self.eat_keyword(exp!(Raw));
             assert!(found_raw);
-            let mutability = self.parse_const_or_mut().unwrap();
+            let mutability = self.parse_mut_or_const().unwrap();
             (ast::BorrowKind::Raw, mutability)
         } else {
             match self.parse_pin_and_mut() {
@@ -1304,16 +1305,17 @@ impl<'a> Parser<'a> {
                             self.span_to_snippet(close_paren).is_ok_and(|snippet| snippet == ")")
                         {
                             err.cancel();
+                            let type_str = pprust::path_to_string(&path);
                             self.dcx()
                                 .create_err(errors::ParenthesesWithStructFields {
                                     span,
                                     braces_for_struct: errors::BracesForStructLiteral {
                                         first: open_paren,
                                         second: close_paren,
-                                        r#type: path.clone(),
+                                        r#type: type_str.clone(),
                                     },
                                     no_fields_for_fn: errors::NoFieldsForFnCall {
-                                        r#type: path,
+                                        r#type: type_str,
                                         fields: fields
                                             .into_iter()
                                             .map(|field| field.span.until(field.expr.span))
@@ -3464,7 +3466,9 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn eat_metavar_guard(&mut self) -> Option<Box<Guard>> {
-        self.eat_metavar_seq(MetaVarKind::Guard, |this| this.parse_match_arm_guard()).flatten()
+        self.eat_metavar_seq(MetaVarKind::Guard, |this| {
+            this.expect_match_arm_guard(ForceCollect::Yes)
+        })
     }
 
     fn parse_match_arm_guard(&mut self) -> PResult<'a, Option<Box<Guard>>> {
@@ -4036,7 +4040,7 @@ impl<'a> Parser<'a> {
                 return Err(this.dcx().create_err(errors::ExpectedStructField {
                     span: this.look_ahead(1, |t| t.span),
                     ident_span: this.token.span,
-                    token: this.look_ahead(1, |t| *t),
+                    token: pprust::token_to_string(&this.look_ahead(1, |t| *t)),
                 }));
             }
             let (ident, expr) = if is_shorthand {

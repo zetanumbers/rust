@@ -129,18 +129,6 @@ impl<'a> Diagnostic<'a, ()>
     }
 }
 
-pub struct DiagCallback<'a>(
-    pub  &'a Box<
-        dyn for<'b> Fn(DiagCtxtHandle<'b>, Level) -> Diag<'b, ()> + DynSend + DynSync + 'static,
-    >,
-);
-
-impl<'a, 'b> Diagnostic<'a, ()> for DiagCallback<'b> {
-    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
-        (self.0)(dcx, level)
-    }
-}
-
 /// Type used to emit diagnostic through a closure instead of implementing the `Diagnostic` trait.
 pub struct DiagDecorator<F: FnOnce(&mut Diag<'_, ()>)>(pub F);
 
@@ -155,10 +143,7 @@ impl<'a, F: FnOnce(&mut Diag<'_, ()>)> Diagnostic<'a, ()> for DiagDecorator<F> {
 /// Trait implemented by error types. This should not be implemented manually. Instead, use
 /// `#[derive(Subdiagnostic)]` -- see [rustc_macros::Subdiagnostic].
 #[rustc_diagnostic_item = "Subdiagnostic"]
-pub trait Subdiagnostic
-where
-    Self: Sized,
-{
+pub trait Subdiagnostic {
     /// Add a subdiagnostic to an existing diagnostic.
     fn add_to_diag<G: EmissionGuarantee>(self, diag: &mut Diag<'_, G>);
 }

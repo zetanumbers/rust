@@ -696,6 +696,13 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
         tcx.dcx().emit_fatal(errors::CpuRequired);
     }
 
+    if let Some(target_cpu) = &tcx.sess.opts.cg.target_cpu
+        && tcx.sess.target.unsupported_cpus.contains(&target_cpu.into())
+    {
+        // The target cpu is explicitly listed as an unsupported cpu
+        tcx.dcx().emit_fatal(errors::CpuUnsupported { target_cpu: target_cpu.clone() });
+    }
+
     let cgu_name_builder = &mut CodegenUnitNameBuilder::new(tcx);
 
     // Run the monomorphization collector and partition the collected items into
@@ -902,7 +909,7 @@ impl CrateInfo {
         let linked_symbols =
             crate_types.iter().map(|&c| (c, crate::back::linker::linked_symbols(tcx, c))).collect();
         let local_crate_name = tcx.crate_name(LOCAL_CRATE);
-        let windows_subsystem = find_attr!(tcx, crate, WindowsSubsystem(kind, _) => *kind);
+        let windows_subsystem = find_attr!(tcx, crate, WindowsSubsystem(kind) => *kind);
 
         // This list is used when generating the command line to pass through to
         // system linker. The linker expects undefined symbols on the left of the

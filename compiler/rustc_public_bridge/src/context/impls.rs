@@ -53,7 +53,7 @@ impl<'tcx, B: Bridge> AllocRangeHelpers<'tcx> for CompilerCtxt<'tcx, B> {
 }
 
 impl<'tcx, B: Bridge> CompilerCtxt<'tcx, B> {
-    pub fn lift<T: ty::Lift<TyCtxt<'tcx>>>(&self, value: T) -> Option<T::Lifted> {
+    pub fn lift<T: ty::Lift<TyCtxt<'tcx>>>(&self, value: T) -> T::Lifted {
         self.tcx.lift(value)
     }
 
@@ -381,6 +381,16 @@ impl<'tcx, B: Bridge> CompilerCtxt<'tcx, B> {
     ) -> Binder<'tcx, FnSig<'tcx>> {
         let sig = self.tcx.fn_sig(def_id).instantiate(self.tcx, args_ref).skip_norm_wip();
         sig
+    }
+
+    /// Retrieve the constness for the given function definition.
+    pub fn constness(&self, def_id: DefId) -> rustc_hir::Constness {
+        self.tcx.constness(def_id)
+    }
+
+    /// Retrieve the asyncness for the given function definition.
+    pub fn asyncness(&self, def_id: DefId) -> ty::Asyncness {
+        self.tcx.asyncness(def_id)
     }
 
     /// Retrieve the intrinsic definition if the item corresponds one.

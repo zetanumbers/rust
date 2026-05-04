@@ -891,8 +891,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                                     // `generic_const_exprs`
                                     .eq(
                                         DefineOpaqueTypes::Yes,
-                                        ty::AliasTerm::from(a),
-                                        ty::AliasTerm::from(b),
+                                        ty::AliasTerm::from_unevaluated_const(tcx, a),
+                                        ty::AliasTerm::from_unevaluated_const(tcx, b),
                                     )
                                 {
                                     return self.evaluate_predicates_recursively(
@@ -1113,6 +1113,14 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         let reached_depth = stack.reached_depth.get();
         if reached_depth >= stack.depth {
             debug!("CACHE MISS");
+            self.insert_evaluation_cache(param_env, fresh_trait_pred, dep_node, result);
+            stack.cache().on_completion(stack.dfn);
+        } else if let Some(_guar) = self.infcx.tainted_by_errors() {
+            // When an error has occurred, we allow global caching of results even if they
+            // appear stack-dependent. This prevents exponential re-evaluation of cycles
+            // in the presence of errors, avoiding compiler hangs like #150907.
+            // This is safe because compilation will fail anyway.
+            debug!("CACHE MISS (tainted by errors)");
             self.insert_evaluation_cache(param_env, fresh_trait_pred, dep_node, result);
             stack.cache().on_completion(stack.dfn);
         } else {
@@ -1451,7 +1459,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             && let ty::ImplPolarity::Reservation = tcx.impl_polarity(def_id)
         {
             if let Some(intercrate_ambiguity_clauses) = &mut self.intercrate_ambiguity_causes {
-                let message = find_attr!(tcx, def_id, RustcReservationImpl(_, message) => *message);
+                let message = find_attr!(tcx, def_id, RustcReservationImpl(message) => *message);
                 if let Some(message) = message {
                     debug!(
                         "filter_reservation_impls: \
@@ -1761,7 +1769,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         env_predicate: PolyProjectionPredicate<'tcx>,
         potentially_unnormalized_candidates: bool,
     ) -> ProjectionMatchesProjection {
-        debug_assert_eq!(obligation.predicate.def_id, env_predicate.item_def_id());
+        debug_assert_eq!(obligation.predicate.def_id(), env_predicate.item_def_id());
 
         let mut nested_obligations = PredicateObligations::new();
         let infer_predicate = self.infcx.instantiate_binder_with_fresh_vars(
@@ -1797,7 +1805,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             });
 
         if is_match {
-            let generics = self.tcx().generics_of(obligation.predicate.def_id);
+            let generics = self.tcx().generics_of(obligation.predicate.def_id());
             // FIXME(generic_associated_types): Addresses aggressive inference in #92917.
             // If this type is a GAT, and of the GAT args resolve to something new,
             // that means that we must have newly inferred something about the GAT.
