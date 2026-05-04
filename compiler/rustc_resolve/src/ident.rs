@@ -5,10 +5,9 @@ use Namespace::*;
 use rustc_ast::{self as ast, NodeId};
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::def::{DefKind, MacroKinds, Namespace, NonMacroAttrKind, PartialRes, PerNS};
-use rustc_middle::ty::Visibility;
 use rustc_middle::{bug, span_bug};
+use rustc_session::errors::feature_err;
 use rustc_session::lint::builtin::PROC_MACRO_DERIVE_RESOLUTION_FALLBACK;
-use rustc_session::parse::feature_err;
 use rustc_span::edition::Edition;
 use rustc_span::hygiene::{ExpnId, ExpnKind, LocalExpnId, MacroKind, SyntaxContext};
 use rustc_span::{Ident, Span, kw, sym};
@@ -24,9 +23,9 @@ use crate::late::{
 use crate::macros::{MacroRulesScope, sub_namespace_match};
 use crate::{
     AmbiguityError, AmbiguityKind, AmbiguityWarning, BindingKey, CmResolver, Decl, DeclKind,
-    Determinacy, Finalize, IdentKey, ImportKind, LateDecl, LocalModule, Module, ModuleKind,
-    ModuleOrUniformRoot, ParentScope, PathResult, PrivacyError, Res, ResolutionError, Resolver,
-    Scope, ScopeSet, Segment, Stage, Symbol, Used, errors,
+    Determinacy, Finalize, IdentKey, ImportKind, ImportSummary, LateDecl, LocalModule, Module,
+    ModuleKind, ModuleOrUniformRoot, ParentScope, PathResult, PrivacyError, Res, ResolutionError,
+    Resolver, Scope, ScopeSet, Segment, Stage, Symbol, Used, errors,
 };
 
 #[derive(Copy, Clone)]
@@ -485,12 +484,18 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         // We do not need to report them if we are either in speculative resolution,
                         // or in late resolution when everything is already imported and expanded
                         // and no ambiguities exist.
-                        let import_vis = match finalize {
+                        let import = match finalize {
                             None | Some(Finalize { stage: Stage::Late, .. }) => {
                                 return ControlFlow::Break(Ok(decl));
                             }
-                            Some(Finalize { import_vis, .. }) => import_vis,
+                            Some(Finalize { import, .. }) => import,
                         };
+                        this.get_mut().maybe_push_glob_vs_glob_vis_ambiguity(
+                            ident,
+                            orig_ident_span,
+                            decl,
+                            import,
+                        );
 
                         if let Some(&(innermost_decl, _)) = innermost_results.first() {
                             // Found another solution, if the first one was "weak", report an error.
@@ -503,7 +508,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 decl,
                                 scope,
                                 &innermost_results,
-                                import_vis,
+                                import,
                             ) {
                                 // No need to search for more potential ambiguities, one is enough.
                                 return ControlFlow::Break(Ok(innermost_decl));
@@ -780,6 +785,30 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ret.map_err(ControlFlow::Continue)
     }
 
+    fn maybe_push_glob_vs_glob_vis_ambiguity(
+        &mut self,
+        ident: IdentKey,
+        orig_ident_span: Span,
+        decl: Decl<'ra>,
+        import: Option<ImportSummary>,
+    ) {
+        let Some(import) = import else { return };
+        let vis1 = self.import_decl_vis(decl, import);
+        let vis2 = self.import_decl_vis_ext(decl, import, true);
+        if vis1 != vis2 {
+            self.ambiguity_errors.push(AmbiguityError {
+                kind: AmbiguityKind::GlobVsGlob,
+                ambig_vis: Some((vis1, vis2)),
+                ident: ident.orig(orig_ident_span),
+                b1: decl.ambiguity_vis_max.get().unwrap_or(decl),
+                b2: decl.ambiguity_vis_min.get().unwrap_or(decl),
+                scope1: Scope::ModuleGlobs(decl.parent_module.unwrap(), None),
+                scope2: Scope::ModuleGlobs(decl.parent_module.unwrap(), None),
+                warning: Some(AmbiguityWarning::GlobImport),
+            });
+        }
+    }
+
     fn maybe_push_ambiguity(
         &mut self,
         ident: IdentKey,
@@ -790,19 +819,18 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         decl: Decl<'ra>,
         scope: Scope<'ra>,
         innermost_results: &[(Decl<'ra>, Scope<'ra>)],
-        import_vis: Option<Visibility>,
+        import: Option<ImportSummary>,
     ) -> bool {
         let (innermost_decl, innermost_scope) = innermost_results[0];
         let (res, innermost_res) = (decl.res(), innermost_decl.res());
         let ambig_vis = if res != innermost_res {
             None
-        } else if let Some(import_vis) = import_vis
-            && let min =
-                (|d: Decl<'_>| d.vis().min(import_vis.to_def_id(), self.tcx).expect_local())
-            && let (min1, min2) = (min(decl), min(innermost_decl))
-            && min1 != min2
+        } else if let Some(import) = import
+            && let vis1 = self.import_decl_vis(decl, import)
+            && let vis2 = self.import_decl_vis(innermost_decl, import)
+            && vis1 != vis2
         {
-            Some((min1, min2))
+            Some((vis1, vis2))
         } else {
             return false;
         };
@@ -1561,12 +1589,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         let item = if let Some(diag_metadata) = diag_metadata
                             && let Some(current_item) = diag_metadata.current_item
                         {
-                            let span = current_item
+                            let label_span = current_item
                                 .kind
                                 .ident()
                                 .map(|i| i.span)
                                 .unwrap_or(current_item.span);
-                            Some((span, current_item.kind.clone()))
+                            Some((label_span, current_item.span, current_item.kind.clone()))
                         } else {
                             None
                         };
@@ -1655,12 +1683,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         let item = if let Some(diag_metadata) = diag_metadata
                             && let Some(current_item) = diag_metadata.current_item
                         {
-                            let span = current_item
+                            let label_span = current_item
                                 .kind
                                 .ident()
                                 .map(|i| i.span)
                                 .unwrap_or(current_item.span);
-                            Some((span, current_item.kind.clone()))
+                            Some((label_span, current_item.span, current_item.kind.clone()))
                         } else {
                             None
                         };
@@ -1799,6 +1827,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 "too many leading `super` keywords".to_string(),
                                 "there are too many leading `super` keywords".to_string(),
                                 None,
+                                None,
                             )
                         },
                     );
@@ -1838,8 +1867,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 }
             }
 
+            let allow_trailing_self = is_last && name == kw::SelfLower;
+
             // Report special messages for path segment keywords in wrong positions.
-            if ident.is_path_segment_keyword() && segment_idx != 0 {
+            if ident.is_path_segment_keyword() && segment_idx != 0 && !allow_trailing_self {
                 return PathResult::failed(
                     ident,
                     false,
@@ -1859,13 +1890,21 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 format!("global paths cannot start with {name_str}"),
                                 "cannot start with this".to_string(),
                             )
+                        } else if name == kw::SelfLower {
+                            (
+                                format!(
+                                    "`self` in paths can only be used in start position or last position"
+                                ),
+                                "can only be used in path start position or last position"
+                                    .to_string(),
+                            )
                         } else {
                             (
                                 format!("{name_str} in paths can only be used in start position"),
                                 "can only be used in path start position".to_string(),
                             )
                         };
-                        (message, label, None)
+                        (message, label, None, None)
                     },
                 );
             }
@@ -1979,10 +2018,28 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             module_had_parse_errors,
                             module,
                             || {
+                                let import_inherent_item_error_flag =
+                                    self.tcx.features().import_trait_associated_functions()
+                                        && matches!(
+                                            res,
+                                            Res::Def(
+                                                DefKind::Struct
+                                                    | DefKind::Enum
+                                                    | DefKind::Union
+                                                    | DefKind::ForeignTy,
+                                                _
+                                            )
+                                        );
+                                // Show a different error message for items that can have associated items.
                                 let label = format!(
-                                    "`{ident}` is {} {}, not a module",
+                                    "`{ident}` is {} {}, not a module{}",
                                     res.article(),
-                                    res.descr()
+                                    res.descr(),
+                                    if import_inherent_item_error_flag {
+                                        " or a trait"
+                                    } else {
+                                        ""
+                                    }
                                 );
                                 let scope = match &path[..segment_idx] {
                                     [.., prev] => {
@@ -1997,7 +2054,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 // FIXME: reword, as the reason we expected a module is because of
                                 // the following path segment.
                                 let message = format!("cannot find module `{ident}` in {scope}");
-                                (message, label, None)
+                                let note = if import_inherent_item_error_flag {
+                                    Some(
+                                        "cannot import inherent associated items, only trait associated items".to_string(),
+                                    )
+                                } else {
+                                    None
+                                };
+                                (message, label, None, note)
                             },
                         );
                     }
@@ -2022,18 +2086,20 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         module_had_parse_errors,
                         module,
                         || {
-                            this.get_mut().report_path_resolution_error(
-                                path,
-                                opt_ns,
-                                parent_scope,
-                                ribs,
-                                ignore_decl,
-                                ignore_import,
-                                module,
-                                segment_idx,
-                                ident,
-                                diag_metadata,
-                            )
+                            let (message, label, suggestion) =
+                                this.get_mut().report_path_resolution_error(
+                                    path,
+                                    opt_ns,
+                                    parent_scope,
+                                    ribs,
+                                    ignore_decl,
+                                    ignore_import,
+                                    module,
+                                    segment_idx,
+                                    ident,
+                                    diag_metadata,
+                                );
+                            (message, label, suggestion, None)
                         },
                     );
                 }

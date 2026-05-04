@@ -13,7 +13,7 @@ use rustc_infer::traits::{
 };
 use rustc_middle::ty::print::PrintPolyTraitPredicateExt;
 use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitable as _, TypeVisitableExt as _, Unnormalized};
-use rustc_session::parse::feature_err_unstable_feature_bound;
+use rustc_session::errors::feature_err_unstable_feature_bound;
 use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span};
 use tracing::{debug, instrument};
 
@@ -363,6 +363,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     if impl_candidates.len() < 40 {
                         self.report_similar_impl_candidates(
                             impl_candidates.as_slice(),
+                            obligation,
                             trait_pred,
                             obligation.cause.body_id,
                             &mut err,
@@ -579,7 +580,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 if let Err(guar) = self
                     .tcx
                     .ensure_result()
-                    .coherent_trait(self.tcx.parent(data.projection_term.def_id))
+                    .coherent_trait(self.tcx.parent(data.projection_term.def_id()))
                 {
                     // Avoid bogus "type annotations needed `Foo: Bar`" errors on `impl Bar for Foo` in case
                     // other `Foo` impls are incoherent.

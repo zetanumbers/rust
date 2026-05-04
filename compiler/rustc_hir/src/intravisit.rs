@@ -71,11 +71,6 @@ use rustc_span::{Ident, Span, Symbol};
 
 use crate::hir::*;
 
-pub trait IntoVisitor<'hir> {
-    type Visitor: Visitor<'hir>;
-    fn into_visitor(&self) -> Self::Visitor;
-}
-
 #[derive(Copy, Clone, Debug)]
 pub enum FnKind<'a> {
     /// `#[xxx] pub async/const/extern "Abi" fn foo()`
@@ -618,16 +613,16 @@ pub fn walk_item<'v, V: Visitor<'v>>(visitor: &mut V, item: &'v Item<'v>) -> V::
             try_visit!(visitor.visit_generics(generics));
             try_visit!(visitor.visit_variant_data(struct_definition));
         }
-        ItemKind::Trait(
-            _constness,
-            _is_auto,
-            _safety,
-            ref impl_restriction,
+        ItemKind::Trait {
+            impl_restriction,
+            constness: _,
+            is_auto: _,
+            safety: _,
             ident,
-            ref generics,
+            generics,
             bounds,
-            trait_item_refs,
-        ) => {
+            items: trait_item_refs,
+        } => {
             if let RestrictionKind::Restricted(path) = &impl_restriction.kind {
                 walk_list!(visitor, visit_path_segment, path.segments);
             }
