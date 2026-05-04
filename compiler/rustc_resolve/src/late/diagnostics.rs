@@ -12,6 +12,7 @@ use rustc_ast::{
 };
 use rustc_ast_pretty::pprust::{path_to_string, where_bound_predicate_to_string};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexMap, FxIndexSet};
+use rustc_data_structures::unord::UnordItems;
 use rustc_errors::codes::*;
 use rustc_errors::{
     Applicability, Diag, Diagnostic, ErrorGuaranteed, MultiSpan, SuggestionStyle, pluralize,
@@ -2670,7 +2671,11 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
             .extern_crate_map
             .items()
             // FIXME: This doesn't include impls like `impl Default for String`.
-            .flat_map(|(_, crate_)| self.r.tcx.implementations_of_trait((*crate_, default_trait)))
+            .flat_map(|(_, crate_)| {
+                UnordItems::new(
+                    self.r.tcx.implementations_of_trait((*crate_, default_trait)).into_iter(),
+                )
+            })
             .filter_map(|(_, simplified_self_ty)| *simplified_self_ty)
             .filter_map(|simplified_self_ty| match simplified_self_ty {
                 SimplifiedType::Adt(did) => Some(did),
