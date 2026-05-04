@@ -2,7 +2,11 @@
 //@[next] compile-flags: -Znext-solver=globally
 //@ ignore-compare-mode-next-solver (explicit revisions)
 //@ check-pass
-// Regression test for trait-system-refactor-initiative#7
+// Regression test for trait-system-refactor-initiative#7. This test
+// would error if we were to rely on lazy normalization here.
+//
+// We eagerly normalize the associated types, here, causing this to
+// compile.
 
 use std::marker::PhantomData;
 
