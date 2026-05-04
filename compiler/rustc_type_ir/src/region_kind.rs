@@ -215,8 +215,9 @@ impl<I: Interner> fmt::Debug for RegionKind<I> {
     }
 }
 
+// This impl could be derived with `StableHash_NoContext`, but we instead write it by hand in order
+// to panic on `ReVar`.
 #[cfg(feature = "nightly")]
-// This is not a derived impl because a derive would require `I: StableHash`
 impl<I: Interner> StableHash for RegionKind<I>
 where
     I::EarlyParamRegion: StableHash,
