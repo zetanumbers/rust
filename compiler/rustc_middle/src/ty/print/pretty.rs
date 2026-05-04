@@ -751,7 +751,7 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
                     if self.tcx().codegen_fn_attrs(def_id).safe_target_features {
                         write!(self, "#[target_features] ")?;
                         sig = sig.map_bound(|mut sig| {
-                            sig.fn_sig_kind = sig.fn_sig_kind.set_safe(true);
+                            sig.fn_sig_kind = sig.fn_sig_kind.set_safety(hir::Safety::Safe);
                             sig
                         });
                     }
@@ -1346,7 +1346,7 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
         &mut self,
         alias_ty: ty::AliasTerm<'tcx>,
     ) -> Result<(), PrintError> {
-        let def_key = self.tcx().def_key(alias_ty.def_id);
+        let def_key = self.tcx().def_key(alias_ty.def_id());
         self.print_path_with_generic_args(
             |p| {
                 p.print_path_with_simple(
@@ -2082,10 +2082,9 @@ pub(crate) fn pretty_print_const<'tcx>(
     print_types: bool,
 ) -> fmt::Result {
     ty::tls::with(|tcx| {
-        let literal = tcx.lift(c).unwrap();
         let mut p = FmtPrinter::new(tcx, Namespace::ValueNS);
         p.print_alloc_ids = true;
-        p.pretty_print_const(literal, print_types)?;
+        p.pretty_print_const(tcx.lift(c), print_types)?;
         fmt.write_str(&p.into_buffer())?;
         Ok(())
     })
@@ -3098,7 +3097,6 @@ macro_rules! forward_display_to_print {
                 ty::tls::with(|tcx| {
                     let mut p = FmtPrinter::new(tcx, Namespace::TypeNS);
                     tcx.lift(*self)
-                        .expect("could not lift for printing")
                         .print(&mut p)?;
                     f.write_str(&p.into_buffer())?;
                     Ok(())
@@ -3158,22 +3156,22 @@ define_print! {
 
     ty::AliasTerm<'tcx> {
         match self.kind(p.tcx()) {
-            ty::AliasTermKind::InherentTy | ty::AliasTermKind::InherentConst => p.pretty_print_inherent_projection(*self)?,
-            ty::AliasTermKind::ProjectionTy => {
+            ty::AliasTermKind::InherentTy {..} | ty::AliasTermKind::InherentConst {..} => p.pretty_print_inherent_projection(*self)?,
+            ty::AliasTermKind::ProjectionTy { def_id } => {
                 if !(p.should_print_verbose() || with_reduced_queries())
-                    && p.tcx().is_impl_trait_in_trait(self.def_id)
+                    && p.tcx().is_impl_trait_in_trait(def_id)
                 {
-                    p.pretty_print_rpitit(self.def_id, self.args)?;
+                    p.pretty_print_rpitit(def_id, self.args)?;
                 } else {
-                    p.print_def_path(self.def_id, self.args)?;
+                    p.print_def_path(def_id, self.args)?;
                 }
             }
-            ty::AliasTermKind::FreeTy
-            | ty::AliasTermKind::FreeConst
-            | ty::AliasTermKind::OpaqueTy
-            | ty::AliasTermKind::UnevaluatedConst
-            | ty::AliasTermKind::ProjectionConst => {
-                p.print_def_path(self.def_id, self.args)?;
+            ty::AliasTermKind::FreeTy { def_id }
+            | ty::AliasTermKind::FreeConst { def_id }
+            | ty::AliasTermKind::OpaqueTy { def_id }
+            | ty::AliasTermKind::UnevaluatedConst { def_id }
+            | ty::AliasTermKind::ProjectionConst { def_id } => {
+                p.print_def_path(def_id, self.args)?;
             }
         }
     }

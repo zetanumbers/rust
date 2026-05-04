@@ -27,7 +27,7 @@ use rustc_middle::ty::{
     Unnormalized, Upcast,
 };
 use rustc_middle::{bug, span_bug};
-use rustc_session::parse::feature_err;
+use rustc_session::errors::feature_err;
 use rustc_span::{DUMMY_SP, Span, sym};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::regions::{InferCtxtRegionExt, OutlivesEnvironmentBuildExt};
@@ -326,7 +326,7 @@ pub(super) fn check_item<'tcx>(
         hir::ItemKind::Struct(..) => check_type_defn(tcx, item, false),
         hir::ItemKind::Union(..) => check_type_defn(tcx, item, true),
         hir::ItemKind::Enum(..) => check_type_defn(tcx, item, true),
-        hir::ItemKind::Trait(..) => check_trait(tcx, item),
+        hir::ItemKind::Trait { .. } => check_trait(tcx, item),
         hir::ItemKind::TraitAlias(..) => check_trait(tcx, item),
         _ => Ok(()),
     }
@@ -728,6 +728,7 @@ fn region_known_to_outlive<'tcx>(
             SubregionOrigin::RelateRegionParamBound(DUMMY_SP, None),
             region_b,
             region_a,
+            ty::VisibleForLeakCheck::Unreachable,
         );
     })
 }
@@ -855,7 +856,12 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &ty::GenericParamDef) -> Result<(), Er
             let span = tcx.def_span(param.def_id);
             let def_id = param.def_id.expect_local();
 
-            if tcx.features().adt_const_params() || tcx.features().min_adt_const_params() {
+            if tcx.features().const_param_ty_unchecked() {
+                enter_wf_checking_ctxt(tcx, tcx.local_parent(def_id), |wfcx| {
+                    wfcx.register_wf_obligation(span, None, ty.into());
+                    Ok(())
+                })
+            } else if tcx.features().adt_const_params() || tcx.features().min_adt_const_params() {
                 enter_wf_checking_ctxt(tcx, tcx.local_parent(def_id), |wfcx| {
                     wfcx.register_bound(
                         ObligationCause::new(span, def_id, ObligationCauseCode::ConstParam(ty)),
@@ -911,6 +917,7 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &ty::GenericParamDef) -> Result<(), Er
                     // Can never implement `ConstParamTy`, don't suggest anything.
                     Err(
                         ConstParamTyImplementationError::NotAnAdtOrBuiltinAllowed
+                        | ConstParamTyImplementationError::NonExhaustive(..)
                         | ConstParamTyImplementationError::InvalidInnerTyOfBuiltinTy(..),
                     ) => None,
                     Err(ConstParamTyImplementationError::UnsizedConstParamsFeatureRequired) => {
@@ -1188,7 +1195,7 @@ fn check_trait(tcx: TyCtxt<'_>, item: &hir::Item<'_>) -> Result<(), ErrorGuarant
     });
 
     // Only check traits, don't check trait aliases
-    if let hir::ItemKind::Trait(..) = item.kind {
+    if let hir::ItemKind::Trait { .. } = item.kind {
         check_gat_where_clauses(tcx, item.owner_id.def_id);
     }
     res
@@ -1361,12 +1368,14 @@ pub(super) fn check_type_const<'tcx>(
     let tcx = wfcx.tcx();
     let span = tcx.def_span(def_id);
 
-    wfcx.register_bound(
-        ObligationCause::new(span, def_id, ObligationCauseCode::ConstParam(item_ty)),
-        wfcx.param_env,
-        item_ty,
-        tcx.require_lang_item(LangItem::ConstParamTy, span),
-    );
+    if !tcx.features().const_param_ty_unchecked() {
+        wfcx.register_bound(
+            ObligationCause::new(span, def_id, ObligationCauseCode::ConstParam(item_ty)),
+            wfcx.param_env,
+            item_ty,
+            tcx.require_lang_item(LangItem::ConstParamTy, span),
+        );
+    }
 
     if has_value {
         let raw_ct = tcx.const_of_item(def_id).instantiate_identity();
@@ -1655,7 +1664,7 @@ pub(super) fn check_where_clauses<'tcx>(wfcx: &WfCheckingCtxt<'_, 'tcx>, def_id:
                 .map_bound(|pred| {
                     pred.term.as_const().map(|ct| {
                         let assoc_const_ty = tcx
-                            .type_of(pred.projection_term.def_id)
+                            .type_of(pred.projection_term.def_id())
                             .instantiate(tcx, pred.projection_term.args)
                             .skip_norm_wip();
                         ty::ClauseKind::ConstArgHasType(ct, assoc_const_ty)

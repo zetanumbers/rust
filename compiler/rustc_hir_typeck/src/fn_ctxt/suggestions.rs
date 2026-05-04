@@ -7,6 +7,7 @@ use rustc_ast::util::parser::ExprPrecedence;
 use rustc_data_structures::packed::Pu128;
 use rustc_errors::{Applicability, Diag, MultiSpan, listify, msg};
 use rustc_hir::def::{CtorKind, CtorOf, DefKind, Res};
+use rustc_hir::intravisit::Visitor;
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::{
     self as hir, Arm, CoroutineDesugaring, CoroutineKind, CoroutineSource, Expr, ExprKind,
@@ -26,13 +27,14 @@ use rustc_session::errors::ExprParenthesesNeeded;
 use rustc_span::{ExpnKind, Ident, MacroKind, Span, Spanned, Symbol, sym};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::error_reporting::traits::DefIdOrName;
+use rustc_trait_selection::error_reporting::traits::suggestions::ReturnsVisitor;
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits;
 use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt as _;
 use tracing::{debug, instrument};
 
 use super::FnCtxt;
-use crate::errors;
+use crate::errors::{self, SuggestBoxingForReturnImplTrait};
 use crate::fn_ctxt::rustc_span::BytePos;
 use crate::method::probe;
 use crate::method::probe::{IsSuggestion, Mode, ProbeScope};
@@ -931,6 +933,76 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
             hir::FnRetTy::Return(hir_ty) => {
                 if let hir::TyKind::OpaqueDef(op_ty, ..) = hir_ty.kind
+                    && let [hir::GenericBound::Trait(trait_ref)] = op_ty.bounds
+                    && !trait_ref
+                        .trait_ref
+                        .path
+                        .segments
+                        .last()
+                        .and_then(|seg| seg.args)
+                        .map_or(false, |args| !args.constraints.is_empty())
+                {
+                    // Use the path to get the trait name string
+                    let trait_name = trait_ref
+                        .trait_ref
+                        .path
+                        .segments
+                        .iter()
+                        .map(|seg| seg.ident.as_str())
+                        .collect::<Vec<_>>()
+                        .join("::");
+
+                    err.subdiagnostic(errors::ExpectedReturnTypeLabel::ImplTrait {
+                        span: hir_ty.span,
+                        trait_name,
+                    });
+
+                    if let Some(ret_coercion_span) = self.ret_coercion_span.get() {
+                        let expected_name = expected.to_string();
+                        err.span_label(
+                            ret_coercion_span,
+                            format!("return type resolved to be `{expected_name}`"),
+                        );
+                    }
+
+                    let trait_def_id = trait_ref.trait_ref.path.res.def_id();
+                    if self.tcx.is_dyn_compatible(trait_def_id) {
+                        err.subdiagnostic(SuggestBoxingForReturnImplTrait::ChangeReturnType {
+                            start_sp: hir_ty.span.with_hi(hir_ty.span.lo() + BytePos(4)),
+                            end_sp: hir_ty.span.shrink_to_hi(),
+                        });
+
+                        let body = self.tcx.hir_body_owned_by(fn_id);
+                        let mut visitor = ReturnsVisitor::default();
+                        visitor.visit_body(&body);
+
+                        if !visitor.returns.is_empty() {
+                            let starts: Vec<Span> = visitor
+                                .returns
+                                .iter()
+                                .filter(|expr| expr.span.can_be_used_for_suggestions())
+                                .map(|expr| expr.span.shrink_to_lo())
+                                .collect();
+                            let ends: Vec<Span> = visitor
+                                .returns
+                                .iter()
+                                .filter(|expr| expr.span.can_be_used_for_suggestions())
+                                .map(|expr| expr.span.shrink_to_hi())
+                                .collect();
+
+                            if !starts.is_empty() {
+                                err.subdiagnostic(SuggestBoxingForReturnImplTrait::BoxReturnExpr {
+                                    starts,
+                                    ends,
+                                });
+                            }
+                        }
+                    }
+
+                    self.try_suggest_return_impl_trait(err, expected, found, fn_id);
+                    self.try_note_caller_chooses_ty_for_ty_param(err, expected, found);
+                    return true;
+                } else if let hir::TyKind::OpaqueDef(op_ty, ..) = hir_ty.kind
                     // FIXME: account for RPITIT.
                     && let [hir::GenericBound::Trait(trait_ref)] = op_ty.bounds
                     && let Some(hir::PathSegment { args: Some(generic_args), .. }) =

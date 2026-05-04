@@ -8,7 +8,7 @@ use rustc_hir::{AttrItem, Attribute, MethodKind, Target};
 use rustc_span::{BytePos, Span, Symbol, sym};
 
 use crate::AttributeParser;
-use crate::context::{AcceptContext, Stage};
+use crate::context::AcceptContext;
 use crate::errors::{
     InvalidAttrAtCrateLevel, InvalidTargetLint, ItemFollowingInnerAttr,
     UnsupportedAttributesInWhere,
@@ -87,11 +87,11 @@ pub(crate) enum Policy {
     Error(Target),
 }
 
-impl<'sess, S: Stage> AttributeParser<'sess, S> {
+impl<'sess> AttributeParser<'sess> {
     pub(crate) fn check_target(
         allowed_targets: &AllowedTargets,
         target: Target,
-        cx: &mut AcceptContext<'_, 'sess, S>,
+        cx: &mut AcceptContext<'_, 'sess>,
     ) {
         // For crate-level attributes we emit a specific set of lints to warn
         // people about accidentally not using them on the crate.
@@ -142,9 +142,9 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
                 };
 
                 let attr_span = cx.attr_span;
-                cx.emit_dyn_lint(
+                cx.emit_lint_with_sess(
                     lint,
-                    move |dcx, level| {
+                    move |dcx, level, _| {
                         InvalidTargetLint {
                             name: name.to_string(),
                             target: target.plural_name(),
@@ -176,7 +176,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
         }
     }
 
-    pub(crate) fn check_crate_level(target: Target, cx: &mut AcceptContext<'_, 'sess, S>) {
+    pub(crate) fn check_crate_level(target: Target, cx: &mut AcceptContext<'_, 'sess>) {
         if target == Target::Crate {
             return;
         }
@@ -186,16 +186,13 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
         let target_span = cx.target_span;
         let attr_span = cx.attr_span;
 
-        cx.emit_dyn_lint(
+        cx.emit_lint(
             rustc_session::lint::builtin::UNUSED_ATTRIBUTES,
-            move |dcx, level| {
-                crate::errors::InvalidAttrStyle {
-                    name: &name,
-                    is_used_as_inner,
-                    target_span: (!is_used_as_inner).then_some(target_span),
-                    target: target.name(),
-                }
-                .into_diag(dcx, level)
+            crate::errors::InvalidAttrStyle {
+                name,
+                is_used_as_inner,
+                target_span: (!is_used_as_inner).then_some(target_span),
+                target: target.name(),
             },
             attr_span,
         );
@@ -292,15 +289,16 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
         // in where clauses. After that, this function would become useless.
         let spans = attrs
             .into_iter()
-            // FIXME: We shouldn't need to special-case `doc`!
-            .filter(|attr| {
-                matches!(
-                    attr,
-                    Attribute::Parsed(AttributeKind::DocComment { .. } | AttributeKind::Doc(_))
-                        | Attribute::Unparsed(_)
-                )
+            .filter_map(|attr| {
+                match attr {
+                    Attribute::Parsed(AttributeKind::DocComment { span, .. }) => Some(*span),
+                    // FIXME: We shouldn't need to special-case `doc`!
+                    Attribute::Parsed(AttributeKind::Doc(attr)) => Some(attr.first_span),
+                    // Checked during attribute parsing target checking
+                    Attribute::Parsed(_) => None,
+                    Attribute::Unparsed(attr) => Some(attr.span),
+                }
             })
-            .map(|attr| attr.span())
             .collect::<Vec<_>>();
         if !spans.is_empty() {
             self.dcx()

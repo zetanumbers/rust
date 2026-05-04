@@ -49,9 +49,7 @@ use rustc_middle::ty::{
 use rustc_middle::{bug, span_bug};
 use rustc_session::lint;
 use rustc_span::{BytePos, Pos, Span, Symbol, sym};
-use rustc_trait_selection::error_reporting::InferCtxtErrorExt as _;
 use rustc_trait_selection::infer::InferCtxtExt;
-use rustc_trait_selection::solve;
 use tracing::{debug, instrument};
 
 use super::FnCtxt;
@@ -958,15 +956,15 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         capture_clause: hir::CaptureBy,
         span: Span,
     ) {
-        struct MigrationLint<'a, 'b, 'tcx> {
+        struct MigrationLint<'a, 'tcx> {
             closure_def_id: LocalDefId,
-            this: &'a FnCtxt<'b, 'tcx>,
+            this: &'a FnCtxt<'a, 'tcx>,
             body_id: hir::BodyId,
             need_migrations: Vec<NeededMigration>,
             migration_message: String,
         }
 
-        impl<'a, 'b, 'c, 'tcx> Diagnostic<'a, ()> for MigrationLint<'b, 'c, 'tcx> {
+        impl<'a, 'b, 'tcx> Diagnostic<'a, ()> for MigrationLint<'b, 'tcx> {
             fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
                 let Self { closure_def_id, this, body_id, need_migrations, migration_message } =
                     self;
@@ -1170,45 +1168,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     need_migrations,
                 },
             );
-        }
-    }
-    fn normalize_capture_place(&self, span: Span, place: Place<'tcx>) -> Place<'tcx> {
-        let mut place = self.resolve_vars_if_possible(place);
-
-        // In the new solver, types in HIR `Place`s can contain unnormalized aliases,
-        // which can ICE later (e.g. when projecting fields for diagnostics).
-        if self.next_trait_solver() {
-            let cause = self.misc(span);
-            let at = self.at(&cause, self.param_env);
-            match solve::deeply_normalize_with_skipped_universes_and_ambiguous_coroutine_goals(
-                at,
-                Unnormalized::new_wip(place.clone()),
-                vec![],
-            ) {
-                Ok((normalized, goals)) => {
-                    if !goals.is_empty() {
-                        let mut typeck_results = self.typeck_results.borrow_mut();
-                        typeck_results.coroutine_stalled_predicates.extend(
-                            goals
-                                .into_iter()
-                                // FIXME: throwing away the param-env :(
-                                .map(|goal| (goal.predicate, self.misc(span))),
-                        );
-                    }
-                    normalized
-                }
-                Err(errors) => {
-                    let guar = self.infcx.err_ctxt().report_fulfillment_errors(errors);
-                    place.base_ty = Ty::new_error(self.tcx, guar);
-                    for proj in &mut place.projections {
-                        proj.ty = Ty::new_error(self.tcx, guar);
-                    }
-                    place
-                }
-            }
-        } else {
-            // For the old solver we can rely on `normalize` to eagerly normalize aliases.
-            self.normalize(span, Unnormalized::new_wip(place))
         }
     }
 
@@ -1828,7 +1787,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         // Normalize eagerly when inserting into `capture_information`, so all downstream
         // capture analysis can assume a normalized `Place`.
-        self.normalize_capture_place(self.tcx.hir_span(var_hir_id), place)
+        self.normalize(self.tcx.hir_span(var_hir_id), Unnormalized::new_wip(place))
     }
 
     fn should_log_capture_analysis(&self, closure_def_id: LocalDefId) -> bool {
@@ -2084,8 +2043,8 @@ fn drop_location_span(tcx: TyCtxt<'_>, hir_id: HirId) -> Span {
     tcx.sess.source_map().end_point(owner_span)
 }
 
-struct InferBorrowKind<'fcx, 'a, 'tcx> {
-    fcx: &'fcx FnCtxt<'a, 'tcx>,
+struct InferBorrowKind<'a, 'tcx> {
+    fcx: &'a FnCtxt<'a, 'tcx>,
     // The def-id of the closure whose kind and upvar accesses are being inferred.
     closure_def_id: LocalDefId,
 
@@ -2119,7 +2078,7 @@ struct InferBorrowKind<'fcx, 'a, 'tcx> {
     fake_reads: Vec<(Place<'tcx>, FakeReadCause, HirId)>,
 }
 
-impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
+impl<'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'a, 'tcx> {
     #[instrument(skip(self), level = "debug")]
     fn fake_read(
         &mut self,
@@ -2134,7 +2093,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         let dummy_capture_kind = ty::UpvarCapture::ByRef(ty::BorrowKind::Immutable);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
+        let place = self.fcx.normalize(span, Unnormalized::new_wip(place_with_id.place.clone()));
 
         let (place, _) = restrict_capture_precision(place, dummy_capture_kind);
 
@@ -2148,7 +2107,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         assert_eq!(self.closure_def_id, upvar_id.closure_expr_id);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
+        let place = self.fcx.normalize(span, Unnormalized::new_wip(place_with_id.place.clone()));
 
         self.capture_information.push((
             place,
@@ -2166,7 +2125,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         assert_eq!(self.closure_def_id, upvar_id.closure_expr_id);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
+        let place = self.fcx.normalize(span, Unnormalized::new_wip(place_with_id.place.clone()));
 
         self.capture_information.push((
             place,
@@ -2192,7 +2151,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         let capture_kind = ty::UpvarCapture::ByRef(bk);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
+        let place = self.fcx.normalize(span, Unnormalized::new_wip(place_with_id.place.clone()));
 
         // We only want repr packed restriction to be applied to reading references into a packed
         // struct, and not when the data is being moved. Therefore we call this method here instead

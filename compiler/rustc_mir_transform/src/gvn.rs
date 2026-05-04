@@ -173,15 +173,16 @@ impl<'tcx> crate::MirPass<'tcx> for GVN {
                 storage_checker.visit_basic_block_data(bb, data);
             }
 
-            storage_checker.storage_to_remove
+            Some(storage_checker.storage_to_remove)
         } else {
-            // Remove the storage statements of all the reused locals.
-            state.reused_locals.clone()
+            None
         };
 
+        // If None, remove the storage statements of all the reused locals.
+        let storage_to_remove = storage_to_remove.as_ref().unwrap_or(&state.reused_locals);
         debug!(?storage_to_remove);
 
-        StorageRemover { tcx, reused_locals: state.reused_locals, storage_to_remove }
+        StorageRemover { tcx, reused_locals: &state.reused_locals, storage_to_remove }
             .visit_body_preserves_cfg(body);
     }
 
@@ -1060,7 +1061,7 @@ impl<'body, 'a, 'tcx> VnState<'body, 'a, 'tcx> {
     ) -> Option<VnIndex> {
         let value = match *rvalue {
             // Forward values.
-            Rvalue::Use(ref mut operand) => return self.simplify_operand(operand, location),
+            Rvalue::Use(ref mut operand, _) => return self.simplify_operand(operand, location),
 
             // Roots.
             Rvalue::Repeat(ref mut op, amount) => {
@@ -1262,7 +1263,8 @@ impl<'body, 'a, 'tcx> VnState<'body, 'a, 'tcx> {
         if let Some(value) = self.simplify_aggregate_to_copy(ty, variant_index, &fields) {
             if let Some(place) = self.try_as_place(value, location, true) {
                 self.reused_locals.insert(place.local);
-                *rvalue = Rvalue::Use(Operand::Copy(place));
+                // FIXME: Is it correct to make these retagging assignments?
+                *rvalue = Rvalue::Use(Operand::Copy(place), WithRetag::Yes);
             }
             return Some(value);
         }
@@ -2021,13 +2023,13 @@ impl<'tcx> MutVisitor<'tcx> for VnState<'_, '_, 'tcx> {
 
         let value = self.simplify_rvalue(lhs, rvalue, location);
         if let Some(value) = value {
+            // FIXME: Is it correct to make these retagging assignments?
             if let Some(const_) = self.try_as_constant(value) {
-                *rvalue = Rvalue::Use(Operand::Constant(Box::new(const_)));
+                *rvalue = Rvalue::Use(Operand::Constant(Box::new(const_)), WithRetag::Yes);
             } else if let Some(place) = self.try_as_place(value, location, false)
-                && *rvalue != Rvalue::Use(Operand::Move(place))
-                && *rvalue != Rvalue::Use(Operand::Copy(place))
+                && !matches!(rvalue, Rvalue::Use(Operand::Move(p) | Operand::Copy(p), _) if p == &place)
             {
-                *rvalue = Rvalue::Use(Operand::Copy(place));
+                *rvalue = Rvalue::Use(Operand::Copy(place), WithRetag::Yes);
                 self.reused_locals.insert(place.local);
             }
         }
@@ -2058,13 +2060,13 @@ impl<'tcx> MutVisitor<'tcx> for VnState<'_, '_, 'tcx> {
     }
 }
 
-struct StorageRemover<'tcx> {
+struct StorageRemover<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
-    reused_locals: DenseBitSet<Local>,
-    storage_to_remove: DenseBitSet<Local>,
+    reused_locals: &'a DenseBitSet<Local>,
+    storage_to_remove: &'a DenseBitSet<Local>,
 }
 
-impl<'tcx> MutVisitor<'tcx> for StorageRemover<'tcx> {
+impl<'a, 'tcx> MutVisitor<'tcx> for StorageRemover<'a, 'tcx> {
     fn tcx(&self) -> TyCtxt<'tcx> {
         self.tcx
     }

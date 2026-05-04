@@ -3,8 +3,8 @@ use std::ffi::c_uint;
 use std::{assert_matches, iter, ptr};
 
 use rustc_abi::{
-    Align, BackendRepr, Float, HasDataLayout, Integer, NumScalableVectors, Primitive, Size,
-    WrappingRange,
+    AddressSpace, Align, BackendRepr, Float, HasDataLayout, Integer, NumScalableVectors, Primitive,
+    Size, WrappingRange,
 };
 use rustc_codegen_ssa::base::{compare_simd_types, wants_msvc_seh, wants_wasm_eh};
 use rustc_codegen_ssa::common::{IntPredicate, TypeKind};
@@ -178,6 +178,7 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
         span: Span,
     ) -> Result<(), ty::Instance<'tcx>> {
         let tcx = self.tcx;
+        let llvm_version = crate::llvm_util::get_version();
 
         let name = tcx.item_name(instance.def_id());
         let fn_args = instance.args;
@@ -194,7 +195,7 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
             | sym::maximum_number_nsz_f64
             | sym::maximum_number_nsz_f128
                 // Need at least LLVM 22 for `min/maximumnum` to not crash LLVM.
-                if crate::llvm_util::get_version() >= (22, 0, 0) =>
+                if llvm_version >= (22, 0, 0) =>
             {
                 let intrinsic_name = if name.as_str().starts_with("min") {
                     "llvm.minimumnum"
@@ -420,7 +421,7 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
             }
 
             // FIXME move into the branch below when LLVM 22 is the lowest version we support.
-            sym::carryless_mul if crate::llvm_util::get_version() >= (22, 0, 0) => {
+            sym::carryless_mul if llvm_version >= (22, 0, 0) => {
                 let ty = args[0].layout.ty;
                 if !ty.is_integral() {
                     tcx.dcx().emit_err(InvalidMonomorphization::BasicIntegerType {
@@ -618,6 +619,46 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
 
                 // We have copied the value to `result` already.
                 return Ok(());
+            }
+
+            sym::gpu_launch_sized_workgroup_mem => {
+                // Generate an anonymous global per call, with these properties:
+                // 1. The global is in the address space for workgroup memory
+                // 2. It is an `external` global
+                // 3. It is correctly aligned for the pointee `T`
+                // All instances of extern addrspace(gpu_workgroup) globals are merged in the LLVM backend.
+                // The name is irrelevant.
+                // See https://docs.nvidia.com/cuda/cuda-c-programming-guide/#shared
+                let name = if llvm_version < (23, 0, 0) && tcx.sess.target.arch == Arch::Nvptx64 {
+                    // The auto-assigned name for extern shared globals in the nvptx backend does
+                    // not compile in ptxas. Workaround this issue by assigning a name.
+                    // Fixed in LLVM 23.
+                    "gpu_launch_sized_workgroup_mem"
+                } else {
+                    ""
+                };
+                let global = self.declare_global_in_addrspace(
+                    name,
+                    self.type_array(self.type_i8(), 0),
+                    AddressSpace::GPU_WORKGROUP,
+                );
+                let ty::RawPtr(inner_ty, _) = result.layout.ty.kind() else { unreachable!() };
+                // The alignment of the global is used to specify the *minimum* alignment that
+                // must be obeyed by the GPU runtime.
+                // When multiple of these global variables are used by a kernel, the maximum alignment is taken.
+                // See https://github.com/llvm/llvm-project/blob/a271d07488a85ce677674bbe8101b10efff58c95/llvm/lib/Target/AMDGPU/AMDGPULowerModuleLDSPass.cpp#L821
+                let alignment = self.align_of(*inner_ty).bytes() as u32;
+                unsafe {
+                    // FIXME Workaround the above issue by taking maximum alignment if the global existed
+                    if tcx.sess.target.arch == Arch::Nvptx64 {
+                        if alignment > llvm::LLVMGetAlignment(global) {
+                            llvm::LLVMSetAlignment(global, alignment);
+                        }
+                    } else {
+                        llvm::LLVMSetAlignment(global, alignment);
+                    }
+                }
+                self.cx().const_pointercast(global, self.type_ptr())
             }
 
             sym::amdgpu_dispatch_ptr => {
@@ -1033,6 +1074,24 @@ fn can_autocast<'ll>(cx: &CodegenCx<'ll, '_>, rust_ty: &'ll Type, llvm_ty: &'ll 
             }
         }
         TypeKind::BFloat => rust_ty == cx.type_i16(),
+        TypeKind::X86_AMX if cx.type_kind(rust_ty) == TypeKind::Vector => {
+            let element_ty = cx.element_type(rust_ty);
+            let element_count = cx.vector_length(rust_ty) as u64;
+
+            let element_size_bits = match cx.type_kind(element_ty) {
+                TypeKind::Half => 16,
+                TypeKind::Float => 32,
+                TypeKind::Double => 64,
+                TypeKind::FP128 => 128,
+                TypeKind::Integer => cx.int_width(element_ty),
+                TypeKind::Pointer => cx.int_width(cx.isize_ty),
+                _ => bug!(
+                    "Vector element type `{element_ty:?}` not one of integer, float or pointer"
+                ),
+            };
+
+            element_size_bits * element_count == 8192
+        }
         _ => false,
     }
 }
@@ -1101,6 +1160,12 @@ fn autocast<'ll>(
                     bx.const_vector(&shuffle_mask),
                 )
             }
+        }
+        (TypeKind::Vector, TypeKind::X86_AMX) => {
+            bx.call_intrinsic("llvm.x86.cast.vector.to.tile", &[src_ty], &[val])
+        }
+        (TypeKind::X86_AMX, TypeKind::Vector) => {
+            bx.call_intrinsic("llvm.x86.cast.tile.to.vector", &[dest_ty], &[val])
         }
         _ => bx.bitcast(val, dest_ty), // for `bf16(xN)` <-> `u16(xN)`
     }
@@ -1789,9 +1854,20 @@ fn codegen_offload<'ll, 'tcx>(
     let sig = tcx.instantiate_bound_regions_with_erased(sig);
     let inputs = sig.inputs();
 
-    let metadata = inputs.iter().map(|ty| OffloadMetadata::from_ty(tcx, *ty)).collect::<Vec<_>>();
+    let fn_abi = cx.fn_abi_of_instance(fn_target, ty::List::empty());
 
-    let types = inputs.iter().map(|ty| cx.layout_of(*ty).llvm_type(cx)).collect::<Vec<_>>();
+    let mut metadata = Vec::new();
+    let mut types = Vec::new();
+
+    for (i, arg_abi) in fn_abi.args.iter().enumerate() {
+        let ty = inputs[i];
+        let decomposed = OffloadMetadata::handle_abi(cx, tcx, ty, arg_abi);
+
+        for (meta, entry_ty) in decomposed {
+            metadata.push(meta);
+            types.push(bx.cx.layout_of(entry_ty).llvm_type(bx.cx));
+        }
+    }
 
     let offload_globals_ref = cx.offload_globals.borrow();
     let offload_globals = match offload_globals_ref.as_ref() {
@@ -2846,7 +2922,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
     );
 
     macro_rules! minmax_red {
-        ($name:ident: $int_red:ident, $float_red:ident) => {
+        ($name:ident: $int_red:ident) => {
             if name == sym::$name {
                 require!(
                     ret_ty == in_elem,
@@ -2855,7 +2931,6 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
                 return match in_elem.kind() {
                     ty::Int(_i) => Ok(bx.$int_red(args[0].immediate(), true)),
                     ty::Uint(_u) => Ok(bx.$int_red(args[0].immediate(), false)),
-                    ty::Float(_f) => Ok(bx.$float_red(args[0].immediate())),
                     _ => return_error!(InvalidMonomorphization::UnsupportedSymbol {
                         span,
                         name,
@@ -2869,8 +2944,9 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
         };
     }
 
-    minmax_red!(simd_reduce_min: vector_reduce_min, vector_reduce_fmin);
-    minmax_red!(simd_reduce_max: vector_reduce_max, vector_reduce_fmax);
+    // Currently no support for float due to <https://github.com/llvm/llvm-project/issues/185827>.
+    minmax_red!(simd_reduce_min: vector_reduce_min);
+    minmax_red!(simd_reduce_max: vector_reduce_max);
 
     macro_rules! bitwise_red {
         ($name:ident : $red:ident, $boolean:expr) => {

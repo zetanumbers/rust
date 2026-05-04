@@ -19,12 +19,11 @@ use rustc_errors::emitter::HumanReadableErrorType;
 use rustc_errors::{ColorConfig, DiagCtxtFlags};
 use rustc_feature::UnstableFeatures;
 use rustc_hashes::Hash64;
-use rustc_macros::{BlobDecodable, Decodable, Encodable, HashStable_Generic};
+use rustc_macros::{BlobDecodable, Decodable, Encodable, StableHash};
 use rustc_span::edition::{DEFAULT_EDITION, EDITION_NAME_LIST, Edition, LATEST_STABLE_EDITION};
 use rustc_span::source_map::FilePathMapping;
 use rustc_span::{
-    FileName, HashStableContext, RealFileName, RemapPathScopeComponents, SourceFileHashAlgorithm,
-    Symbol, sym,
+    FileName, RealFileName, RemapPathScopeComponents, SourceFileHashAlgorithm, Symbol, sym,
 };
 use rustc_target::spec::{
     FramePointer, LinkSelfContainedComponents, LinkerFeatures, PanicStrategy, SplitDebuginfo,
@@ -89,7 +88,7 @@ pub enum CFProtection {
     Full,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash, HashStable_Generic, Encodable, Decodable)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash, StableHash, Encodable, Decodable)]
 pub enum OptLevel {
     /// `-Copt-level=0`
     No,
@@ -544,7 +543,7 @@ impl SwitchWithOptPath {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, HashStable_Generic)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, StableHash)]
 #[derive(Encodable, BlobDecodable)]
 pub enum SymbolManglingVersion {
     Legacy,
@@ -620,7 +619,7 @@ macro_rules! define_output_types {
             }
         ),* $(,)?
     ) => {
-        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, HashStable_Generic)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, StableHash)]
         #[derive(Encodable, Decodable)]
         pub enum OutputType {
             $(
@@ -637,10 +636,10 @@ macro_rules! define_output_types {
             const THIS_IMPLEMENTATION_HAS_BEEN_TRIPLE_CHECKED: () = ();
         }
 
-        impl<Hcx: HashStableContext> ToStableHashKey<Hcx> for OutputType {
+        impl ToStableHashKey for OutputType {
             type KeyType = Self;
 
-            fn to_stable_hash_key(&self, _: &mut Hcx) -> Self::KeyType {
+            fn to_stable_hash_key<Hcx>(&self, _: &mut Hcx) -> Self::KeyType {
                 *self
             }
         }
@@ -841,7 +840,7 @@ pub enum ResolveDocLinks {
 /// *Do not* switch `BTreeMap` out for an unsorted container type! That would break
 /// dependency tracking for command-line arguments. Also only hash keys, since tracking
 /// should only depend on the output types, not the paths they're written to.
-#[derive(Clone, Debug, Hash, HashStable_Generic, Encodable, Decodable)]
+#[derive(Clone, Debug, Hash, StableHash, Encodable, Decodable)]
 pub struct OutputTypes(BTreeMap<OutputType, Option<OutFileName>>);
 
 impl OutputTypes {
@@ -1055,7 +1054,7 @@ impl Input {
     }
 }
 
-#[derive(Clone, Hash, Debug, HashStable_Generic, PartialEq, Eq, Encodable, Decodable)]
+#[derive(Clone, Hash, Debug, StableHash, PartialEq, Eq, Encodable, Decodable)]
 pub enum OutFileName {
     Real(PathBuf),
     Stdout,
@@ -1130,7 +1129,7 @@ impl OutFileName {
     }
 }
 
-#[derive(Clone, Hash, Debug, HashStable_Generic, Encodable, Decodable)]
+#[derive(Clone, Hash, Debug, StableHash, Encodable, Decodable)]
 pub struct OutputFilenames {
     pub(crate) out_directory: PathBuf,
     /// Crate name. Never contains '-'.
@@ -1205,6 +1204,7 @@ impl OutputFilenames {
     }
 
     pub fn interface_path(&self) -> PathBuf {
+        debug!("using crate_name={} for interface_path", self.crate_stem);
         self.out_directory.join(format!("lib{}.rs", self.crate_stem))
     }
 
@@ -1214,6 +1214,7 @@ impl OutputFilenames {
         let extension = flavor.extension();
         match flavor {
             OutputType::Metadata => {
+                debug!("using crate_name={} for {extension}", self.crate_stem);
                 self.out_directory.join(format!("lib{}.{}", self.crate_stem, extension))
             }
             _ => self.with_directory_and_extension(&self.out_directory, extension),
@@ -1288,6 +1289,7 @@ impl OutputFilenames {
     }
 
     pub fn with_directory_and_extension(&self, directory: &Path, extension: &str) -> PathBuf {
+        debug!("using filestem={} for {extension}", self.filestem);
         let mut path = directory.join(&self.filestem);
         path.set_extension(extension);
         path
@@ -1419,7 +1421,6 @@ impl Default for Options {
             target_triple: TargetTuple::from_tuple(host_tuple()),
             test: false,
             incremental: None,
-            untracked_state_hash: Default::default(),
             unstable_opts,
             prints: Vec::new(),
             cg: Default::default(),
@@ -1485,11 +1486,7 @@ impl Options {
     }
 
     pub fn get_symbol_mangling_version(&self) -> SymbolManglingVersion {
-        self.cg.symbol_mangling_version.unwrap_or(if self.unstable_features.is_nightly_build() {
-            SymbolManglingVersion::V0
-        } else {
-            SymbolManglingVersion::Legacy
-        })
+        self.cg.symbol_mangling_version.unwrap_or(SymbolManglingVersion::V0)
     }
 
     #[inline]
@@ -1526,7 +1523,7 @@ impl UnstableOptions {
 }
 
 // The type of entry function, so users can have their own entry functions
-#[derive(Copy, Clone, PartialEq, Hash, Debug, HashStable_Generic)]
+#[derive(Copy, Clone, PartialEq, Hash, Debug, StableHash)]
 pub enum EntryFnType {
     Main {
         /// Specifies what to do with `SIGPIPE` before calling `fn main()`.
@@ -2641,7 +2638,7 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
     if unstable_opts.retpoline_external_thunk {
         unstable_opts.retpoline = true;
         collected_options.target_modifiers.insert(
-            OptionsTargetModifiers::UnstableOptions(UnstableOptionsTargetModifiers::retpoline),
+            OptionsTargetModifiers::UnstableOptions(UnstableOptionsTargetModifiers::Retpoline),
             "true".to_string(),
         );
     }
@@ -2770,7 +2767,6 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         target_triple,
         test,
         incremental,
-        untracked_state_hash: Default::default(),
         unstable_opts,
         prints,
         cg,

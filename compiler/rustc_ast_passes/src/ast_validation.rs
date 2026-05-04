@@ -30,11 +30,11 @@ use rustc_data_structures::fx::FxIndexMap;
 use rustc_errors::{DiagCtxtHandle, Diagnostic, LintBuffer};
 use rustc_feature::Features;
 use rustc_session::Session;
+use rustc_session::errors::feature_err;
 use rustc_session::lint::builtin::{
     DEPRECATED_WHERE_CLAUSE_LOCATION, MISSING_ABI, MISSING_UNSAFE_ON_EXTERN,
     PATTERNS_IN_FNS_WITHOUT_BODY, UNUSED_VISIBILITIES,
 };
-use rustc_session::parse::feature_err;
 use rustc_span::{Ident, Span, kw, sym};
 use rustc_target::spec::{AbiMap, AbiMapping};
 use thin_vec::thin_vec;
@@ -208,7 +208,7 @@ impl<'a> AstValidator<'a> {
     }
 
     // Mirrors `visit::walk_ty`, but tracks relevant state.
-    fn walk_ty(&mut self, t: &'a Ty) {
+    fn walk_ty(&mut self, t: &Ty) {
         match &t.kind {
             TyKind::ImplTrait(_, bounds) => {
                 self.with_impl_trait(Some(t.span), |this| visit::walk_ty(this, t));
@@ -731,7 +731,7 @@ impl<'a> AstValidator<'a> {
     /// C-variadics must be:
     /// - Non-const
     /// - Either foreign, or free and `unsafe extern "C"` semantically
-    fn check_c_variadic_type(&self, fk: FnKind<'a>, attrs: &'a AttrVec) {
+    fn check_c_variadic_type(&self, fk: FnKind<'_>, attrs: &AttrVec) {
         // `...` is already rejected when it is not the final parameter.
         let variadic_param = match fk.decl().inputs.last() {
             Some(param) if matches!(param.ty.kind, TyKind::CVarArgs) => param,
@@ -762,12 +762,23 @@ impl<'a> AstValidator<'a> {
         match fn_ctxt {
             FnCtxt::Foreign => return,
             FnCtxt::Free | FnCtxt::Assoc(_) => {
-                if !self.sess.target.supports_c_variadic_definitions() {
-                    self.dcx().emit_err(errors::CVariadicNotSupported {
-                        variadic_span: variadic_param.span,
-                        target: &*self.sess.target.llvm_target,
-                    });
-                    return;
+                match self.sess.target.supports_c_variadic_definitions() {
+                    CVariadicStatus::NotSupported => {
+                        self.dcx().emit_err(errors::CVariadicNotSupported {
+                            variadic_span: variadic_param.span,
+                            target: &*self.sess.target.llvm_target,
+                        });
+                        return;
+                    }
+                    CVariadicStatus::Unstable { feature } if !self.features.enabled(feature) => {
+                        let msg =
+                            format!("C-variadic function definitions on this target are unstable");
+                        feature_err(&self.sess, feature, variadic_param.span, msg).emit();
+                        return;
+                    }
+                    CVariadicStatus::Unstable { .. } | CVariadicStatus::Stable => {
+                        /* fall through */
+                    }
                 }
 
                 match sig.header.ext {
@@ -806,7 +817,7 @@ impl<'a> AstValidator<'a> {
     fn check_c_variadic_abi(
         &self,
         abi: ExternAbi,
-        attrs: &'a AttrVec,
+        attrs: &AttrVec,
         dotdotdot_span: Span,
         sig: &FnSig,
     ) {
@@ -976,7 +987,7 @@ impl<'a> AstValidator<'a> {
         });
     }
 
-    fn visit_ty_common(&mut self, ty: &'a Ty) {
+    fn visit_ty_common(&mut self, ty: &Ty) {
         match &ty.kind {
             TyKind::FnPtr(bfty) => {
                 self.check_fn_ptr_safety(bfty.decl_span, bfty.safety);
@@ -1039,13 +1050,13 @@ impl<'a> AstValidator<'a> {
     }
 
     // Used within `visit_item` for item kinds where we don't call `visit::walk_item`.
-    fn visit_attrs_vis(&mut self, attrs: &'a AttrVec, vis: &'a Visibility) {
+    fn visit_attrs_vis(&mut self, attrs: &AttrVec, vis: &Visibility) {
         walk_list!(self, visit_attribute, attrs);
         self.visit_vis(vis);
     }
 
     // Used within `visit_item` for item kinds where we don't call `visit::walk_item`.
-    fn visit_attrs_vis_ident(&mut self, attrs: &'a AttrVec, vis: &'a Visibility, ident: &'a Ident) {
+    fn visit_attrs_vis_ident(&mut self, attrs: &AttrVec, vis: &Visibility, ident: &Ident) {
         walk_list!(self, visit_attribute, attrs);
         self.visit_vis(vis);
         self.visit_ident(ident);
@@ -1117,25 +1128,25 @@ fn validate_generic_param_order(dcx: DiagCtxtHandle<'_>, generics: &[GenericPara
             dcx.emit_err(errors::OutOfOrderParams {
                 spans: spans.clone(),
                 sugg_span: span,
-                param_ord,
-                max_param,
+                param_ord: param_ord.to_string(),
+                max_param: max_param.to_string(),
                 ordered_params: &ordered_params,
             });
         }
     }
 }
 
-impl<'a> Visitor<'a> for AstValidator<'a> {
+impl Visitor<'_> for AstValidator<'_> {
     fn visit_attribute(&mut self, attr: &Attribute) {
         validate_attr::check_attr(&self.sess.psess, attr);
     }
 
-    fn visit_ty(&mut self, ty: &'a Ty) {
+    fn visit_ty(&mut self, ty: &Ty) {
         self.visit_ty_common(ty);
         self.walk_ty(ty)
     }
 
-    fn visit_item(&mut self, item: &'a Item) {
+    fn visit_item(&mut self, item: &Item) {
         if item.attrs.iter().any(|attr| attr.is_proc_macro_attr()) {
             self.has_proc_macro_decls = true;
         }
@@ -1477,7 +1488,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
         self.lint_node_id = previous_lint_node_id;
     }
 
-    fn visit_foreign_item(&mut self, fi: &'a ForeignItem) {
+    fn visit_foreign_item(&mut self, fi: &ForeignItem) {
         match &fi.kind {
             ForeignItemKind::Fn(box Fn { defaultness, ident, sig, body, .. }) => {
                 self.check_defaultness(fi.span, *defaultness, AllowDefault::No, AllowFinal::No);
@@ -1527,7 +1538,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
     }
 
     // Mirrors `visit::walk_generic_args`, but tracks relevant state.
-    fn visit_generic_args(&mut self, generic_args: &'a GenericArgs) {
+    fn visit_generic_args(&mut self, generic_args: &GenericArgs) {
         match generic_args {
             GenericArgs::AngleBracketed(data) => {
                 self.check_generic_args_before_constraints(data);
@@ -1557,7 +1568,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
         }
     }
 
-    fn visit_generics(&mut self, generics: &'a Generics) {
+    fn visit_generics(&mut self, generics: &Generics) {
         let mut prev_param_default = None;
         for param in &generics.params {
             match param.kind {
@@ -1613,7 +1624,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
         }
     }
 
-    fn visit_param_bound(&mut self, bound: &'a GenericBound, ctxt: BoundKind) {
+    fn visit_param_bound(&mut self, bound: &GenericBound, ctxt: BoundKind) {
         match bound {
             GenericBound::Trait(trait_ref) => {
                 match (ctxt, trait_ref.modifiers.constness, trait_ref.modifiers.polarity) {
@@ -1671,7 +1682,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
         visit::walk_param_bound(self, bound)
     }
 
-    fn visit_fn(&mut self, fk: FnKind<'a>, attrs: &AttrVec, span: Span, id: NodeId) {
+    fn visit_fn(&mut self, fk: FnKind<'_>, attrs: &AttrVec, span: Span, id: NodeId) {
         // Only associated `fn`s can have `self` parameters.
         let self_semantic = match fk.ctxt() {
             Some(FnCtxt::Assoc(_)) => SelfSemantic::Yes,
@@ -1784,7 +1795,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
         self.with_tilde_const(disallowed, |this| visit::walk_fn(this, fk));
     }
 
-    fn visit_assoc_item(&mut self, item: &'a AssocItem, ctxt: AssocCtxt) {
+    fn visit_assoc_item(&mut self, item: &AssocItem, ctxt: AssocCtxt) {
         if let Some(ident) = item.kind.ident()
             && attr::contains_name(&item.attrs, sym::no_mangle)
         {
@@ -1931,7 +1942,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
         }
     }
 
-    fn visit_anon_const(&mut self, anon_const: &'a AnonConst) {
+    fn visit_anon_const(&mut self, anon_const: &AnonConst) {
         self.with_tilde_const(
             Some(TildeConstReason::AnonConst { span: anon_const.value.span }),
             |this| visit::walk_anon_const(this, anon_const),
