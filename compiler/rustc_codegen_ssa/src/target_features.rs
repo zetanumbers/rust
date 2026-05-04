@@ -65,13 +65,12 @@ pub(crate) fn from_target_feature_attr(
         } else if let Some(nightly_feature) = stability.requires_nightly(/* in_cfg */ false)
             && !rust_features.enabled(nightly_feature)
         {
-            feature_err(
-                &tcx.sess,
-                nightly_feature,
-                feature_span,
-                format!("the target feature `{feature}` is currently unstable"),
-            )
-            .emit();
+            let explain = if stability.is_cfg_stable_toggle_unstable() {
+                format!("the target feature `{feature}` is allowed in cfg but unstable otherwise")
+            } else {
+                format!("the target feature `{feature}` is currently unstable")
+            };
+            feature_err(&tcx.sess, nightly_feature, feature_span, explain).emit();
         } else {
             // Add this and the implied features.
             for &name in tcx.implied_target_features(feature) {
@@ -319,8 +318,15 @@ pub fn cfg_target_feature<'a, const N: usize>(
                         // An unstable feature. Warn about using it. It makes little sense
                         // to hard-error here since we just warn about fully unknown
                         // features above.
-                        sess.dcx()
-                            .emit_warn(errors::UnstableCTargetFeature { feature: base_feature });
+                        let note = if stability.is_cfg_stable_toggle_unstable() {
+                            "this feature is allowed in cfg but unstable otherwise"
+                        } else {
+                            "this feature is not stably supported"
+                        };
+                        sess.dcx().emit_warn(errors::UnstableCTargetFeature {
+                            feature: base_feature,
+                            note,
+                        });
                     }
                 }
             }

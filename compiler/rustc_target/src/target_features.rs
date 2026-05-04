@@ -78,6 +78,12 @@ impl Stability {
         }
     }
 
+    /// Returns whether the feature is cfg-stable but still requires a nightly feature gate to
+    /// be used in `#[target_feature]`/`-Ctarget-feature`.
+    pub fn is_cfg_stable_toggle_unstable(&self) -> bool {
+        matches!(self, Stability::CfgStableToggleUnstable { .. })
+    }
+
     /// Returns whether the feature may be toggled via `#[target_feature]` or `-Ctarget-feature`.
     /// (It might still be nightly-only even if this returns `true`, so make sure to also check
     /// `requires_nightly`.)
