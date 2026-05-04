@@ -320,6 +320,27 @@ pub struct InferCtxt<'tcx> {
     pub obligation_inspector: Cell<Option<ObligationInspector<'tcx>>>,
 }
 
+impl<'tcx> Drop for InferCtxt<'tcx> {
+    fn drop(&mut self) {
+        // Defuse the drop bomb in the OpaqueTypeStorage when we're in TypingMode::Borrowck,
+        // and the InferCtxt doesn't consider regions. This is okay since in `Borrowck`,
+        // the only reason we care about opaques is in relation to regions.
+        // In some places *after* typeck, like in lints we use `TypingMode::Borrowck`
+        // to prevent defining opaque types and we simply don't care about regions.
+        match self.typing_mode() {
+            TypingMode::Coherence
+            | TypingMode::Analysis { .. }
+            | TypingMode::PostBorrowckAnalysis { .. }
+            | TypingMode::PostAnalysis => {}
+            TypingMode::Borrowck { .. } => {
+                if !self.considering_regions {
+                    let _ = self.inner.borrow_mut().opaque_type_storage.take_opaque_types();
+                }
+            }
+        }
+    }
+}
+
 /// See the `error_reporting` module for more details.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TypeFoldable, TypeVisitable)]
 pub enum ValuePairs<'tcx> {
