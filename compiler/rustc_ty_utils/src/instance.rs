@@ -6,8 +6,8 @@ use rustc_middle::bug;
 use rustc_middle::query::Providers;
 use rustc_middle::traits::{BuiltinImplSource, CodegenObligationError};
 use rustc_middle::ty::{
-    self, ClosureKind, GenericArgsRef, Instance, MayBeErased, PseudoCanonicalInput, TyCtxt,
-    TypeVisitableExt, Unnormalized,
+    self, ClosureKind, GenericArgsRef, Instance, PseudoCanonicalInput, TyCtxt, TypeVisitableExt,
+    Unnormalized,
 };
 use rustc_span::sym;
 use rustc_trait_selection::traits;
@@ -155,13 +155,12 @@ fn resolve_associated_item<'tcx>(
                 // and the obligation is monomorphic, otherwise passes such as
                 // transmute checking and polymorphic MIR optimizations could
                 // get a result which isn't correct for all monomorphizations.
-                match typing_env.typing_mode() {
+                match typing_env.typing_mode().assert_not_erased() {
                     ty::TypingMode::Coherence
                     | ty::TypingMode::Analysis { .. }
                     | ty::TypingMode::Borrowck { .. }
                     | ty::TypingMode::PostBorrowckAnalysis { .. } => false,
                     ty::TypingMode::PostAnalysis => !trait_ref.still_further_specializable(),
-                    ty::TypingMode::ErasedNotCoherence(MayBeErased) => unreachable!(),
                 }
             };
             if !eligible {

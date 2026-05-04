@@ -82,7 +82,7 @@ where
                     // During HIR typeck, opaque types start out as unconstrained
                     // inference variables. In borrowck we instead use the type
                     // computed in HIR typeck as the initial value.
-                    match self.typing_mode() {
+                    match self.typing_mode().assert_not_erased() {
                         TypingMode::Analysis { .. } => {}
                         TypingMode::Borrowck { .. } => {
                             let actual = cx
@@ -98,7 +98,6 @@ where
                         TypingMode::Coherence
                         | TypingMode::PostBorrowckAnalysis { .. }
                         | TypingMode::PostAnalysis => unreachable!(),
-                        TypingMode::ErasedNotCoherence(MayBeErased) => todo!(),
                     }
                 }
 

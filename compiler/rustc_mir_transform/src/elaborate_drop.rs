@@ -7,7 +7,7 @@ use rustc_index::Idx;
 use rustc_middle::mir::*;
 use rustc_middle::ty::adjustment::PointerCoercion;
 use rustc_middle::ty::util::IntTypeExt;
-use rustc_middle::ty::{self, GenericArg, GenericArgsRef, MayBeErased, Ty, TyCtxt, Unnormalized};
+use rustc_middle::ty::{self, GenericArg, GenericArgsRef, Ty, TyCtxt, Unnormalized};
 use rustc_middle::{bug, span_bug, traits};
 use rustc_span::{DUMMY_SP, Spanned, dummy_spanned};
 use tracing::{debug, instrument};
@@ -547,7 +547,7 @@ where
                 let subpath = self.elaborator.field_subpath(variant_path, field_idx);
                 let tcx = self.tcx();
 
-                match self.elaborator.typing_env().typing_mode() {
+                match self.elaborator.typing_env().typing_mode().assert_not_erased() {
                     ty::TypingMode::PostAnalysis => {}
                     ty::TypingMode::Coherence
                     | ty::TypingMode::Analysis { .. }
@@ -555,7 +555,6 @@ where
                     | ty::TypingMode::PostBorrowckAnalysis { .. } => {
                         bug!()
                     }
-                    ty::TypingMode::ErasedNotCoherence(MayBeErased) => unreachable!(),
                 }
 
                 let field_ty = field.ty(tcx, args);

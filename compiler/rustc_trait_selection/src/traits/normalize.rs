@@ -12,8 +12,8 @@ use rustc_macros::extension;
 use rustc_middle::span_bug;
 use rustc_middle::traits::{ObligationCause, ObligationCauseCode};
 use rustc_middle::ty::{
-    self, AliasTerm, MayBeErased, Term, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
-    TypeVisitable, TypeVisitableExt, TypingMode, Unnormalized,
+    self, AliasTerm, Term, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitable,
+    TypeVisitableExt, TypingMode, Unnormalized,
 };
 use tracing::{debug, instrument};
 
@@ -138,14 +138,13 @@ pub(super) fn needs_normalization<'tcx, T: TypeVisitable<TyCtxt<'tcx>>>(
 
     // Opaques are treated as rigid outside of `TypingMode::PostAnalysis`,
     // so we can ignore those.
-    match infcx.typing_mode_raw() {
+    match infcx.typing_mode_raw().assert_not_erased() {
         // FIXME(#132279): We likely want to reveal opaques during post borrowck analysis
         TypingMode::Coherence
         | TypingMode::Analysis { .. }
         | TypingMode::Borrowck { .. }
         | TypingMode::PostBorrowckAnalysis { .. } => flags.remove(ty::TypeFlags::HAS_TY_OPAQUE),
         TypingMode::PostAnalysis => {}
-        TypingMode::ErasedNotCoherence(MayBeErased) => unreachable!(),
     }
 
     value.has_type_flags(flags)

@@ -24,7 +24,7 @@ mod trait_goals;
 use derive_where::derive_where;
 use rustc_type_ir::inherent::*;
 pub use rustc_type_ir::solve::*;
-use rustc_type_ir::{self as ty, Interner, MayBeErased, TyVid, TypingMode};
+use rustc_type_ir::{self as ty, Interner, TyVid, TypingMode};
 use tracing::instrument;
 
 pub use self::eval_ctxt::{
@@ -358,7 +358,11 @@ where
     }
 
     fn opaque_type_is_rigid(&self, def_id: I::DefId) -> bool {
-        match self.typing_mode() {
+        match self
+            .typing_mode()
+            // Caller should handle erased mode
+            .assert_not_erased()
+        {
             // Opaques are never rigid outside of analysis mode.
             TypingMode::Coherence | TypingMode::PostAnalysis => false,
             // During analysis, opaques are rigid unless they may be defined by
@@ -368,8 +372,6 @@ where
             | TypingMode::PostBorrowckAnalysis { defined_opaque_types: non_rigid_opaques } => {
                 !def_id.as_local().is_some_and(|def_id| non_rigid_opaques.contains(&def_id))
             }
-            // Caller should handle this variant
-            TypingMode::ErasedNotCoherence(MayBeErased) => unreachable!(),
         }
     }
 }
