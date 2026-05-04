@@ -259,7 +259,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::PatchableFunctionEntry { .. }
                     | AttributeKind::Path(..)
                     | AttributeKind::PatternComplexityLimit { .. }
-                    | AttributeKind::PinV2
+                    | AttributeKind::PinV2(..)
                     | AttributeKind::PreludeImport
                     | AttributeKind::ProfilerRuntime
                     | AttributeKind::RecursionLimit { .. }
