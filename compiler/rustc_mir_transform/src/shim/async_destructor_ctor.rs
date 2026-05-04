@@ -74,8 +74,8 @@ pub(super) fn build_async_drop_shim<'tcx>(
     let span = tcx.def_span(def_id);
     let source_info = SourceInfo::outermost(span);
 
-    // The first argument (index 0), but add 1 for the return value.
-    let coroutine_layout = Place::from(Local::new(1 + 0));
+    // The first argument (index 0) which will be local 1 (after the return value).
+    let coroutine_layout = Place::from(Local::arg(0));
     let coroutine_layout_dropee =
         tcx.mk_place_field(coroutine_layout, FieldIdx::new(0), drop_ptr_ty);
 
@@ -118,13 +118,12 @@ pub(super) fn build_async_drop_shim<'tcx>(
         return body;
     }
 
-    let mut dropee_ptr = Place::from(body.local_decls.push(LocalDecl::new(drop_ptr_ty, span)));
+    let dropee_ptr = Place::from(body.local_decls.push(LocalDecl::new(drop_ptr_ty, span)));
     let st_kind = StatementKind::Assign(Box::new((
         dropee_ptr,
-        Rvalue::Use(Operand::Move(coroutine_layout_dropee)),
+        Rvalue::Use(Operand::Move(coroutine_layout_dropee), WithRetag::Yes),
     )));
     body.basic_blocks_mut()[START_BLOCK].statements.push(Statement::new(source_info, st_kind));
-    dropee_ptr = dropee_emit_retag(tcx, &mut body, dropee_ptr, span);
 
     let dropline = body.basic_blocks.last_index();
 
@@ -235,7 +234,7 @@ fn build_adrop_for_coroutine_shim<'tcx>(
                 source_info,
                 StatementKind::Assign(Box::new((
                     Place::from(proxy_ref_local),
-                    Rvalue::Use(Operand::Copy(proxy_ref_place)),
+                    Rvalue::Use(Operand::Copy(proxy_ref_place), WithRetag::Yes),
                 ))),
             ),
         );
@@ -256,7 +255,7 @@ fn build_adrop_for_coroutine_shim<'tcx>(
                         source_info,
                         StatementKind::Assign(Box::new((
                             Place::from(cor_ptr_local),
-                            Rvalue::Use(Operand::Copy(impl_ptr_place)),
+                            Rvalue::Use(Operand::Copy(impl_ptr_place), WithRetag::Yes),
                         ))),
                     ),
                 );
@@ -323,7 +322,7 @@ fn build_adrop_for_adrop_shim<'tcx>(
         source_info,
         StatementKind::Assign(Box::new((
             Place::from(proxy_ref_local),
-            Rvalue::Use(Operand::Copy(proxy_ref_place)),
+            Rvalue::Use(Operand::Copy(proxy_ref_place), WithRetag::Yes),
         ))),
     ));
 
@@ -339,7 +338,7 @@ fn build_adrop_for_adrop_shim<'tcx>(
                 source_info,
                 StatementKind::Assign(Box::new((
                     Place::from(cor_ptr_local),
-                    Rvalue::Use(Operand::Copy(impl_ptr_place)),
+                    Rvalue::Use(Operand::Copy(impl_ptr_place), WithRetag::Yes),
                 ))),
             ));
         }

@@ -1063,7 +1063,8 @@ impl<'hir> LoweringContext<'_, 'hir> {
         let (binder_clause, generic_params) = self.lower_closure_binder(binder);
 
         let (body_id, closure_kind) = self.with_new_scopes(fn_decl_span, move |this| {
-            let mut coroutine_kind = find_attr!(attrs, Coroutine(_) => hir::CoroutineKind::Coroutine(Movability::Movable));
+            let mut coroutine_kind =
+                find_attr!(attrs, Coroutine => hir::CoroutineKind::Coroutine(Movability::Movable));
 
             // FIXME(contracts): Support contracts on closures?
             let body_id = this.lower_fn_body(decl, None, |this| {
@@ -1693,7 +1694,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
             && !self.tcx.features().coroutines()
             && !self.tcx.features().gen_blocks()
         {
-            rustc_session::parse::feature_err(
+            rustc_session::errors::feature_err(
                 &self.tcx.sess,
                 sym::yield_expr,
                 span,

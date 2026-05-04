@@ -23,11 +23,11 @@ use rustc_hir::{Attribute, StabilityLevel};
 use rustc_middle::middle::stability;
 use rustc_middle::ty::{RegisteredTools, TyCtxt};
 use rustc_session::Session;
+use rustc_session::errors::feature_err;
 use rustc_session::lint::builtin::{
     LEGACY_DERIVE_HELPERS, OUT_OF_SCOPE_MACRO_CALLS, UNKNOWN_DIAGNOSTIC_ATTRIBUTES,
     UNUSED_MACRO_RULES, UNUSED_MACROS,
 };
-use rustc_session::parse::feature_err;
 use rustc_span::edit_distance::find_best_match_for_name;
 use rustc_span::edition::Edition;
 use rustc_span::hygiene::{self, AstPass, ExpnData, ExpnKind, LocalExpnId, MacroKind};
@@ -133,7 +133,7 @@ pub fn registered_tools_ast(
 ) -> RegisteredTools {
     let mut registered_tools = RegisteredTools::default();
 
-    if let Some(Attribute::Parsed(AttributeKind::RegisterTool(tools, _))) =
+    if let Some(Attribute::Parsed(AttributeKind::RegisterTool(tools))) =
         AttributeParser::parse_limited(sess, pre_configured_attrs, &[sym::register_tool])
     {
         for tool in tools {

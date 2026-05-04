@@ -248,7 +248,8 @@ enum ResolutionError<'ra> {
         outer_res: Res,
         has_generic_params: HasGenericParams,
         def_kind: DefKind,
-        inner_item: Option<(Span, ast::ItemKind)>,
+        /// 1. label span, 2. item span, 3. item kind
+        inner_item: Option<(Span, Span, ast::ItemKind)>,
         current_self_ty: Option<String>,
     },
     /// Error E0403: the name is already used for a type or const parameter in this generic
@@ -336,8 +337,9 @@ enum ResolutionError<'ra> {
     BindingInNeverPattern,
 }
 
-enum VisResolutionError<'a> {
-    Relative2018(Span, &'a ast::Path),
+#[derive(Debug)]
+enum VisResolutionError {
+    Relative2018(Span, ast::Path),
     AncestorOnly(Span),
     FailedToResolve(Span, Symbol, String, Option<Suggestion>, String),
     ExpectedFound(Span, String, Res),
@@ -1003,6 +1005,13 @@ struct UseError<'a> {
     is_call: bool,
 }
 
+#[derive(Debug)]
+struct DelayedVisResolutionError<'ra> {
+    vis: ast::Visibility,
+    parent_scope: ParentScope<'ra>,
+    error: VisResolutionError,
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum AmbiguityKind {
     BuiltinAttr,
@@ -1363,6 +1372,8 @@ pub struct Resolver<'ra, 'tcx> {
     issue_145575_hack_applied: bool = false,
     /// `use` injections are delayed for better placement and deduplication.
     use_injections: Vec<UseError<'tcx>> = Vec::new(),
+    /// Visibility path resolution failures are delayed until all modules are collected.
+    delayed_vis_resolution_errors: Vec<DelayedVisResolutionError<'ra>> = Vec::new(),
     /// Crate-local macro expanded `macro_export` referred to by a module-relative path.
     macro_expanded_macro_export_errors: BTreeSet<(Span, Span)> = BTreeSet::new(),
 
