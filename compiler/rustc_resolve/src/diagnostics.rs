@@ -242,7 +242,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let container = match old_binding.parent_module.unwrap().kind {
             // Avoid using TyCtxt::def_kind_descr in the resolver, because it
             // indirectly *calls* the resolver, and would cause a query cycle.
-            ModuleKind::Def(kind, def_id, _) => kind.descr(def_id),
+            ModuleKind::Def(kind, def_id, _, _) => kind.descr(def_id),
             ModuleKind::Block => "block",
         };
 
@@ -1764,7 +1764,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
 
         if ident.name == kw::Default
-            && let ModuleKind::Def(DefKind::Enum, def_id, _) = parent_scope.module.kind
+            && let ModuleKind::Def(DefKind::Enum, def_id, _, _) = parent_scope.module.kind
         {
             let span = self.def_span(def_id);
             let source_map = self.tcx.sess.source_map();
@@ -1892,19 +1892,19 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                      missing a `derive` attribute",
                 ident.name,
             );
-            let sugg_span = if let ModuleKind::Def(DefKind::Enum, id, _) = parent_scope.module.kind
-            {
-                let span = self.def_span(id);
-                if span.from_expansion() {
-                    None
+            let sugg_span =
+                if let ModuleKind::Def(DefKind::Enum, id, _, _) = parent_scope.module.kind {
+                    let span = self.def_span(id);
+                    if span.from_expansion() {
+                        None
+                    } else {
+                        // For enum variants sugg_span is empty but we can get the enum's Span.
+                        Some(span.shrink_to_lo())
+                    }
                 } else {
-                    // For enum variants sugg_span is empty but we can get the enum's Span.
-                    Some(span.shrink_to_lo())
-                }
-            } else {
-                // For items this `Span` will be populated, everything else it'll be None.
-                sugg_span
-            };
+                    // For items this `Span` will be populated, everything else it'll be None.
+                    sugg_span
+                };
             match sugg_span {
                 Some(span) => {
                     err.span_suggestion_verbose(
