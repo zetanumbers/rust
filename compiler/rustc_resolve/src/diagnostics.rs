@@ -5,7 +5,8 @@ use std::ops::ControlFlow;
 use itertools::Itertools as _;
 use rustc_ast::visit::{self, Visitor};
 use rustc_ast::{
-    self as ast, CRATE_NODE_ID, Crate, ItemKind, ModKind, NodeId, Path, join_path_idents,
+    self as ast, CRATE_NODE_ID, Crate, DUMMY_NODE_ID, ItemKind, ModKind, NodeId, Path,
+    join_path_idents,
 };
 use rustc_ast_pretty::pprust;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -192,11 +193,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     }
 
     fn report_with_use_injections(&mut self, krate: &Crate) {
-        for UseError { mut err, candidates, def_id, instead, suggestion, path, is_call } in
+        for UseError { mut err, candidates, node_id, instead, suggestion, path, is_call } in
             mem::take(&mut self.use_injections)
         {
-            let (span, found_use) = if let Some(def_id) = def_id.as_local() {
-                UsePlacementFinder::check(krate, self.def_id_to_node_id(def_id))
+            let (span, found_use) = if node_id != DUMMY_NODE_ID {
+                UsePlacementFinder::check(krate, node_id)
             } else {
                 (None, FoundUse::No)
             };
@@ -1705,9 +1706,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         let import_suggestions =
             self.lookup_import_candidates(ident, Namespace::MacroNS, parent_scope, is_expected);
-        let (span, found_use) = match parent_scope.module.nearest_parent_mod().as_local() {
-            Some(def_id) => UsePlacementFinder::check(krate, self.def_id_to_node_id(def_id)),
-            None => (None, FoundUse::No),
+        let (span, found_use) = match parent_scope.module.nearest_parent_mod_node_id() {
+            DUMMY_NODE_ID => (None, FoundUse::No),
+            node_id => UsePlacementFinder::check(krate, node_id),
         };
         show_candidates(
             self.tcx,

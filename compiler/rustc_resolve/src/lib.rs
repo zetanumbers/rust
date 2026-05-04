@@ -1001,8 +1001,8 @@ struct UseError<'a> {
     err: Diag<'a>,
     /// Candidates which user could `use` to access the missing type.
     candidates: Vec<ImportSuggestion>,
-    /// The `DefId` of the module to place the use-statements in.
-    def_id: DefId,
+    /// The `NodeId` of the module to place the use-statements in.
+    node_id: NodeId,
     /// Whether the diagnostic should say "instead" (as in `consider importing ... instead`).
     instead: bool,
     /// Extra free-form suggestion.
