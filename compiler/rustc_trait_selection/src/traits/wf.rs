@@ -14,7 +14,7 @@ use rustc_middle::ty::{
     self, GenericArgsRef, Term, TermKind, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable,
     TypeVisitableExt, TypeVisitor,
 };
-use rustc_session::parse::feature_err;
+use rustc_session::errors::feature_err;
 use rustc_span::def_id::{DefId, LocalDefId};
 use rustc_span::{Span, sym};
 use tracing::{debug, instrument, trace};
@@ -572,6 +572,11 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
         // the nominal obligations of `Sized` would in-effect just elaborate `MetaSized` and make
         // the compiler do a bunch of work needlessly.
         if self.tcx().is_lang_item(def_id, LangItem::Sized) {
+            return Default::default();
+        }
+        if self.tcx().is_lang_item(def_id, LangItem::ConstParamTy)
+            && self.tcx().features().const_param_ty_unchecked()
+        {
             return Default::default();
         }
 

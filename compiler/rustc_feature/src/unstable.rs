@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustc_data_structures::AtomicRef;
 use rustc_data_structures::fx::FxHashSet;
-use rustc_data_structures::stable_hasher::{HashStable, HashStableContext, StableHasher};
+use rustc_data_structures::stable_hasher::{StableHash, StableHashCtxt, StableHasher};
 use rustc_span::{Span, Symbol, sym};
 
 use super::{Feature, to_nonzero};
@@ -120,29 +120,29 @@ impl Features {
     }
 }
 
-impl HashStable for Features {
-    fn hash_stable<Hcx: HashStableContext>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
+impl StableHash for Features {
+    fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
         // `enabled_features` is skipped because it's the sum of the lang and lib features.
         let Features { enabled_lang_features, enabled_lib_features, enabled_features: _ } = self;
-        enabled_lang_features.hash_stable(hcx, hasher);
-        enabled_lib_features.hash_stable(hcx, hasher);
+        enabled_lang_features.stable_hash(hcx, hasher);
+        enabled_lib_features.stable_hash(hcx, hasher);
     }
 }
 
-impl HashStable for EnabledLangFeature {
-    fn hash_stable<Hcx: HashStableContext>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
+impl StableHash for EnabledLangFeature {
+    fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
         let EnabledLangFeature { gate_name, attr_sp, stable_since } = self;
-        gate_name.hash_stable(hcx, hasher);
-        attr_sp.hash_stable(hcx, hasher);
-        stable_since.hash_stable(hcx, hasher);
+        gate_name.stable_hash(hcx, hasher);
+        attr_sp.stable_hash(hcx, hasher);
+        stable_since.stable_hash(hcx, hasher);
     }
 }
 
-impl HashStable for EnabledLibFeature {
-    fn hash_stable<Hcx: HashStableContext>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
+impl StableHash for EnabledLibFeature {
+    fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
         let EnabledLibFeature { gate_name, attr_sp } = self;
-        gate_name.hash_stable(hcx, hasher);
-        attr_sp.hash_stable(hcx, hasher);
+        gate_name.stable_hash(hcx, hasher);
+        attr_sp.stable_hash(hcx, hasher);
     }
 }
 
@@ -256,6 +256,8 @@ declare_features! (
     (internal, cfg_target_has_reliable_f16_f128, "1.88.0", None),
     /// Allows identifying the `compiler_builtins` crate.
     (internal, compiler_builtins, "1.13.0", None),
+    /// Allows skipping `ConstParamTy_` trait implementation checks
+    (internal, const_param_ty_unchecked, "CURRENT_RUSTC_VERSION", None),
     /// Allows writing custom MIR
     (internal, custom_mir, "1.65.0", None),
     /// Implementation details of externally implementable items
@@ -420,6 +422,9 @@ declare_features! (
     (unstable, bpf_target_feature, "1.54.0", Some(150247)),
     /// Allows using C-variadics.
     (unstable, c_variadic, "1.34.0", Some(44930)),
+    /// Allows defining c-variadic functions on targets where this feature has not yet
+    /// undergone sufficient testing for stabilization.
+    (unstable, c_variadic_experimental_arch, "CURRENT_RUSTC_VERSION", Some(155973)),
     /// Allows defining c-variadic naked functions with any extern ABI that is allowed
     /// on c-variadic foreign functions.
     (unstable, c_variadic_naked_functions, "1.93.0", Some(148767)),
@@ -750,6 +755,8 @@ declare_features! (
     (internal, unsized_fn_params, "1.49.0", Some(48055)),
     /// Allows using the `#[used(linker)]` (or `#[used(compiler)]`) attribute.
     (unstable, used_with_arg, "1.60.0", Some(93798)),
+    /// Allows view types.
+    (unstable, view_types, "CURRENT_RUSTC_VERSION", Some(155938)),
     /// Target features on wasm.
     (unstable, wasm_target_feature, "1.30.0", Some(150260)),
     /// Allows use of attributes in `where` clauses.
