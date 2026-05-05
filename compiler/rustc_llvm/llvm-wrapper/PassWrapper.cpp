@@ -97,7 +97,6 @@ extern "C" bool LLVMRustHasFeature(LLVMTargetMachineRef TM,
   const MCSubtargetInfo &MCInfo = *Target->getMCSubtargetInfo();
 #endif
   return MCInfo.checkFeatures(std::string("+") + Feature);
-
 }
 
 /// Check whether the target has a specific assembly mnemonic like `ret` or
