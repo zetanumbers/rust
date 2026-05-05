@@ -21,7 +21,7 @@ if $SKIP; then
     exit 0
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "error: working tree is dirty, refusing to push"
     echo "       commit, stash, or discard changes first."
     echo "You may use \`git push --no-verify\` to skip this check."
