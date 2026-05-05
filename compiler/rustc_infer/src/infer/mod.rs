@@ -322,21 +322,29 @@ pub struct InferCtxt<'tcx> {
 
 impl<'tcx> Drop for InferCtxt<'tcx> {
     fn drop(&mut self) {
-        // Defuse the drop bomb in the OpaqueTypeStorage when we're in TypingMode::Borrowck,
-        // and the InferCtxt doesn't consider regions. This is okay since in `Borrowck`,
-        // the only reason we care about opaques is in relation to regions.
+        let mut inner = self.inner.borrow_mut();
+        let opaque_type_storage = &mut inner.opaque_type_storage;
+
+        // No need for the drop bomb when we're in TypingMode::Borrowck, and the InferCtxt doesn't consider regions.
+        // This is okay since in `Borrowck`, the only reason we care about opaques is in relation to regions.
         // In some places *after* typeck, like in lints we use `TypingMode::Borrowck`
         // to prevent defining opaque types and we simply don't care about regions.
-        match self.typing_mode() {
+        match self.typing_mode_raw() {
             TypingMode::Coherence
             | TypingMode::Analysis { .. }
             | TypingMode::PostBorrowckAnalysis { .. }
             | TypingMode::PostAnalysis => {}
+            // In erased mode, the opaque type storage is always empty
+            TypingMode::ErasedNotCoherence(..) => {}
             TypingMode::Borrowck { .. } => {
                 if !self.considering_regions {
-                    let _ = self.inner.borrow_mut().opaque_type_storage.take_opaque_types();
+                    return;
                 }
             }
+        }
+
+        if !opaque_type_storage.is_empty() {
+            ty::tls::with(|tcx| tcx.dcx().delayed_bug(format!("{opaque_type_storage:?}")));
         }
     }
 }
