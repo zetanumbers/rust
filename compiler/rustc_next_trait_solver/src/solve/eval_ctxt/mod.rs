@@ -21,8 +21,8 @@ use tracing::{Level, debug, instrument, trace, warn};
 
 use super::has_only_region_constraints;
 use crate::canonical::{
-    EraseOpaqueTypes, canonicalize_goal, canonicalize_response,
-    instantiate_and_apply_query_response, response_no_constraints_raw,
+    canonicalize_goal, canonicalize_response, instantiate_and_apply_query_response,
+    response_no_constraints_raw,
 };
 use crate::coherence;
 use crate::delegate::SolverDelegate;
@@ -82,6 +82,42 @@ enum RerunDecision {
     Yes,
     No,
     EagerlyPropagateToParent,
+}
+
+enum EraseOpaqueTypes {
+    /// This setting erases opaque types, unless we're in coherence.
+    /// In `TypingMode::Coherence` we never erase opaque types
+    IfNotCoherence,
+    No,
+}
+
+fn maybe_erase_opaque_types<I: Interner>(
+    erase_opaque_types: EraseOpaqueTypes,
+    opaque_types: &[(OpaqueTypeKey<I>, I::Ty)],
+    typing_mode: TypingMode<I>,
+) -> (&[(OpaqueTypeKey<I>, I::Ty)], TypingMode<I>) {
+    match (erase_opaque_types, typing_mode) {
+        // In `TypingMode::Coherence` there should not be any opaques, and we also don't change typing mode.
+        (_, TypingMode::Coherence) => {
+            assert!(opaque_types.is_empty());
+            (&[][..], TypingMode::Coherence)
+        }
+        // Make sure we're not recursively in `ErasedNotCoherence`.
+        (_, TypingMode::ErasedNotCoherence(MayBeErased)) => {
+            assert!(opaque_types.is_empty());
+            (&[][..], TypingMode::ErasedNotCoherence(MayBeErased))
+        }
+        // If we're supposed to erase opaque types, and we're in any typing mode other than coherence,
+        // do the erasing and change typing mode.
+        (
+            EraseOpaqueTypes::IfNotCoherence,
+            TypingMode::Analysis { .. }
+            | TypingMode::Borrowck { .. }
+            | TypingMode::PostBorrowckAnalysis { .. }
+            | TypingMode::PostAnalysis,
+        ) => (&[][..], TypingMode::ErasedNotCoherence(MayBeErased)),
+        (EraseOpaqueTypes::No, typing_mode) => (opaque_types, typing_mode),
+    }
 }
 
 pub struct EvalCtxt<'a, D, I = <D as SolverDelegate>::Interner>
@@ -691,8 +727,10 @@ where
         step_kind: PathKind,
         erase_opaque_types: EraseOpaqueTypes,
     ) -> (AccessedOpaques<I>, (QueryResult<I>, Vec<I::GenericArg>, CanonicalInput<I>)) {
+        let (opaque_types, typing_mode) =
+            maybe_erase_opaque_types(erase_opaque_types, opaque_types, self.typing_mode());
         let (orig_values, canonical_goal) =
-            canonicalize_goal(self.delegate, goal, &opaque_types, erase_opaque_types);
+            canonicalize_goal(self.delegate, goal, opaque_types, typing_mode);
 
         let (canonical_result, accessed_opaques) = self.search_graph.evaluate_goal(
             self.cx(),
@@ -1768,8 +1806,10 @@ pub(super) fn evaluate_root_goal_for_proof_tree<D: SolverDelegate<Interner = I>,
         assert!(opaque_types.is_empty());
     }
 
+    let (opaque_types, typing_mode) =
+        maybe_erase_opaque_types(EraseOpaqueTypes::No, &opaque_types, delegate.typing_mode_raw());
     let (orig_values, canonical_goal) =
-        canonicalize_goal(delegate, goal, &opaque_types, EraseOpaqueTypes::No);
+        canonicalize_goal(delegate, goal, &opaque_types, typing_mode);
 
     let (canonical_result, final_revision) =
         delegate.cx().evaluate_root_goal_for_proof_tree_raw(canonical_goal);

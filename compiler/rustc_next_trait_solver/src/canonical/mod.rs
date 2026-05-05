@@ -17,7 +17,7 @@ use rustc_type_ir::inherent::*;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::{
     self as ty, Canonical, CanonicalVarKind, CanonicalVarValues, InferCtxtLike, Interner,
-    MayBeErased, TypeFoldable, TypingMode, TypingModeEqWrapper,
+    TypeFoldable, TypingMode, TypingModeEqWrapper,
 };
 use tracing::instrument;
 
@@ -46,13 +46,6 @@ impl<I: Interner, T> ResponseT<I> for inspect::State<I, T> {
     }
 }
 
-pub(super) enum EraseOpaqueTypes {
-    /// This setting erases opaque types, unless we're in coherence.
-    /// In `TypingMode::Coherence` we never erase opaque types
-    IfNotCoherence,
-    No,
-}
-
 /// Canonicalizes the goal remembering the original values
 /// for each bound variable.
 ///
@@ -61,35 +54,12 @@ pub(super) fn canonicalize_goal<D, I>(
     delegate: &D,
     goal: Goal<I, I::Predicate>,
     opaque_types: &[(ty::OpaqueTypeKey<I>, I::Ty)],
-    erase_opaque_types: EraseOpaqueTypes,
+    typing_mode: TypingMode<I>,
 ) -> (Vec<I::GenericArg>, CanonicalInput<I, I::Predicate>)
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    let (opaque_types, typing_mode) = match (erase_opaque_types, delegate.typing_mode_raw()) {
-        // In `TypingMode::Coherence` there should not be any opaques, and we also don't change typing mode.
-        (_, TypingMode::Coherence) => {
-            assert!(opaque_types.is_empty());
-            (&[][..], TypingMode::Coherence)
-        }
-        // Make sure we're not recursively in `ErasedNotCoherence`.
-        (_, TypingMode::ErasedNotCoherence(MayBeErased)) => {
-            assert!(opaque_types.is_empty());
-            (&[][..], TypingMode::ErasedNotCoherence(MayBeErased))
-        }
-        // If we're supposed to erase opaque types, and we're in any typing mode other than coherence,
-        // do the erasing and change typing mode.
-        (
-            EraseOpaqueTypes::IfNotCoherence,
-            TypingMode::Analysis { .. }
-            | TypingMode::Borrowck { .. }
-            | TypingMode::PostBorrowckAnalysis { .. }
-            | TypingMode::PostAnalysis,
-        ) => (&[][..], TypingMode::ErasedNotCoherence(MayBeErased)),
-        (EraseOpaqueTypes::No, typing_mode) => (opaque_types, typing_mode),
-    };
-
     let (orig_values, canonical) = Canonicalizer::canonicalize_input(
         delegate,
         QueryInput {
