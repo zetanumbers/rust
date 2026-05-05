@@ -5,7 +5,8 @@
 #![allow(clippy::wildcard_imports, clippy::enum_glob_use)]
 
 use crate::{both, over};
-use rustc_ast::{self as ast, *};
+use rustc_ast::{self as ast, HasAttrs, *};
+use rustc_span::sym;
 use rustc_span::symbol::Ident;
 use std::mem;
 
@@ -448,30 +449,30 @@ pub fn eq_item_kind(l: &ItemKind, r: &ItemKind) -> bool {
         },
         (
             Trait(box ast::Trait {
+                impl_restriction: liprt,
                 constness: lc,
                 is_auto: la,
                 safety: lu,
-                impl_restriction: liprt,
                 ident: li,
                 generics: lg,
                 bounds: lb,
                 items: lis,
             }),
             Trait(box ast::Trait {
+                impl_restriction: riprt,
                 constness: rc,
                 is_auto: ra,
                 safety: ru,
-                impl_restriction: riprt,
                 ident: ri,
                 generics: rg,
                 bounds: rb,
                 items: ris,
             }),
         ) => {
-            matches!(lc, ast::Const::No) == matches!(rc, ast::Const::No)
+            eq_impl_restriction(liprt, riprt)
+                && matches!(lc, ast::Const::No) == matches!(rc, ast::Const::No)
                 && la == ra
                 && matches!(lu, Safety::Default) == matches!(ru, Safety::Default)
-                && eq_impl_restriction(liprt, riprt)
                 && eq_id(*li, *ri)
                 && eq_generics(lg, rg)
                 && over(lb, rb, eq_generic_bound)
@@ -1043,4 +1044,18 @@ pub fn eq_delim_args(l: &DelimArgs, r: &DelimArgs) -> bool {
     l.delim == r.delim
         && l.tokens.len() == r.tokens.len()
         && l.tokens.iter().zip(r.tokens.iter()).all(|(a, b)| a.eq_unspanned(b))
+}
+
+/// Checks whether `#[cfg(test)]` is directly applied to `item`.
+pub fn is_cfg_test(item: &impl HasAttrs) -> bool {
+    item.attrs().iter().any(|attr| {
+        if attr.has_name(sym::cfg)
+            && let Some(item_list) = attr.meta_item_list()
+            && item_list.iter().any(|item| item.has_name(sym::test))
+        {
+            true
+        } else {
+            false
+        }
+    })
 }

@@ -57,7 +57,7 @@ use rustc_hir::def::{
     PerNS,
 };
 use rustc_hir::def_id::{CRATE_DEF_ID, CrateNum, DefId, LOCAL_CRATE, LocalDefId, LocalDefIdMap};
-use rustc_hir::definitions::PerParentDisambiguatorState;
+use rustc_hir::definitions::{PerParentDisambiguatorState, PerParentDisambiguatorsMap};
 use rustc_hir::{PrimTy, TraitCandidate, find_attr};
 use rustc_index::bit_set::DenseBitSet;
 use rustc_metadata::creader::CStore;
@@ -66,8 +66,8 @@ use rustc_middle::metadata::{AmbigModChild, ModChild, Reexport};
 use rustc_middle::middle::privacy::EffectiveVisibilities;
 use rustc_middle::query::Providers;
 use rustc_middle::ty::{
-    self, DelegationInfo, Feed, MainDefinition, RegisteredTools, ResolverAstLowering,
-    ResolverGlobalCtxt, TyCtxt, TyCtxtFeed, Visibility,
+    self, DelegationInfo, MainDefinition, RegisteredTools, ResolverAstLowering, ResolverGlobalCtxt,
+    TyCtxt, TyCtxtFeed, Visibility,
 };
 use rustc_session::config::CrateType;
 use rustc_session::lint::builtin::PRIVATE_MACRO_USE;
@@ -248,7 +248,8 @@ enum ResolutionError<'ra> {
         outer_res: Res,
         has_generic_params: HasGenericParams,
         def_kind: DefKind,
-        inner_item: Option<(Span, ast::ItemKind)>,
+        /// 1. label span, 2. item span, 3. item kind
+        inner_item: Option<(Span, Span, ast::ItemKind)>,
         current_self_ty: Option<String>,
     },
     /// Error E0403: the name is already used for a type or const parameter in this generic
@@ -270,8 +271,6 @@ enum ResolutionError<'ra> {
     IdentifierBoundMoreThanOnceInSamePattern(Ident),
     /// Error E0426: use of undeclared label.
     UndeclaredLabel { name: Symbol, suggestion: Option<LabelSuggestion> },
-    /// Error E0429: `self` imports are only allowed within a `{ }` list.
-    SelfImportsOnlyAllowedWithin { root: bool, span_with_rename: Span },
     /// Error E0433: failed to resolve.
     FailedToResolve {
         segment: Symbol,
@@ -338,8 +337,9 @@ enum ResolutionError<'ra> {
     BindingInNeverPattern,
 }
 
-enum VisResolutionError<'a> {
-    Relative2018(Span, &'a ast::Path),
+#[derive(Debug)]
+enum VisResolutionError {
+    Relative2018(Span, ast::Path),
     AncestorOnly(Span),
     FailedToResolve(Span, Symbol, String, Option<Suggestion>, String),
     ExpectedFound(Span, String, Res),
@@ -481,6 +481,7 @@ enum PathResult<'ra> {
         segment_name: Symbol,
         error_implied_by_parse_error: bool,
         message: String,
+        note: Option<String>,
     },
 }
 
@@ -491,13 +492,18 @@ impl<'ra> PathResult<'ra> {
         finalize: bool,
         error_implied_by_parse_error: bool,
         module: Option<ModuleOrUniformRoot<'ra>>,
-        label_and_suggestion: impl FnOnce() -> (String, String, Option<Suggestion>),
+        label_and_suggestion_and_note: impl FnOnce() -> (
+            String,
+            String,
+            Option<Suggestion>,
+            Option<String>,
+        ),
     ) -> PathResult<'ra> {
-        let (message, label, suggestion) = if finalize {
-            label_and_suggestion()
+        let (message, label, suggestion, note) = if finalize {
+            label_and_suggestion_and_note()
         } else {
             // FIXME: this output isn't actually present in the test suite.
-            (format!("cannot find `{ident}` in this scope"), String::new(), None)
+            (format!("cannot find `{ident}` in this scope"), String::new(), None, None)
         };
         PathResult::Failed {
             span: ident.span,
@@ -508,6 +514,7 @@ impl<'ra> PathResult<'ra> {
             module,
             error_implied_by_parse_error,
             message,
+            note,
         }
     }
 }
@@ -924,7 +931,13 @@ struct DeclData<'ra> {
     warn_ambiguity: CmCell<bool>,
     expansion: LocalExpnId,
     span: Span,
-    vis: CmCell<Visibility<DefId>>,
+    initial_vis: Visibility<DefId>,
+    /// If the declaration refers to an ambiguous glob set, then this is the most visible
+    /// declaration from the set, if its visibility is different from `initial_vis`.
+    ambiguity_vis_max: CmCell<Option<Decl<'ra>>>,
+    /// If the declaration refers to an ambiguous glob set, then this is the least visible
+    /// declaration from the set, if its visibility is different from `initial_vis`.
+    ambiguity_vis_min: CmCell<Option<Decl<'ra>>>,
     parent_module: Option<Module<'ra>>,
 }
 
@@ -992,6 +1005,13 @@ struct UseError<'a> {
     is_call: bool,
 }
 
+#[derive(Debug)]
+struct DelayedVisResolutionError<'ra> {
+    vis: ast::Visibility,
+    parent_scope: ParentScope<'ra>,
+    error: VisResolutionError,
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum AmbiguityKind {
     BuiltinAttr,
@@ -1044,7 +1064,13 @@ struct AmbiguityError<'ra> {
 
 impl<'ra> DeclData<'ra> {
     fn vis(&self) -> Visibility<DefId> {
-        self.vis.get()
+        // Select the maximum visibility if there are multiple ambiguous glob imports.
+        self.ambiguity_vis_max.get().map(|d| d.vis()).unwrap_or_else(|| self.initial_vis)
+    }
+
+    fn min_vis(&self) -> Visibility<DefId> {
+        // Select the minimum visibility if there are multiple ambiguous glob imports.
+        self.ambiguity_vis_min.get().map(|d| d.vis()).unwrap_or_else(|| self.initial_vis)
     }
 
     fn res(&self) -> Res {
@@ -1346,6 +1372,8 @@ pub struct Resolver<'ra, 'tcx> {
     issue_145575_hack_applied: bool = false,
     /// `use` injections are delayed for better placement and deduplication.
     use_injections: Vec<UseError<'tcx>> = Vec::new(),
+    /// Visibility path resolution failures are delayed until all modules are collected.
+    delayed_vis_resolution_errors: Vec<DelayedVisResolutionError<'ra>> = Vec::new(),
     /// Crate-local macro expanded `macro_export` referred to by a module-relative path.
     macro_expanded_macro_export_errors: BTreeSet<(Span, Span)> = BTreeSet::new(),
 
@@ -1415,9 +1443,9 @@ pub struct Resolver<'ra, 'tcx> {
 
     next_node_id: NodeId = CRATE_NODE_ID,
 
-    node_id_to_def_id: NodeMap<Feed<'tcx, LocalDefId>>,
+    node_id_to_def_id: NodeMap<LocalDefId>,
 
-    per_parent_disambiguators: LocalDefIdMap<PerParentDisambiguatorState>,
+    disambiguators: LocalDefIdMap<PerParentDisambiguatorState>,
 
     /// Indices of unnamed struct or variant fields with unresolved attributes.
     placeholder_field_indices: FxHashMap<NodeId, usize> = default::fx_hash_map(),
@@ -1500,7 +1528,9 @@ impl<'ra> ResolverArenas<'ra> {
             kind: DeclKind::Def(res),
             ambiguity: CmCell::new(None),
             warn_ambiguity: CmCell::new(false),
-            vis: CmCell::new(vis),
+            initial_vis: vis,
+            ambiguity_vis_max: CmCell::new(None),
+            ambiguity_vis_min: CmCell::new(None),
             span,
             expansion,
             parent_module,
@@ -1582,19 +1612,11 @@ impl<'ra, 'tcx> AsRef<Resolver<'ra, 'tcx>> for Resolver<'ra, 'tcx> {
 
 impl<'tcx> Resolver<'_, 'tcx> {
     fn opt_local_def_id(&self, node: NodeId) -> Option<LocalDefId> {
-        self.opt_feed(node).map(|f| f.key())
-    }
-
-    fn local_def_id(&self, node: NodeId) -> LocalDefId {
-        self.feed(node).key()
-    }
-
-    fn opt_feed(&self, node: NodeId) -> Option<Feed<'tcx, LocalDefId>> {
         self.node_id_to_def_id.get(&node).copied()
     }
 
-    fn feed(&self, node: NodeId) -> Feed<'tcx, LocalDefId> {
-        self.opt_feed(node).unwrap_or_else(|| panic!("no entry for node id: `{node:?}`"))
+    fn local_def_id(&self, node: NodeId) -> LocalDefId {
+        self.opt_local_def_id(node).unwrap_or_else(|| panic!("no entry for node id: `{node:?}`"))
     }
 
     fn local_def_kind(&self, node: NodeId) -> DefKind {
@@ -1617,17 +1639,13 @@ impl<'tcx> Resolver<'_, 'tcx> {
             node_id,
             name,
             def_kind,
-            self.tcx.definitions_untracked().def_key(self.node_id_to_def_id[&node_id].key()),
+            self.tcx.definitions_untracked().def_key(self.node_id_to_def_id[&node_id]),
         );
 
+        let disambiguator = self.disambiguators.get_or_create(parent);
+
         // FIXME: remove `def_span` body, pass in the right spans here and call `tcx.at().create_def()`
-        let feed = self.tcx.create_def(
-            parent,
-            name,
-            def_kind,
-            None,
-            self.per_parent_disambiguators.entry(parent).or_default(),
-        );
+        let feed = self.tcx.create_def(parent, name, def_kind, None, disambiguator);
         let def_id = feed.def_id();
 
         // Create the definition.
@@ -1645,7 +1663,7 @@ impl<'tcx> Resolver<'_, 'tcx> {
         // we don't need a mapping from `NodeId` to `LocalDefId`.
         if node_id != ast::DUMMY_NODE_ID {
             debug!("create_def: def_id_to_node_id[{:?}] <-> {:?}", def_id, node_id);
-            self.node_id_to_def_id.insert(node_id, feed.downgrade());
+            self.node_id_to_def_id.insert(node_id, def_id);
         }
 
         feed
@@ -1696,7 +1714,7 @@ impl<'tcx> Resolver<'_, 'tcx> {
     fn def_id_to_node_id(&self, def_id: LocalDefId) -> NodeId {
         self.node_id_to_def_id
             .items()
-            .filter(|(_, v)| v.key() == def_id)
+            .filter(|(_, v)| **v == def_id)
             .map(|(k, _)| *k)
             .get_only()
             .unwrap()
@@ -1737,8 +1755,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let crate_feed = tcx.create_local_crate_def_id(crate_span);
 
         crate_feed.def_kind(DefKind::Mod);
-        let crate_feed = crate_feed.downgrade();
-        node_id_to_def_id.insert(CRATE_NODE_ID, crate_feed);
+        node_id_to_def_id.insert(CRATE_NODE_ID, CRATE_DEF_ID);
 
         let mut invocation_parents = FxHashMap::default();
         invocation_parents.insert(LocalExpnId::ROOT, InvocationParent::ROOT);
@@ -1811,7 +1828,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             doc_link_resolutions: Default::default(),
             doc_link_traits_in_scope: Default::default(),
             current_crate_outer_attr_insert_span,
-            per_parent_disambiguators: Default::default(),
+            disambiguators: Default::default(),
             ..
         };
 
@@ -1891,8 +1908,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         Default::default()
     }
 
-    fn feed_visibility(&mut self, feed: Feed<'tcx, LocalDefId>, vis: Visibility) {
-        let feed = feed.upgrade(self.tcx);
+    fn feed_visibility(&mut self, feed: TyCtxtFeed<'tcx, LocalDefId>, vis: Visibility) {
         feed.visibility(vis.to_def_id());
         self.visibilities_for_hashing.push((feed.def_id(), vis));
     }
@@ -1911,10 +1927,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             .stripped_cfg_items
             .into_iter()
             .filter_map(|item| {
-                let parent_scope =
-                    self.node_id_to_def_id.get(&item.parent_scope)?.key().to_def_id();
+                let parent_scope = self.node_id_to_def_id.get(&item.parent_scope)?.to_def_id();
                 Some(StrippedCfgItem { parent_scope, ident: item.ident, cfg: item.cfg })
             })
+            .collect();
+        let disambiguators = self
+            .disambiguators
+            .into_items()
+            .map(|(def_id, disamb)| (def_id, Steal::new(disamb)))
             .collect();
 
         let global_ctxt = ResolverGlobalCtxt {
@@ -1942,20 +1962,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             lifetimes_res_map: self.lifetimes_res_map,
             extra_lifetime_params_map: self.extra_lifetime_params_map,
             next_node_id: self.next_node_id,
-            node_id_to_def_id: self
-                .node_id_to_def_id
-                .into_items()
-                .map(|(k, f)| (k, f.key()))
-                .collect(),
+            node_id_to_def_id: self.node_id_to_def_id,
             trait_map: self.trait_map,
             lifetime_elision_allowed: self.lifetime_elision_allowed,
             lint_buffer: Steal::new(self.lint_buffer),
             delegation_infos: self.delegation_infos,
-            per_parent_disambiguators: self
-                .per_parent_disambiguators
-                .into_items()
-                .map(|(k, d)| (k, Steal::new(d)))
-                .collect(),
+            disambiguators,
         };
         ResolverOutputs { global_ctxt, ast_lowering }
     }
@@ -2722,6 +2734,15 @@ enum Stage {
     Late,
 }
 
+/// Parts of import data required for finalizing import resolution.
+/// Does not carry a lifetime, so it can be stored in `Finalize`.
+#[derive(Copy, Clone, Debug)]
+struct ImportSummary {
+    vis: Visibility,
+    nearest_parent_mod: LocalDefId,
+    is_single: bool,
+}
+
 /// Invariant: if `Finalize` is used, expansion and import resolution must be complete.
 #[derive(Copy, Clone, Debug)]
 struct Finalize {
@@ -2740,8 +2761,8 @@ struct Finalize {
     used: Used = Used::Other,
     /// Finalizing early or late resolution.
     stage: Stage = Stage::Early,
-    /// Nominal visibility of the import item, in case we are resolving an import's final segment.
-    import_vis: Option<Visibility> = None,
+    /// Some import data, in case we are resolving an import's final segment.
+    import: Option<ImportSummary> = None,
 }
 
 impl Finalize {

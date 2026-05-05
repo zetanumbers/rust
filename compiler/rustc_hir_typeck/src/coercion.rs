@@ -1051,17 +1051,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         expr: &'tcx hir::Expr<'tcx>,
         expr_ty: Ty<'tcx>,
-        mut target: Ty<'tcx>,
+        target: Ty<'tcx>,
         allow_two_phase: AllowTwoPhase,
         cause: Option<ObligationCause<'tcx>>,
     ) -> RelateResult<'tcx, Ty<'tcx>> {
-        let source = self.try_structurally_resolve_type(expr.span, expr_ty);
-        if self.next_trait_solver() {
-            target = self.try_structurally_resolve_type(
-                cause.as_ref().map_or(expr.span, |cause| cause.span),
-                target,
-            );
-        }
+        let source = self.resolve_vars_with_obligations(expr_ty);
         debug!("coercion::try({:?}: {:?} -> {:?})", expr, source, target);
 
         let cause =
@@ -1099,23 +1093,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // Make sure to structurally resolve the types, since we use
             // the `TyKind`s heavily in coercion.
             let ocx = ObligationCtxt::new(self);
-            let structurally_resolve = |ty| {
-                let ty = self.shallow_resolve(ty);
-                if self.next_trait_solver()
-                    && let ty::Alias(..) = ty.kind()
-                {
-                    ocx.structurally_normalize_ty(&cause, self.param_env, Unnormalized::new_wip(ty))
-                } else {
-                    Ok(ty)
-                }
-            };
-            let Ok(expr_ty) = structurally_resolve(expr_ty) else {
-                return false;
-            };
-            let Ok(target_ty) = structurally_resolve(target_ty) else {
-                return false;
-            };
-
             let Ok(ok) = coerce.coerce(expr_ty, target_ty) else {
                 return false;
             };
@@ -1261,8 +1238,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         new: &hir::Expr<'_>,
         new_ty: Ty<'tcx>,
     ) -> RelateResult<'tcx, Ty<'tcx>> {
-        let prev_ty = self.try_structurally_resolve_type(cause.span, prev_ty);
-        let new_ty = self.try_structurally_resolve_type(new.span, new_ty);
+        let prev_ty = self.resolve_vars_with_obligations(prev_ty);
+        let new_ty = self.resolve_vars_with_obligations(new_ty);
         debug!(
             "coercion::try_find_coercion_lub({:?}, {:?}, exprs={:?} exprs)",
             prev_ty,
@@ -1998,9 +1975,13 @@ impl<'tcx> CoerceMany<'tcx> {
             );
         }
 
-        let ret_coercion_span = fcx.ret_coercion_span.get();
+        let is_return_position = fcx
+            .tcx
+            .hir_get_fn_id_for_return_block(block_or_return_id)
+            .is_some_and(|fn_id| fn_id == fcx.tcx.local_def_id_to_hir_id(fcx.body_id));
 
-        if let Some(sp) = ret_coercion_span
+        if is_return_position
+            && let Some(sp) = fcx.ret_coercion_span.get()
             // If the closure has an explicit return type annotation, or if
             // the closure's return type has been inferred from outside
             // requirements (such as an Fn* trait bound), then a type error
@@ -2095,7 +2076,7 @@ impl<'tcx> ProofTreeVisitor<'tcx> for CoerceVisitor<'_, 'tcx> {
                     ControlFlow::Break(())
                 }
             }
-            Ok(Certainty::Maybe { .. }) => {
+            Ok(Certainty::Maybe(_)) => {
                 // FIXME: structurally normalize?
                 if self.fcx.tcx.is_lang_item(pred.def_id(), LangItem::Unsize)
                     && let ty::Dynamic(..) = pred.skip_binder().trait_ref.args.type_at(1).kind()

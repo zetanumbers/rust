@@ -109,6 +109,7 @@ declare_lint_pass! {
         SHADOWING_SUPERTRAIT_ITEMS,
         SINGLE_USE_LIFETIMES,
         STABLE_FEATURES,
+        TAIL_CALL_TRACK_CALLER,
         TAIL_EXPR_DROP_ORDER,
         TEST_UNSTABLE_LINT,
         TEXT_DIRECTION_CODEPOINT_IN_COMMENT,
@@ -192,6 +193,11 @@ declare_lint! {
         reason: fcw!(FutureReleaseError #81670),
         report_in_deps: true,
     };
+    // We exempt `FORBIDDEN_LINT_GROUPS` from `-Dwarnings` because it specifically
+    // triggers in cases (like #80988) where you have `forbid(warnings)`,
+    // and so if we turned that into an error, it'd defeat the purpose of the
+    // future compatibility warning.
+    ignore_deny_warnings
 }
 
 declare_lint! {
@@ -4072,8 +4078,12 @@ declare_lint! {
     /// and actionable warning of similar quality to our other diagnostics. See this tracking
     /// issue for more details: <https://github.com/rust-lang/rust/issues/136096>.
     pub LINKER_MESSAGES,
-    Allow,
-    "warnings emitted at runtime by the target-specific linker program"
+    Warn,
+    "warnings emitted at runtime by the target-specific linker program",
+    // Linker messages don't live up to the high standard people expect of rustc's errors.
+    // Prevent `-D warnings` from applying to it.
+    // It's still possible to pass `-D linker-messages` specifically.
+    ignore_deny_warnings
 }
 
 declare_lint! {
@@ -5638,7 +5648,12 @@ declare_lint! {
     /// LLVM periodically updates its list of intrinsics. Deprecated intrinsics are unlikely
     /// to be removed, but they may optimize less well than their new versions, so it's
     /// best to use the new version. Also, some deprecated intrinsics might have buggy
-    /// behavior
+    /// behavior.
+    ///
+    /// This `link_llvm_intrinsics` lint is intended to be used internally only, and requires the
+    /// `#![feature(link_llvm_intrinsics)]` internal feature gate. For more information, see [its chapter in
+    /// the Unstable Book](https://doc.rust-lang.org/unstable-book/language-features/link-llvm-intrinsics.html)
+    /// and [its tracking issue](https://github.com/rust-lang/rust/issues/29602).
     pub DEPRECATED_LLVM_INTRINSIC,
     Allow,
     "detects uses of deprecated LLVM intrinsics",

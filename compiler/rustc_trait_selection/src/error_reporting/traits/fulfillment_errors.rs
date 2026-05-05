@@ -25,8 +25,8 @@ use rustc_middle::traits::select::OverflowError;
 use rustc_middle::ty::abstract_const::NotConstEvaluatable;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::print::{
-    PrintPolyTraitPredicateExt, PrintTraitPredicateExt as _, PrintTraitRefExt as _,
-    with_forced_trimmed_paths,
+    PrintPolyTraitPredicateExt, PrintPolyTraitRefExt as _, PrintTraitPredicateExt as _,
+    PrintTraitRefExt as _, with_forced_trimmed_paths,
 };
 use rustc_middle::ty::{
     self, GenericArgKind, TraitRef, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
@@ -886,6 +886,23 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     );
                 }
             }
+        } else if let ty::Param(param) = trait_ref.self_ty().skip_binder().kind()
+            && let Some(generics) =
+                self.tcx.hir_node_by_def_id(main_obligation.cause.body_id).generics()
+        {
+            let constraint = ty::print::with_no_trimmed_paths!(format!(
+                "[const] {}",
+                trait_ref.map_bound(|tr| tr.trait_ref).print_trait_sugared(),
+            ));
+            ty::suggest_constraining_type_param(
+                self.tcx,
+                generics,
+                &mut diag,
+                param.name.as_str(),
+                &constraint,
+                Some(trait_ref.def_id()),
+                None,
+            );
         }
         diag
     }
@@ -1536,8 +1553,11 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     let unnormalized_term = data.projection_term.to_term(self.tcx);
                     // FIXME(-Znext-solver): For diagnostic purposes, it would be nice
                     // to deeply normalize this type.
-                    let normalized_term =
-                        ocx.normalize(&obligation.cause, obligation.param_env, Unnormalized::new_wip(unnormalized_term));
+                    let normalized_term = ocx.normalize(
+                        &obligation.cause,
+                        obligation.param_env,
+                        Unnormalized::new_wip(unnormalized_term),
+                    );
 
                     // constrain inference variables a bit more to nested obligations from normalize so
                     // we can have more helpful errors.
@@ -1566,13 +1586,11 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                         |alias_term: ty::AliasTerm<'tcx>, expected_term: ty::Term<'tcx>| {
                             let ocx = ObligationCtxt::new(self);
 
-                            let Ok(normalized_term) = ocx.structurally_normalize_term(
+                            let normalized_term = ocx.normalize(
                                 &ObligationCause::dummy(),
                                 obligation.param_env,
                                 Unnormalized::new_wip(alias_term.to_term(self.tcx)),
-                            ) else {
-                                return None;
-                            };
+                            );
 
                             if let Err(terr) = ocx.eq(
                                 &ObligationCause::dummy(),
@@ -1586,8 +1604,9 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                             }
                         };
 
-                    if let Some(lhs) = lhs.to_alias_term()
-                        && let ty::AliasTermKind::ProjectionTy | ty::AliasTermKind::ProjectionConst = lhs.kind(self.tcx)
+                    if let Some(lhs) = lhs.to_alias_term(self.tcx)
+                        && let ty::AliasTermKind::ProjectionTy { .. }
+                        | ty::AliasTermKind::ProjectionConst { .. } = lhs.kind(self.tcx)
                         && let Some((better_type_err, expected_term)) =
                             derive_better_type_error(lhs, rhs)
                     {
@@ -1595,8 +1614,9 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                             Some((lhs, self.resolve_vars_if_possible(expected_term), rhs)),
                             better_type_err,
                         )
-                    } else if let Some(rhs) = rhs.to_alias_term()
-                        && let ty::AliasTermKind::ProjectionTy | ty::AliasTermKind::ProjectionConst = rhs.kind(self.tcx)
+                    } else if let Some(rhs) = rhs.to_alias_term(self.tcx)
+                        && let ty::AliasTermKind::ProjectionTy { .. }
+                        | ty::AliasTermKind::ProjectionConst { .. } = rhs.kind(self.tcx)
                         && let Some((better_type_err, expected_term)) =
                             derive_better_type_error(rhs, lhs)
                     {
@@ -1741,7 +1761,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         let self_ty = projection_term.self_ty();
 
         with_forced_trimmed_paths! {
-            if self.tcx.is_lang_item(projection_term.def_id, LangItem::FnOnceOutput) {
+            if self.tcx.is_lang_item(projection_term.def_id(), LangItem::FnOnceOutput) {
                 let (span, closure_span) = if let ty::Closure(def_id, _) = *self_ty.kind() {
                     let def_span = self.tcx.def_span(def_id);
                     if let Some(local_def_id) = def_id.as_local()
@@ -1968,6 +1988,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
     pub(super) fn report_similar_impl_candidates(
         &self,
         impl_candidates: &[ImplCandidate<'tcx>],
+        obligation: &PredicateObligation<'tcx>,
         trait_pred: ty::PolyTraitPredicate<'tcx>,
         body_def_id: LocalDefId,
         err: &mut Diag<'_>,
@@ -2032,6 +2053,20 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         };
 
         if let [single] = &impl_candidates {
+            let self_ty = trait_pred.skip_binder().self_ty();
+            if !self_ty.has_escaping_bound_vars() {
+                let self_ty = self.tcx.instantiate_bound_regions_with_erased(trait_pred.self_ty());
+                if let ty::Ref(_, inner_ty, _) = self_ty.kind()
+                    && self.can_eq(param_env, single.trait_ref.self_ty(), *inner_ty)
+                    && !self.where_clause_expr_matches_failed_self_ty(obligation, self_ty)
+                {
+                    // Avoid pointing at a nearby impl like `String: Borrow<str>` when the
+                    // failing obligation comes from something nested inside an enclosing call
+                    // expression such as `foo(&[String::from("a")])`.
+                    return true;
+                }
+            }
+
             // If we have a single implementation, try to unify it with the trait ref
             // that failed. This should uncover a better hint for what *is* implemented.
             if self.probe(|_| {
@@ -2451,6 +2486,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             let impl_candidates = self.find_similar_impl_candidates(trait_pred);
             self.report_similar_impl_candidates(
                 &impl_candidates,
+                obligation,
                 trait_pred,
                 body_def_id,
                 err,
@@ -2687,7 +2723,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
     fn predicate_can_apply(
         &self,
         param_env: ty::ParamEnv<'tcx>,
-        pred: ty::PolyTraitPredicate<'tcx>,
+        pred: impl Upcast<TyCtxt<'tcx>, ty::Predicate<'tcx>> + TypeFoldable<TyCtxt<'tcx>>,
     ) -> bool {
         struct ParamToVarFolder<'a, 'tcx> {
             infcx: &'a InferCtxt<'tcx>,
@@ -2747,6 +2783,11 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 obligation.predicate,
                 obligation.param_env,
                 obligation.cause.code(),
+            );
+            self.suggest_borrow_for_unsized_closure_return(
+                obligation.cause.body_id,
+                err,
+                obligation.predicate,
             );
             self.suggest_unsized_bound_if_applicable(err, obligation);
             if let Some(span) = err.span.primary_span()
@@ -2816,13 +2857,11 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         );
         let trait_ref = normalized_predicate.trait_ref;
 
-        let Ok(assume) = ocx.structurally_normalize_const(
+        let assume = ocx.normalize(
             &obligation.cause,
             obligation.param_env,
             Unnormalized::new_wip(trait_ref.args.const_at(2)),
-        ) else {
-            return (obligation.clone(), trait_predicate);
-        };
+        );
 
         let Some(assume) = rustc_transmute::Assume::from_const(self.tcx, assume) else {
             return (obligation.clone(), trait_predicate);
@@ -2869,17 +2908,11 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             );
 
             let ocx = ObligationCtxt::new(self);
-            let Ok(assume) = ocx.structurally_normalize_const(
+            let assume = ocx.normalize(
                 &obligation.cause,
                 obligation.param_env,
                 Unnormalized::new_wip(trait_pred.trait_ref.args.const_at(2)),
-            ) else {
-                self.dcx().span_delayed_bug(
-                    span,
-                    "Unable to construct rustc_transmute::Assume where it was previously possible",
-                );
-                return GetSafeTransmuteErrorAndReason::Silent;
-            };
+            );
 
             let Some(assume) = rustc_transmute::Assume::from_const(self.infcx.tcx, assume) else {
                 self.dcx().span_delayed_bug(
@@ -3127,6 +3160,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             let impl_candidates = self.find_similar_impl_candidates(trait_predicate);
             if !self.report_similar_impl_candidates(
                 &impl_candidates,
+                obligation,
                 trait_predicate,
                 body_def_id,
                 err,

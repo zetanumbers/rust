@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustc_data_structures::AtomicRef;
 use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::stable_hasher::{StableHash, StableHashCtxt, StableHasher};
 use rustc_span::{Span, Symbol, sym};
 
 use super::{Feature, to_nonzero};
@@ -119,6 +120,32 @@ impl Features {
     }
 }
 
+impl StableHash for Features {
+    fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
+        // `enabled_features` is skipped because it's the sum of the lang and lib features.
+        let Features { enabled_lang_features, enabled_lib_features, enabled_features: _ } = self;
+        enabled_lang_features.stable_hash(hcx, hasher);
+        enabled_lib_features.stable_hash(hcx, hasher);
+    }
+}
+
+impl StableHash for EnabledLangFeature {
+    fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
+        let EnabledLangFeature { gate_name, attr_sp, stable_since } = self;
+        gate_name.stable_hash(hcx, hasher);
+        attr_sp.stable_hash(hcx, hasher);
+        stable_since.stable_hash(hcx, hasher);
+    }
+}
+
+impl StableHash for EnabledLibFeature {
+    fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
+        let EnabledLibFeature { gate_name, attr_sp } = self;
+        gate_name.stable_hash(hcx, hasher);
+        attr_sp.stable_hash(hcx, hasher);
+    }
+}
+
 macro_rules! declare_features {
     ($(
         $(#[doc = $doc:tt])* ($status:ident, $feature:ident, $ver:expr, $issue:expr),
@@ -229,6 +256,8 @@ declare_features! (
     (internal, cfg_target_has_reliable_f16_f128, "1.88.0", None),
     /// Allows identifying the `compiler_builtins` crate.
     (internal, compiler_builtins, "1.13.0", None),
+    /// Allows skipping `ConstParamTy_` trait implementation checks
+    (internal, const_param_ty_unchecked, "CURRENT_RUSTC_VERSION", None),
     /// Allows writing custom MIR
     (internal, custom_mir, "1.65.0", None),
     /// Implementation details of externally implementable items
@@ -303,6 +332,8 @@ declare_features! (
     (internal, panic_runtime, "1.10.0", Some(32837)),
     /// Allows using pattern types.
     (internal, pattern_types, "1.79.0", Some(123646)),
+    /// Allows `repr(simd)` and importing the various simd intrinsics.
+    (internal, repr_simd, "1.4.0", Some(27731)),
     /// Allows using compiler's own crates.
     (unstable, rustc_private, "1.0.0", Some(27812)),
     /// Allows using internal rustdoc features like `doc(keyword)`.
@@ -391,6 +422,9 @@ declare_features! (
     (unstable, bpf_target_feature, "1.54.0", Some(150247)),
     /// Allows using C-variadics.
     (unstable, c_variadic, "1.34.0", Some(44930)),
+    /// Allows defining c-variadic functions on targets where this feature has not yet
+    /// undergone sufficient testing for stabilization.
+    (unstable, c_variadic_experimental_arch, "CURRENT_RUSTC_VERSION", Some(155973)),
     /// Allows defining c-variadic naked functions with any extern ABI that is allowed
     /// on c-variadic foreign functions.
     (unstable, c_variadic_naked_functions, "1.93.0", Some(148767)),
@@ -478,6 +512,8 @@ declare_features! (
     (unstable, diagnostic_on_move, "1.96.0", Some(154181)),
     /// Allows giving unresolved imports a custom diagnostic message
     (unstable, diagnostic_on_unknown, "1.96.0", Some(152900)),
+    /// Allows macros to customize macro argument matcher diagnostics.
+    (unstable, diagnostic_on_unmatch_args, "CURRENT_RUSTC_VERSION", Some(155642)),
     /// Allows `#[doc(cfg(...))]`.
     (unstable, doc_cfg, "1.21.0", Some(43781)),
     /// Allows `#[doc(masked)]`.
@@ -545,7 +581,7 @@ declare_features! (
     /// Target features on hexagon.
     (unstable, hexagon_target_feature, "1.27.0", Some(150250)),
     /// Allows `impl(crate) trait Foo` restrictions.
-    (incomplete, impl_restriction, "1.96.0", Some(105077)),
+    (unstable, impl_restriction, "CURRENT_RUSTC_VERSION", Some(105077)),
     /// Allows `impl Trait` to be used inside associated types (RFC 2515).
     (unstable, impl_trait_in_assoc_type, "1.70.0", Some(63063)),
     /// Allows `impl Trait` in bindings (`let`).
@@ -657,8 +693,6 @@ declare_features! (
     (incomplete, ref_pat_eat_one_layer_2024_structural, "1.81.0", Some(123076)),
     /// Allows using the `#[register_tool]` attribute.
     (unstable, register_tool, "1.41.0", Some(66079)),
-    /// Allows `repr(simd)` and importing the various simd intrinsics.
-    (unstable, repr_simd, "1.4.0", Some(27731)),
     /// Allows bounding the return type of AFIT/RPITIT.
     (unstable, return_type_notation, "1.70.0", Some(109417)),
     /// Target features on riscv.
@@ -721,6 +755,8 @@ declare_features! (
     (internal, unsized_fn_params, "1.49.0", Some(48055)),
     /// Allows using the `#[used(linker)]` (or `#[used(compiler)]`) attribute.
     (unstable, used_with_arg, "1.60.0", Some(93798)),
+    /// Allows view types.
+    (unstable, view_types, "CURRENT_RUSTC_VERSION", Some(155938)),
     /// Target features on wasm.
     (unstable, wasm_target_feature, "1.30.0", Some(150260)),
     /// Allows use of attributes in `where` clauses.

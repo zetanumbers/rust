@@ -742,7 +742,7 @@ impl<'a, 'tcx> ProofTreeVisitor<'tcx> for AmbiguityCausesVisitor<'a, 'tcx> {
         // was irrelevant.
         match goal.result() {
             Ok(Certainty::Yes) | Err(NoSolution) => return,
-            Ok(Certainty::Maybe { .. }) => {}
+            Ok(Certainty::Maybe(_)) => {}
         }
 
         // For bound predicates we simply call `infcx.enter_forall`
@@ -753,7 +753,7 @@ impl<'a, 'tcx> ProofTreeVisitor<'tcx> for AmbiguityCausesVisitor<'a, 'tcx> {
             ty::PredicateKind::Clause(ty::ClauseKind::Trait(tr)) => tr.trait_ref,
             ty::PredicateKind::Clause(ty::ClauseKind::Projection(proj))
                 if matches!(
-                    infcx.tcx.def_kind(proj.projection_term.def_id),
+                    infcx.tcx.def_kind(proj.projection_term.def_id()),
                     DefKind::AssocTy | DefKind::AssocConst { .. }
                 ) =>
             {
@@ -775,7 +775,7 @@ impl<'a, 'tcx> ProofTreeVisitor<'tcx> for AmbiguityCausesVisitor<'a, 'tcx> {
                 && let ty::ImplPolarity::Reservation = infcx.tcx.impl_polarity(def_id)
             {
                 if let Some(message) =
-                    find_attr!(infcx.tcx, def_id, RustcReservationImpl(_, message) => *message)
+                    find_attr!(infcx.tcx, def_id, RustcReservationImpl(message) => *message)
                 {
                     self.causes.insert(IntercrateAmbiguityCause::ReservationImpl { message });
                 }

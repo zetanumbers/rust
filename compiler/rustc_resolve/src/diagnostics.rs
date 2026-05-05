@@ -1,4 +1,5 @@
 // ignore-tidy-filelength
+use std::mem;
 use std::ops::ControlFlow;
 
 use itertools::Itertools as _;
@@ -48,10 +49,10 @@ use crate::imports::{Import, ImportKind};
 use crate::late::{DiagMetadata, PatternSource, Rib};
 use crate::{
     AmbiguityError, AmbiguityKind, AmbiguityWarning, BindingError, BindingKey, Decl, DeclKind,
-    Finalize, ForwardGenericParamBanReason, HasGenericParams, IdentKey, LateDecl, MacroRulesScope,
-    Module, ModuleKind, ModuleOrUniformRoot, ParentScope, PathResult, PrivacyError, Res,
-    ResolutionError, Resolver, Scope, ScopeSet, Segment, UseError, Used, VisResolutionError,
-    errors as errs, path_names_to_string,
+    DelayedVisResolutionError, Finalize, ForwardGenericParamBanReason, HasGenericParams, IdentKey,
+    LateDecl, MacroRulesScope, Module, ModuleKind, ModuleOrUniformRoot, ParentScope, PathResult,
+    PrivacyError, Res, ResolutionError, Resolver, Scope, ScopeSet, Segment, UseError, Used,
+    VisResolutionError, errors as errs, path_names_to_string,
 };
 
 /// A vector of spans and replacements, a message and applicability.
@@ -137,6 +138,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     }
 
     pub(crate) fn report_errors(&mut self, krate: &Crate) {
+        self.report_delayed_vis_resolution_errors();
         self.report_with_use_injections(krate);
 
         for &(span_use, span_def) in &self.macro_expanded_macro_export_errors {
@@ -171,16 +173,27 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
 
         let mut reported_spans = FxHashSet::default();
-        for error in std::mem::take(&mut self.privacy_errors) {
+        for error in mem::take(&mut self.privacy_errors) {
             if reported_spans.insert(error.dedup_span) {
                 self.report_privacy_error(&error);
             }
         }
     }
 
+    fn report_delayed_vis_resolution_errors(&mut self) {
+        for DelayedVisResolutionError { vis, parent_scope, error } in
+            mem::take(&mut self.delayed_vis_resolution_errors)
+        {
+            match self.try_resolve_visibility(&parent_scope, &vis, true) {
+                Ok(_) => self.report_vis_error(error),
+                Err(error) => self.report_vis_error(error),
+            };
+        }
+    }
+
     fn report_with_use_injections(&mut self, krate: &Crate) {
         for UseError { mut err, candidates, def_id, instead, suggestion, path, is_call } in
-            std::mem::take(&mut self.use_injections)
+            mem::take(&mut self.use_injections)
         {
             let (span, found_use) = if let Some(def_id) = def_id.as_local() {
                 UsePlacementFinder::check(krate, self.def_id_to_node_id(def_id))
@@ -386,9 +399,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let mut suggestion = None;
         let mut span = binding_span;
         match import.kind {
-            ImportKind::Single { type_ns_only: true, .. } => {
-                suggestion = Some(format!("self as {suggested_name}"))
-            }
             ImportKind::Single { source, .. } => {
                 if let Some(pos) = source.span.hi().0.checked_sub(binding_span.lo().0)
                     && let Ok(snippet) = self.tcx.sess.source_map().span_to_snippet(binding_span)
@@ -608,12 +618,13 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     span,
                     label: None,
                     refer_to_type_directly: None,
+                    use_let: None,
                     sugg: None,
                     static_or_const,
                     is_self,
-                    item: inner_item.as_ref().map(|(span, kind)| {
+                    item: inner_item.as_ref().map(|(label_span, _, kind)| {
                         errs::GenericParamsFromOuterItemInnerItem {
-                            span: *span,
+                            span: *label_span,
                             descr: kind.descr().to_string(),
                             is_self,
                         }
@@ -621,10 +632,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 };
 
                 let sm = self.tcx.sess.source_map();
+                // Note: do not early return for missing def_id here,
+                // we still want to provide suggestions for `Res::SelfTyParam` and `Res::SelfTyAlias`.
                 let def_id = match outer_res {
                     Res::SelfTyParam { .. } => {
                         err.label = Some(Label::SelfTyParam(span));
-                        return self.dcx().create_err(err);
+                        None
                     }
                     Res::SelfTyAlias { alias_to: def_id, .. } => {
                         err.label = Some(Label::SelfTyAlias(reduce_impl_span_to_impl_keyword(
@@ -633,15 +646,15 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         )));
                         err.refer_to_type_directly =
                             current_self_ty.map(|snippet| errs::UseTypeDirectly { span, snippet });
-                        return self.dcx().create_err(err);
+                        None
                     }
                     Res::Def(DefKind::TyParam, def_id) => {
                         err.label = Some(Label::TyParam(self.def_span(def_id)));
-                        def_id
+                        Some(def_id)
                     }
                     Res::Def(DefKind::ConstParam, def_id) => {
                         err.label = Some(Label::ConstParam(self.def_span(def_id)));
-                        def_id
+                        Some(def_id)
                     }
                     _ => {
                         bug!(
@@ -652,8 +665,15 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                 };
 
-                if let HasGenericParams::Yes(span) = has_generic_params
-                    && !matches!(inner_item, Some((_, ItemKind::Delegation(..))))
+                if let Some((_, item_span, ItemKind::Const(_))) = inner_item.as_ref() {
+                    err.use_let = Some(errs::GenericParamsFromOuterItemUseLet {
+                        span: sm.span_until_whitespace(*item_span),
+                    });
+                }
+
+                if let Some(def_id) = def_id
+                    && let HasGenericParams::Yes(span) = has_generic_params
+                    && !matches!(inner_item, Some((_, _, ItemKind::Delegation(..))))
                 {
                     let name = self.tcx.item_name(def_id);
                     let (span, snippet) = if span.is_empty() {
@@ -913,29 +933,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     sub_unreachable,
                 })
             }
-            ResolutionError::SelfImportsOnlyAllowedWithin { root, span_with_rename } => {
-                // None of the suggestions below would help with a case like `use self`.
-                let (suggestion, mpart_suggestion) = if root {
-                    (None, None)
-                } else {
-                    // use foo::bar::self        -> foo::bar
-                    // use foo::bar::self as abc -> foo::bar as abc
-                    let suggestion = errs::SelfImportsOnlyAllowedWithinSuggestion { span };
-
-                    // use foo::bar::self        -> foo::bar::{self}
-                    // use foo::bar::self as abc -> foo::bar::{self as abc}
-                    let mpart_suggestion = errs::SelfImportsOnlyAllowedWithinMultipartSuggestion {
-                        multipart_start: span_with_rename.shrink_to_lo(),
-                        multipart_end: span_with_rename.shrink_to_hi(),
-                    };
-                    (Some(suggestion), Some(mpart_suggestion))
-                };
-                self.dcx().create_err(errs::SelfImportsOnlyAllowedWithin {
-                    span,
-                    suggestion,
-                    mpart_suggestion,
-                })
-            }
             ResolutionError::FailedToResolve { segment, label, suggestion, module, message } => {
                 let mut err = struct_span_code_err!(self.dcx(), span, E0433, "{message}");
                 err.span_label(span, label);
@@ -979,23 +976,47 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     .source_map()
                     .span_extend_to_prev_str(ident.span, current, true, false);
 
-                let ((with, with_label), without) = match sp {
+                let (with, with_label, without) = match sp {
                     Some(sp) if !self.tcx.sess.source_map().is_multiline(sp) => {
                         let sp = sp
                             .with_lo(BytePos(sp.lo().0 - (current.len() as u32)))
                             .until(ident.span);
-                        (
-                        (Some(errs::AttemptToUseNonConstantValueInConstantWithSuggestion {
-                                span: sp,
-                                suggestion,
-                                current,
-                                type_span,
-                            }), Some(errs::AttemptToUseNonConstantValueInConstantLabelWithSuggestion {span})),
-                            None,
-                        )
+
+                        // Only suggest replacing the binding keyword if this is a simple
+                        // binding.
+                        //
+                        // Note: this approach still incorrectly suggests for irrefutable
+                        // patterns like `if let x = 1 { const { x } }`, since the text
+                        // between `let` and the identifier is just whitespace.
+                        // See tests/ui/consts/non-const-value-in-const-irrefutable-pat-binding.rs
+                        let is_simple_binding =
+                            self.tcx.sess.source_map().span_to_snippet(sp).is_ok_and(|snippet| {
+                                let after_keyword = snippet[current.len()..].trim();
+                                after_keyword.is_empty() || after_keyword == "mut"
+                            });
+
+                        if is_simple_binding {
+                            (
+                                Some(errs::AttemptToUseNonConstantValueInConstantWithSuggestion {
+                                    span: sp,
+                                    suggestion,
+                                    current,
+                                    type_span,
+                                }),
+                                Some(errs::AttemptToUseNonConstantValueInConstantLabelWithSuggestion { span }),
+                                None,
+                            )
+                        } else {
+                            (
+                                None,
+                                Some(errs::AttemptToUseNonConstantValueInConstantLabelWithSuggestion { span }),
+                                None,
+                            )
+                        }
                     }
                     _ => (
-                        (None, None),
+                        None,
+                        None,
                         Some(errs::AttemptToUseNonConstantValueInConstantWithoutSuggestion {
                             ident_span: ident.span,
                             suggestion,
@@ -1129,7 +1150,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
     pub(crate) fn report_vis_error(
         &mut self,
-        vis_resolution_error: VisResolutionError<'_>,
+        vis_resolution_error: VisResolutionError,
     ) -> ErrorGuaranteed {
         match vis_resolution_error {
             VisResolutionError::Relative2018(span, path) => {
@@ -1138,7 +1159,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     path_span: path.span,
                     // intentionally converting to String, as the text would also be used as
                     // in suggestion context
-                    path_str: pprust::path_to_string(path),
+                    path_str: pprust::path_to_string(&path),
                 })
             }
             VisResolutionError::AncestorOnly(span) => {
@@ -1257,6 +1278,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         suggestions.extend(
                             BUILTIN_ATTRIBUTES
                                 .iter()
+                                // These trace attributes are compiler-generated and have
+                                // deliberately invalid names.
+                                .filter(|attr| {
+                                    !matches!(attr.name, sym::cfg_trace | sym::cfg_attr_trace)
+                                })
                                 .map(|attr| TypoSuggestion::typo_from_name(attr.name, res)),
                         );
                     }
@@ -2149,6 +2175,111 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         self.field_idents(def_id)?.iter().map(|&f| f.span).reduce(Span::to) // None for `struct Foo()`
     }
 
+    /// Returns the path segments (as symbols) of a module, including `kw::Crate` at the start.
+    /// For example, for `crate::foo::bar`, returns `[Crate, foo, bar]`.
+    /// Returns `None` for block modules that don't have a `DefId`.
+    fn module_path_names(&self, module: Module<'ra>) -> Option<Vec<Symbol>> {
+        let mut path = Vec::new();
+        let mut def_id = module.opt_def_id()?;
+        while let Some(parent) = self.tcx.opt_parent(def_id) {
+            if let Some(name) = self.tcx.opt_item_name(def_id) {
+                path.push(name);
+            }
+            if parent.is_top_level_module() {
+                break;
+            }
+            def_id = parent;
+        }
+        path.reverse();
+        path.insert(0, kw::Crate);
+        Some(path)
+    }
+
+    /// Shortens a candidate import path to use `super::` (up to 1 level) or `self::` (same module)
+    /// relative to the current scope, if possible. Only applies to crate-local items and
+    /// only when the resulting path is actually shorter than the original.
+    fn shorten_candidate_path(
+        &self,
+        suggestion: &mut ImportSuggestion,
+        current_module: Module<'ra>,
+    ) {
+        const MAX_SUPER_PATH_ITEMS_IN_SUGGESTION: usize = 1;
+
+        // Only shorten local items.
+        if suggestion.did.is_none_or(|did| !did.is_local()) {
+            return;
+        }
+
+        // Build current module path: [Crate, foo, bar, ...].
+        let Some(current_mod_path) = self.module_path_names(current_module) else {
+            return;
+        };
+
+        // Normalise candidate path: filter out `PathRoot` (`::`), and if the path
+        // doesn't start with `Crate`, prepend it (edition 2015 paths are relative
+        // to the crate root without an explicit `crate::` prefix).
+        let candidate_names = {
+            let filtered_segments: Vec<_> = suggestion
+                .path
+                .segments
+                .iter()
+                .filter(|segment| segment.ident.name != kw::PathRoot)
+                .collect();
+
+            let mut candidate_names: Vec<Symbol> =
+                filtered_segments.iter().map(|segment| segment.ident.name).collect();
+            if candidate_names.first() != Some(&kw::Crate) {
+                candidate_names.insert(0, kw::Crate);
+            }
+            if candidate_names.len() < 2 {
+                return;
+            }
+            candidate_names
+        };
+
+        // The candidate's module path is everything except the last segment (the item name).
+        let candidate_mod_names = &candidate_names[..candidate_names.len() - 1];
+
+        // Find the longest common prefix between the current module and candidate module paths.
+        let common_prefix_length = current_mod_path
+            .iter()
+            .zip(candidate_mod_names.iter())
+            .take_while(|(current, candidate)| current == candidate)
+            .count();
+
+        // Non-crate-local item; keep the full absolute path.
+        if common_prefix_length == 0 {
+            return;
+        }
+
+        let super_count = current_mod_path.len() - common_prefix_length;
+
+        // At the crate root, `use` paths resolve from the crate root anyway, so we can
+        // drop the `crate::` prefix entirely instead of replacing it with `self::`.
+        let at_crate_root = current_mod_path.len() == 1;
+
+        let mut new_segments = if super_count == 0 && at_crate_root {
+            ThinVec::new()
+        } else {
+            let prefix_keyword = match super_count {
+                0 => kw::SelfLower,
+                1..=MAX_SUPER_PATH_ITEMS_IN_SUGGESTION => kw::Super,
+                _ => return, // Too many `super` levels; keep the full absolute path.
+            };
+            thin_vec![ast::PathSegment::from_ident(Ident::with_dummy_span(prefix_keyword),)]
+        };
+        for &name in &candidate_names[common_prefix_length..] {
+            new_segments.push(ast::PathSegment::from_ident(Ident::with_dummy_span(name)));
+        }
+
+        // Only apply if the result is strictly shorter than the original path.
+        if new_segments.len() >= suggestion.path.segments.len() {
+            return;
+        }
+
+        suggestion.path = Path { span: suggestion.path.span, segments: new_segments, tokens: None };
+    }
+
     fn report_privacy_error(&mut self, privacy_error: &PrivacyError<'ra>) {
         let PrivacyError {
             ident,
@@ -2177,12 +2308,16 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         let mut not_publicly_reexported = false;
         if let Some((this_res, outer_ident)) = outermost_res {
-            let import_suggestions = self.lookup_import_candidates(
+            let mut import_suggestions = self.lookup_import_candidates(
                 outer_ident,
                 this_res.ns().unwrap_or(Namespace::TypeNS),
                 &parent_scope,
                 &|res: Res| res == this_res,
             );
+            // Shorten candidate paths using `super::` or `self::` when possible.
+            for suggestion in &mut import_suggestions {
+                self.shorten_candidate_path(suggestion, parent_scope.module);
+            }
             let point_to_def = !show_candidates(
                 self.tcx,
                 &mut err,
