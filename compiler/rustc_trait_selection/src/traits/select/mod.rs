@@ -604,7 +604,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             None => self.check_recursion_limit(&obligation, &obligation)?,
         }
 
-        if sizedness_fast_path(self.tcx(), obligation.predicate, obligation.param_env) {
+        if !self.infcx.disable_trait_solver_fast_paths()
+            && sizedness_fast_path(self.tcx(), obligation.predicate, obligation.param_env)
+        {
             return Ok(EvaluatedToOk);
         }
 

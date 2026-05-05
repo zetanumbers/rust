@@ -641,6 +641,11 @@ impl<'tcx> InferCtxt<'tcx> {
     }
 
     #[inline(always)]
+    pub fn disable_trait_solver_fast_paths(&self) -> bool {
+        self.tcx.disable_trait_solver_fast_paths()
+    }
+
+    #[inline(always)]
     pub fn typing_mode(&self) -> TypingMode<'tcx> {
         self.typing_mode
     }

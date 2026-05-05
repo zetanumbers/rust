@@ -325,6 +325,10 @@ impl<'a, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'tcx> {
     /// compile-time benchmarks are very sensitive to even small changes.
     #[inline(always)]
     fn needs_process_obligation(&self, pending_obligation: &Self::Obligation) -> bool {
+        if self.selcx.infcx.disable_trait_solver_fast_paths() {
+            return true;
+        }
+
         // If we were stalled on some unresolved variables, first check whether
         // any of them have been resolved; if not, don't bother doing more work
         // yet.
@@ -388,7 +392,9 @@ impl<'a, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'tcx> {
 
         let infcx = self.selcx.infcx;
 
-        if sizedness_fast_path(infcx.tcx, obligation.predicate, obligation.param_env) {
+        if !infcx.disable_trait_solver_fast_paths()
+            && sizedness_fast_path(infcx.tcx, obligation.predicate, obligation.param_env)
+        {
             return ProcessResult::Changed(thin_vec![]);
         }
 

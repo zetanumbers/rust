@@ -2657,6 +2657,10 @@ impl<'tcx> TyCtxt<'tcx> {
         self.sess.opts.unstable_opts.next_solver.coherence
     }
 
+    pub fn disable_trait_solver_fast_paths(self) -> bool {
+        self.sess.opts.unstable_opts.disable_fast_paths
+    }
+
     #[allow(rustc::bad_opt_access)]
     pub fn use_typing_mode_borrowck(self) -> bool {
         self.next_trait_solver_globally() || self.sess.opts.unstable_opts.typing_mode_borrowck
