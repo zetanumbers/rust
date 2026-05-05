@@ -16,7 +16,7 @@ use rustc_hir::Attribute;
 use rustc_hir::attrs::AttributeKind;
 use rustc_hir::attrs::diagnostic::{CustomDiagnostic, Directive, FormatArgs};
 use rustc_hir::def::{self, DefKind, PartialRes};
-use rustc_hir::def_id::{DefId, LocalDefIdMap};
+use rustc_hir::def_id::{DefId, LocalDefId, LocalDefIdMap};
 use rustc_middle::metadata::{AmbigModChild, ModChild, Reexport};
 use rustc_middle::span_bug;
 use rustc_middle::ty::{TyCtxt, Visibility};
@@ -90,17 +90,20 @@ pub(crate) enum ImportKind<'ra> {
         /// If this is the import for `foo::bar::a`, we would have the ID of the `UseTree`
         /// for `a` in this field.
         id: NodeId,
+        def_id: LocalDefId,
     },
     Glob {
         // The visibility of the greatest re-export.
         // n.b. `max_vis` is only used in `finalize_import` to check for re-export errors.
         max_vis: CmCell<Option<Visibility>>,
         id: NodeId,
+        def_id: LocalDefId,
     },
     ExternCrate {
         source: Option<Symbol>,
         target: Ident,
         id: NodeId,
+        def_id: LocalDefId,
     },
     MacroUse {
         /// A field has been added indicating whether it should be reported as a lint,
@@ -116,7 +119,7 @@ impl<'ra> std::fmt::Debug for ImportKind<'ra> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ImportKind::*;
         match self {
-            Single { source, target, decls, nested, id, .. } => f
+            Single { source, target, decls, nested, id, def_id } => f
                 .debug_struct("Single")
                 .field("source", source)
                 .field("target", target)
@@ -127,15 +130,20 @@ impl<'ra> std::fmt::Debug for ImportKind<'ra> {
                 )
                 .field("nested", nested)
                 .field("id", id)
+                .field("def_id", def_id)
                 .finish(),
-            Glob { max_vis, id } => {
-                f.debug_struct("Glob").field("max_vis", max_vis).field("id", id).finish()
-            }
-            ExternCrate { source, target, id } => f
+            Glob { max_vis, id, def_id } => f
+                .debug_struct("Glob")
+                .field("max_vis", max_vis)
+                .field("id", id)
+                .field("def_id", def_id)
+                .finish(),
+            ExternCrate { source, target, id, def_id } => f
                 .debug_struct("ExternCrate")
                 .field("source", source)
                 .field("target", target)
                 .field("id", id)
+                .field("def_id", def_id)
                 .finish(),
             MacroUse { warn_private } => {
                 f.debug_struct("MacroUse").field("warn_private", warn_private).finish()
@@ -260,12 +268,11 @@ impl<'ra> ImportData<'ra> {
         }
     }
 
-    pub(crate) fn simplify(&self, r: &Resolver<'_, '_>) -> Reexport {
-        let to_def_id = |id| r.local_def_id(id).to_def_id();
+    pub(crate) fn simplify(&self) -> Reexport {
         match self.kind {
-            ImportKind::Single { id, .. } => Reexport::Single(to_def_id(id)),
-            ImportKind::Glob { id, .. } => Reexport::Glob(to_def_id(id)),
-            ImportKind::ExternCrate { id, .. } => Reexport::ExternCrate(to_def_id(id)),
+            ImportKind::Single { def_id, .. } => Reexport::Single(def_id.to_def_id()),
+            ImportKind::Glob { def_id, .. } => Reexport::Glob(def_id.to_def_id()),
+            ImportKind::ExternCrate { def_id, .. } => Reexport::ExternCrate(def_id.to_def_id()),
             ImportKind::MacroUse { .. } => Reexport::MacroUse,
             ImportKind::MacroExport => Reexport::MacroExport,
         }
@@ -1267,7 +1274,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         let (ident, target, bindings, import_id) = match import.kind {
             ImportKind::Single { source, target, ref decls, id, .. } => (source, target, decls, id),
-            ImportKind::Glob { ref max_vis, id } => {
+            ImportKind::Glob { ref max_vis, id, def_id: _ } => {
                 if import.module_path.len() <= 1 {
                     // HACK(eddyb) `lint_if_path_starts_with_module` needs at least
                     // 2 segments, so the `resolve_path` above won't trigger it.
@@ -1829,23 +1836,23 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let mut children = Vec::new();
         let mut ambig_children = Vec::new();
 
-        module.to_module().for_each_child(self, |this, ident, orig_ident_span, _, binding| {
+        module.to_module().for_each_child(self, |_this, ident, orig_ident_span, _, binding| {
             let res = binding.res().expect_non_local();
             if res != def::Res::Err {
                 let ident = ident.orig(orig_ident_span);
                 let child =
                     |reexport_chain| ModChild { ident, res, vis: binding.vis(), reexport_chain };
                 if let Some((ambig_binding1, ambig_binding2)) = binding.descent_to_ambiguity() {
-                    let main = child(ambig_binding1.reexport_chain(this));
+                    let main = child(ambig_binding1.reexport_chain());
                     let second = ModChild {
                         ident,
                         res: ambig_binding2.res().expect_non_local(),
                         vis: ambig_binding2.vis(),
-                        reexport_chain: ambig_binding2.reexport_chain(this),
+                        reexport_chain: ambig_binding2.reexport_chain(),
                     };
                     ambig_children.push(AmbigModChild { main, second })
                 } else {
-                    children.push(child(binding.reexport_chain(this)));
+                    children.push(child(binding.reexport_chain()));
                 }
             }
         });
