@@ -4,10 +4,15 @@ error[E0606]: casting `&Priority` as `u8` is invalid
 LL |     let priority = priority as u8;
    |                    ^^^^^^^^^^^^^^
    |
-help: dereference the expression
+help: try dereferencing before the cast
    |
 LL |     let priority = *priority as u8;
    |                    +
+help: add `#[derive(Copy, Clone)]` to the enum definition
+   |
+LL + #[derive(Copy, Clone)]
+LL | enum Priority {
+   |
 
 error[E0606]: casting `&Priority` as `u8` is invalid
   --> $DIR/cast-enum-to-int-issue-151116.rs:13:20

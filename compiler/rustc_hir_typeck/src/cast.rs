@@ -301,10 +301,18 @@ impl<'a, 'tcx> CastCheck<'tcx> {
                     {
                         err.span_suggestion_verbose(
                             self.expr_span.shrink_to_lo(),
-                            "dereference the expression",
+                            "try dereferencing before the cast",
                             "*",
                             Applicability::MaybeIncorrect,
                         );
+                        if !fcx.type_is_copy_modulo_regions(fcx.param_env, inner_ty) {
+                            err.span_suggestion_verbose(
+                                fcx.tcx.def_span(adt_def.did()).shrink_to_lo(),
+                                "add `#[derive(Copy, Clone)]` to the enum definition",
+                                "#[derive(Copy, Clone)]\n",
+                                Applicability::MaybeIncorrect,
+                            );
+                        }
                     } else {
                         err.help(format!(
                             "cast through {} first",
