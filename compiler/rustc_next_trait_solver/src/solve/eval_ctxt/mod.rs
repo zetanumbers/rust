@@ -83,43 +83,6 @@ enum RerunDecision {
     No,
     EagerlyPropagateToParent,
 }
-
-enum EraseOpaqueTypes {
-    /// This setting erases opaque types, unless we're in coherence.
-    /// In `TypingMode::Coherence` we never erase opaque types
-    IfNotCoherence,
-    No,
-}
-
-fn maybe_erase_opaque_types<I: Interner>(
-    erase_opaque_types: EraseOpaqueTypes,
-    opaque_types: &[(OpaqueTypeKey<I>, I::Ty)],
-    typing_mode: TypingMode<I>,
-) -> (&[(OpaqueTypeKey<I>, I::Ty)], TypingMode<I>) {
-    match (erase_opaque_types, typing_mode) {
-        // In `TypingMode::Coherence` there should not be any opaques, and we also don't change typing mode.
-        (_, TypingMode::Coherence) => {
-            assert!(opaque_types.is_empty());
-            (&[][..], TypingMode::Coherence)
-        }
-        // Make sure we're not recursively in `ErasedNotCoherence`.
-        (_, TypingMode::ErasedNotCoherence(MayBeErased)) => {
-            assert!(opaque_types.is_empty());
-            (&[][..], TypingMode::ErasedNotCoherence(MayBeErased))
-        }
-        // If we're supposed to erase opaque types, and we're in any typing mode other than coherence,
-        // do the erasing and change typing mode.
-        (
-            EraseOpaqueTypes::IfNotCoherence,
-            TypingMode::Analysis { .. }
-            | TypingMode::Borrowck { .. }
-            | TypingMode::PostBorrowckAnalysis { .. }
-            | TypingMode::PostAnalysis,
-        ) => (&[][..], TypingMode::ErasedNotCoherence(MayBeErased)),
-        (EraseOpaqueTypes::No, typing_mode) => (opaque_types, typing_mode),
-    }
-}
-
 pub struct EvalCtxt<'a, D, I = <D as SolverDelegate>::Interner>
 where
     D: SolverDelegate<Interner = I>,
@@ -530,49 +493,66 @@ where
         // duplicate entries.
         let opaque_types = self.delegate.clone_opaque_types_lookup_table();
         let (goal, opaque_types) = eager_resolve_vars(self.delegate, (goal, opaque_types));
+        let typing_mode = self.typing_mode();
         let step_kind = self.step_kind_for_source(source);
 
         let tracing_span = tracing::span!(
             Level::DEBUG,
-            "evaluate goal raw in typing mode",
+            "evaluate_goal_raw in typing mode",
             "{:?} opaques={:?}",
-            self.typing_mode(),
+            typing_mode,
             opaque_types
         )
         .entered();
 
         let (result, orig_values, canonical_goal) = 'retry_canonicalize: {
-            let mut skip_erased_attempt = false;
-            if matches!(self.typing_mode(), TypingMode::Analysis { .. })
-                && opaque_types.iter().any(|(_, ty)| ty.is_ty_var())
-                && let PredicateKind::Clause(ClauseKind::Trait(..)) =
+            let skip_erased_attempt = if typing_mode.is_coherence() {
+                true
+            } else {
+                let mut skip = false;
+                if opaque_types.iter().any(|(_, ty)| ty.is_ty_var())
+                    && let PredicateKind::Clause(ClauseKind::Trait(..)) =
+                        goal.predicate.kind().skip_binder()
+                {
+                    skip = true;
+                }
+
+                if let PredicateKind::Clause(ClauseKind::Trait(tr)) =
                     goal.predicate.kind().skip_binder()
-            {
-                skip_erased_attempt = true;
-            }
+                    && tr.self_ty().has_coroutines()
+                    && self.cx().trait_is_auto(tr.trait_ref.def_id)
+                {
+                    // FIXME(#155443): this doesn't make a difference now, but with eager normalization
+                    // it likely will.
+                    // skip_erased_attempt = true;
+                }
 
-            if let PredicateKind::Clause(ClauseKind::Trait(tr)) =
-                goal.predicate.kind().skip_binder()
-                && tr.self_ty().has_coroutines()
-                && self.cx().trait_is_auto(tr.trait_ref.def_id)
-            {
-                // FIXME: this doesn't make a difference now, but with eager normalization it likely will
-                // skip_erased_attempt = true;
-            }
+                skip
+            };
 
-            if skip_erased_attempt && self.typing_mode().is_erased_not_coherence() {
-                self.opaque_accesses.rerun_always(RerunReason::SkipErasedAttempt);
-                return Err(NoSolution);
-            }
-
-            if !skip_erased_attempt {
+            if skip_erased_attempt {
+                if typing_mode.is_erased_not_coherence() {
+                    self.opaque_accesses.rerun_always(RerunReason::SkipErasedAttempt);
+                    // FIXME(#155443): We should differentiate between `NoSolution` and force rerun here.
+                    return Err(NoSolution);
+                } else {
+                    debug!("running in original typing mode");
+                }
+            } else {
                 debug!("trying without opaques: {goal:?}");
 
-                let (accessed_opaques, data) = self.canonicalize_goal_maybe_erased(
+                let (orig_values, canonical_goal) = canonicalize_goal(
+                    self.delegate,
                     goal,
-                    &opaque_types,
+                    &[],
+                    TypingMode::ErasedNotCoherence(MayBeErased),
+                );
+
+                let (canonical_result, accessed_opaques) = self.search_graph.evaluate_goal(
+                    self.cx(),
+                    canonical_goal,
                     step_kind,
-                    EraseOpaqueTypes::IfNotCoherence,
+                    &mut inspect::ProofTreeBuilder::new_noop(),
                 );
 
                 let should_rerun = self.should_rerun_after_erased_canonicalization(
@@ -581,40 +561,36 @@ where
                     &opaque_types,
                 );
                 match should_rerun {
-                    RerunDecision::Yes => {}
-                    RerunDecision::No => break 'retry_canonicalize data,
+                    RerunDecision::Yes => debug!("rerunning in original typing mode"),
+                    RerunDecision::No => {
+                        break 'retry_canonicalize (canonical_result, orig_values, canonical_goal);
+                    }
                     RerunDecision::EagerlyPropagateToParent => {
                         self.opaque_accesses.update(accessed_opaques);
-                        break 'retry_canonicalize data;
+                        break 'retry_canonicalize (canonical_result, orig_values, canonical_goal);
                     }
                 }
             }
-            debug!("rerunning with opaques");
 
-            let (accessed_opaques, data) = self.canonicalize_goal_maybe_erased(
-                goal,
-                &opaque_types,
+            let (orig_values, canonical_goal) =
+                canonicalize_goal(self.delegate, goal, &opaque_types, typing_mode);
+
+            let (canonical_result, accessed_opaques) = self.search_graph.evaluate_goal(
+                self.cx(),
+                canonical_goal,
                 step_kind,
-                EraseOpaqueTypes::No,
+                &mut inspect::ProofTreeBuilder::new_noop(),
             );
             assert!(
                 !accessed_opaques.might_rerun(),
                 "we run without TypingMode::ErasedNotCoherence, so opaques are available, and we don't retry if the outer typing mode is ErasedNotCoherence: {accessed_opaques:?} after {goal:?}"
             );
 
-            data
+            (canonical_result, orig_values, canonical_goal)
         };
 
-        let response = match result {
-            Ok(response) => {
-                debug!("success");
-                response
-            }
-            Err(NoSolution) => {
-                debug!("normal failure");
-                return Err(NoSolution);
-            }
-        };
+        debug!(?result);
+        let response = result?;
 
         drop(tracing_span);
 
@@ -718,28 +694,6 @@ where
             normalization_nested_goals,
             GoalEvaluation { goal, certainty, has_changed, stalled_on },
         ))
-    }
-
-    fn canonicalize_goal_maybe_erased(
-        &mut self,
-        goal: Goal<I, I::Predicate>,
-        opaque_types: &[(ty::OpaqueTypeKey<I>, I::Ty)],
-        step_kind: PathKind,
-        erase_opaque_types: EraseOpaqueTypes,
-    ) -> (AccessedOpaques<I>, (QueryResult<I>, Vec<I::GenericArg>, CanonicalInput<I>)) {
-        let (opaque_types, typing_mode) =
-            maybe_erase_opaque_types(erase_opaque_types, opaque_types, self.typing_mode());
-        let (orig_values, canonical_goal) =
-            canonicalize_goal(self.delegate, goal, opaque_types, typing_mode);
-
-        let (canonical_result, accessed_opaques) = self.search_graph.evaluate_goal(
-            self.cx(),
-            canonical_goal,
-            step_kind,
-            &mut inspect::ProofTreeBuilder::new_noop(),
-        );
-
-        (accessed_opaques, (canonical_result, orig_values, canonical_goal))
     }
 
     fn should_rerun_after_erased_canonicalization(
@@ -1801,15 +1755,10 @@ pub(super) fn evaluate_root_goal_for_proof_tree<D: SolverDelegate<Interner = I>,
 ) -> (Result<NestedNormalizationGoals<I>, NoSolution>, inspect::GoalEvaluation<I>) {
     let opaque_types = delegate.clone_opaque_types_lookup_table();
     let (goal, opaque_types) = eager_resolve_vars(delegate, (goal, opaque_types));
+    let typing_mode = delegate.typing_mode_raw().assert_not_erased();
 
-    if delegate.typing_mode_raw().is_erased_not_coherence() {
-        assert!(opaque_types.is_empty());
-    }
-
-    let (opaque_types, typing_mode) =
-        maybe_erase_opaque_types(EraseOpaqueTypes::No, &opaque_types, delegate.typing_mode_raw());
     let (orig_values, canonical_goal) =
-        canonicalize_goal(delegate, goal, &opaque_types, typing_mode);
+        canonicalize_goal(delegate, goal, &opaque_types, typing_mode.into());
 
     let (canonical_result, final_revision) =
         delegate.cx().evaluate_root_goal_for_proof_tree_raw(canonical_goal);

@@ -1550,7 +1550,7 @@ where
         goal: Goal<I, TraitPredicate<I>>,
     ) -> Result<(CanonicalResponse<I>, Option<TraitGoalProvenVia>), NoSolution> {
         let (candidates, failed_candidate_info) =
-            self.assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::All)?;
+            self.assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::All);
         let candidate_preference_mode =
             CandidatePreferenceMode::compute(self.cx(), goal.predicate.def_id());
         self.merge_trait_candidates(candidate_preference_mode, candidates, failed_candidate_info)

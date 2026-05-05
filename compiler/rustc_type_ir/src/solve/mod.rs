@@ -333,10 +333,10 @@ impl<I: Interner> AccessedOpaques<I> {
 /// we're currently typechecking while the `predicate` is some trait bound.
 #[derive_where(Clone, Hash, PartialEq, Debug; I: Interner, P)]
 #[derive_where(Copy; I: Interner, P: Copy)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 #[cfg_attr(
     feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, StableHash_NoContext)
+    derive(Decodable_NoContext, Encodable_NoContext, StableHash_NoContext, GenericTypeVisitable,)
 )]
 pub struct Goal<I: Interner, P> {
     pub param_env: I::ParamEnv,

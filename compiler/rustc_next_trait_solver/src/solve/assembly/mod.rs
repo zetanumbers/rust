@@ -418,18 +418,21 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
+    // FIXME(#155443): This function should only ever return an error
+    // as we want to force a rerun when accessing opaques. We should change
+    // this file to revert all the newly added places which return `NoSolution`.
     pub(super) fn assemble_and_evaluate_candidates<G: GoalKind<D>>(
         &mut self,
         goal: Goal<I, G>,
         assemble_from: AssembleCandidatesFrom,
-    ) -> Result<(Vec<Candidate<I>>, FailedCandidateInfo), NoSolution> {
+    ) -> (Vec<Candidate<I>>, FailedCandidateInfo) {
         let mut candidates = vec![];
         let mut failed_candidate_info =
             FailedCandidateInfo { param_env_head_usages: CandidateHeadUsages::default() };
         let Ok(normalized_self_ty) =
             self.structurally_normalize_ty(goal.param_env, goal.predicate.self_ty())
         else {
-            return Ok((candidates, failed_candidate_info));
+            return (candidates, failed_candidate_info);
         };
 
         let goal: Goal<I, G> = goal
@@ -437,8 +440,8 @@ where
 
         if normalized_self_ty.is_ty_var() {
             debug!("self type has been normalized to infer");
-            self.try_assemble_bounds_via_registered_opaques(goal, assemble_from, &mut candidates)?;
-            return Ok((candidates, failed_candidate_info));
+            self.try_assemble_bounds_via_registered_opaques(goal, assemble_from, &mut candidates);
+            return (candidates, failed_candidate_info);
         }
 
         // Vars that show up in the rest of the goal substs may have been constrained by
@@ -449,7 +452,7 @@ where
             && let Ok(candidate) = self.consider_coherence_unknowable_candidate(goal)
         {
             candidates.push(candidate);
-            return Ok((candidates, failed_candidate_info));
+            return (candidates, failed_candidate_info);
         }
 
         self.assemble_alias_bound_candidates(goal, &mut candidates);
@@ -500,7 +503,7 @@ where
             }
         }
 
-        Ok((candidates, failed_candidate_info))
+        (candidates, failed_candidate_info)
     }
 
     pub(super) fn forced_ambiguity(
@@ -1029,7 +1032,7 @@ where
         goal: Goal<I, G>,
         assemble_from: AssembleCandidatesFrom,
         candidates: &mut Vec<Candidate<I>>,
-    ) -> Result<(), NoSolution> {
+    ) {
         let self_ty = goal.predicate.self_ty();
         // We only use this hack during HIR typeck.
         let opaque_types = match self.typing_mode() {
@@ -1047,7 +1050,7 @@ where
 
         if opaque_types.is_empty() {
             candidates.extend(self.forced_ambiguity(MaybeInfo::AMBIGUOUS));
-            return Ok(());
+            return;
         }
 
         for &alias_ty in &opaque_types {
@@ -1147,8 +1150,6 @@ where
                     this.evaluate_added_goals_and_make_canonical_response(certainty)
                 }));
         }
-
-        Ok(())
     }
 
     /// Assemble and merge candidates for goals which are related to an underlying trait
@@ -1205,7 +1206,7 @@ where
                 // still need to consider alias-bounds for normalization, see
                 // `tests/ui/next-solver/alias-bound-shadowed-by-env.rs`.
                 let (mut candidates, _) = self
-                    .assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::EnvAndBounds)?;
+                    .assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::EnvAndBounds);
                 debug!(?candidates);
 
                 // If the trait goal has been proven by using the environment, we want to treat
@@ -1234,7 +1235,7 @@ where
             }
             TraitGoalProvenVia::Misc => {
                 let (mut candidates, _) =
-                    self.assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::All)?;
+                    self.assemble_and_evaluate_candidates(goal, AssembleCandidatesFrom::All);
 
                 // Prefer "orphaned" param-env normalization predicates, which are used
                 // (for example, and ideally only) when proving item bounds for an impl.
