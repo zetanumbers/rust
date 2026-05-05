@@ -356,13 +356,16 @@ struct UnresolvedImportError {
 
 // Reexports of the form `pub use foo as bar;` where `foo` is `extern crate foo;`
 // are permitted for backward-compatibility under a deprecation lint.
-fn pub_use_of_private_extern_crate_hack(import: ImportSummary, decl: Decl<'_>) -> Option<NodeId> {
+fn pub_use_of_private_extern_crate_hack(
+    import: ImportSummary,
+    decl: Decl<'_>,
+) -> Option<LocalDefId> {
     match (import.is_single, decl.kind) {
         (true, DeclKind::Import { import: decl_import, .. })
-            if let ImportKind::ExternCrate { id, .. } = decl_import.kind
+            if let ImportKind::ExternCrate { def_id, .. } = decl_import.kind
                 && import.vis.is_public() =>
         {
-            Some(id)
+            Some(def_id)
         }
         _ => None,
     }
@@ -1282,7 +1285,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         let (ident, target, bindings, import_id) = match import.kind {
             ImportKind::Single { source, target, ref decls, id, .. } => (source, target, decls, id),
-            ImportKind::Glob { ref max_vis, id, def_id: _ } => {
+            ImportKind::Glob { ref max_vis, id, def_id } => {
                 if import.module_path.len() <= 1 {
                     // HACK(eddyb) `lint_if_path_starts_with_module` needs at least
                     // 2 segments, so the `resolve_path` above won't trigger it.
@@ -1309,7 +1312,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 if let Some(max_vis) = max_vis.get()
                     && import.vis.greater_than(max_vis, self.tcx)
                 {
-                    let def_id = self.local_def_id(id);
                     self.lint_buffer.buffer_lint(
                         UNUSED_IMPORTS,
                         id,
@@ -1629,7 +1631,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         if let Some(extern_crate_id) = pub_use_of_private_extern_crate_hack(import.summary(), decl)
         {
             let ImportKind::Single { id, .. } = import.kind else { unreachable!() };
-            let sugg = self.tcx.source_span(self.local_def_id(extern_crate_id)).shrink_to_lo();
+            let sugg = self.tcx.source_span(extern_crate_id).shrink_to_lo();
             let diagnostic = crate::errors::PrivateExternCrateReexport { ident, sugg };
             return Some(BufferedEarlyLint {
                 lint_id: LintId::of(PUB_USE_OF_PRIVATE_EXTERN_CRATE),
@@ -1671,7 +1673,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
     pub(crate) fn check_for_redundant_imports(&mut self, import: Import<'ra>) -> bool {
         // This function is only called for single imports.
-        let ImportKind::Single { source, target, ref decls, id, .. } = import.kind else {
+        let ImportKind::Single { source, target, ref decls, id, def_id, .. } = import.kind else {
             unreachable!()
         };
 
@@ -1690,7 +1692,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // Skip if the import is public or was used through non scope-based resolution,
         // e.g. through a module-relative path.
         if self.import_use_map.get(&import) == Some(&Used::Other)
-            || self.effective_visibilities.is_exported(self.local_def_id(id))
+            || self.effective_visibilities.is_exported(def_id)
         {
             return false;
         }
