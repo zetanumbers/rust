@@ -22,6 +22,10 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.next_trait_solver
     }
 
+    fn disable_trait_solver_fast_paths(&self) -> bool {
+        self.disable_trait_solver_fast_paths()
+    }
+
     fn typing_mode(&self) -> ty::TypingMode<'tcx> {
         self.typing_mode()
     }

@@ -186,8 +186,9 @@ where
 
                 let goal = obligation.as_goal();
                 let delegate = <&SolverDelegate<'tcx>>::from(infcx);
-                if let Some(certainty) =
-                    delegate.compute_goal_fast_path(goal, obligation.cause.span)
+                if !delegate.disable_trait_solver_fast_paths()
+                    && let Some(certainty) =
+                        delegate.compute_goal_fast_path(goal, obligation.cause.span)
                 {
                     match certainty {
                         // This fast path doesn't depend on region identity so it doesn't
