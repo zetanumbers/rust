@@ -93,11 +93,11 @@ extern "C" bool LLVMRustHasFeature(LLVMTargetMachineRef TM,
   TargetMachine *Target = unwrap(TM);
 #if LLVM_VERSION_GE(23, 0)
   const MCSubtargetInfo &MCInfo = Target->getMCSubtargetInfo();
-  return MCInfo.checkFeatures(std::string("+") + Feature);
 #else
-  const MCSubtargetInfo *MCInfo = Target->getMCSubtargetInfo();
-  return MCInfo->checkFeatures(std::string("+") + Feature);
+  const MCSubtargetInfo &MCInfo = *Target->getMCSubtargetInfo();
 #endif
+  return MCInfo.checkFeatures(std::string("+") + Feature);
+
 }
 
 /// Check whether the target has a specific assembly mnemonic like `ret` or
@@ -297,13 +297,11 @@ extern "C" size_t LLVMRustGetTargetFeaturesCount(LLVMTargetMachineRef TM) {
   const TargetMachine *Target = unwrap(TM);
 #if LLVM_VERSION_GE(23, 0)
   const MCSubtargetInfo &MCInfo = Target->getMCSubtargetInfo();
+#else
+  const MCSubtargetInfo &MCInfo = *Target->getMCSubtargetInfo();
+#endif
   const ArrayRef<SubtargetFeatureKV> FeatTable =
       MCInfo.getAllProcessorFeatures();
-#else
-  const MCSubtargetInfo *MCInfo = Target->getMCSubtargetInfo();
-  const ArrayRef<SubtargetFeatureKV> FeatTable =
-      MCInfo->getAllProcessorFeatures();
-#endif
   return FeatTable.size();
 }
 
@@ -313,13 +311,11 @@ extern "C" void LLVMRustGetTargetFeature(LLVMTargetMachineRef TM, size_t Index,
   const TargetMachine *Target = unwrap(TM);
 #if LLVM_VERSION_GE(23, 0)
   const MCSubtargetInfo &MCInfo = Target->getMCSubtargetInfo();
+#else
+  const MCSubtargetInfo &MCInfo = *Target->getMCSubtargetInfo();
+#endif
   const ArrayRef<SubtargetFeatureKV> FeatTable =
       MCInfo.getAllProcessorFeatures();
-#else
-  const MCSubtargetInfo *MCInfo = Target->getMCSubtargetInfo();
-  const ArrayRef<SubtargetFeatureKV> FeatTable =
-      MCInfo->getAllProcessorFeatures();
-#endif
   const SubtargetFeatureKV Feat = FeatTable[Index];
   *Feature = Feat.Key;
   *Desc = Feat.Desc;
