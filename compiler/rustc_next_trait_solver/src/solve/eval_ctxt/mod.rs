@@ -447,6 +447,7 @@ where
             ref sub_roots,
             stalled_certainty,
         }) = stalled_on
+            && !self.delegate.disable_trait_solver_fast_paths()
             && !stalled_vars.iter().any(|value| self.delegate.is_changed_arg(*value))
             && !sub_roots
                 .iter()
@@ -666,7 +667,10 @@ where
         // If this loop did not result in any progress, what's our final certainty.
         let mut unchanged_certainty = Some(Certainty::Yes);
         for (source, goal, stalled_on) in mem::take(&mut self.nested_goals) {
-            if let Some(certainty) = self.delegate.compute_goal_fast_path(goal, self.origin_span) {
+            if !self.delegate.disable_trait_solver_fast_paths()
+                && let Some(certainty) =
+                    self.delegate.compute_goal_fast_path(goal, self.origin_span)
+            {
                 match certainty {
                     Certainty::Yes => {}
                     Certainty::Maybe { .. } => {

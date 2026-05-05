@@ -230,6 +230,8 @@ pub trait InferCtxtLike: Sized {
         true
     }
 
+    fn disable_trait_solver_fast_paths(&self) -> bool;
+
     fn typing_mode(&self) -> TypingMode<Self::Interner>;
 
     fn universe(&self) -> ty::UniverseIndex;
