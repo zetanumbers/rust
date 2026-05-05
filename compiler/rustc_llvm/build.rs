@@ -278,7 +278,7 @@ fn main() {
         && let Some(maps_str) = maps.to_str()
     {
         for map in maps_str.split('\t') {
-            cfg.flag(&format!("-fdebug-prefix-map={map}"));
+            cfg.flag_if_supported(&format!("-ffile-prefix-map={map}"));
         }
     }
 
