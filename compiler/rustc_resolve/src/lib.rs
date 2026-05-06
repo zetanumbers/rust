@@ -1392,7 +1392,7 @@ pub struct Resolver<'ra, 'tcx> {
     extern_macro_map: CacheRefCell<FxHashMap<DefId, &'ra MacroData>>,
     dummy_ext_bang: Arc<SyntaxExtension>,
     dummy_ext_derive: Arc<SyntaxExtension>,
-    non_macro_attr: &'ra MacroData,
+    non_macro_attr: Arc<SyntaxExtension>,
     local_macro_def_scopes: FxHashMap<LocalDefId, LocalModule<'ra>> = default::fx_hash_map(),
     ast_transform_scopes: FxHashMap<LocalExpnId, LocalModule<'ra>> = default::fx_hash_map(),
     unused_macros: FxIndexMap<LocalDefId, (NodeId, Ident)>,
@@ -1812,8 +1812,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             extern_macro_map: Default::default(),
             dummy_ext_bang: Arc::new(SyntaxExtension::dummy_bang(edition)),
             dummy_ext_derive: Arc::new(SyntaxExtension::dummy_derive(edition)),
-            non_macro_attr: arenas
-                .alloc_macro(MacroData::new(Arc::new(SyntaxExtension::non_macro_attr(edition)))),
+            non_macro_attr: Arc::new(SyntaxExtension::non_macro_attr(edition)),
             unused_macros: Default::default(),
             unused_macro_rules: Default::default(),
             single_segment_macro_resolutions: Default::default(),
@@ -1984,7 +1983,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         match macro_kind {
             MacroKind::Bang => Arc::clone(&self.dummy_ext_bang),
             MacroKind::Derive => Arc::clone(&self.dummy_ext_derive),
-            MacroKind::Attr => Arc::clone(&self.non_macro_attr.ext),
+            MacroKind::Attr => Arc::clone(&self.non_macro_attr),
         }
     }
 
@@ -2013,11 +2012,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     }
 
     fn is_builtin_macro(&self, res: Res) -> bool {
-        self.get_macro(res).is_some_and(|macro_data| macro_data.ext.builtin_name.is_some())
+        self.get_macro(res).is_some_and(|ext| ext.builtin_name.is_some())
     }
 
     fn is_specific_builtin_macro(&self, res: Res, symbol: Symbol) -> bool {
-        self.get_macro(res).is_some_and(|macro_data| macro_data.ext.builtin_name == Some(symbol))
+        self.get_macro(res).is_some_and(|ext| ext.builtin_name == Some(symbol))
     }
 
     fn macro_def(&self, mut ctxt: SyntaxContext) -> DefId {
