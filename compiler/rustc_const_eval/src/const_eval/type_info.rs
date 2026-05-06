@@ -18,7 +18,7 @@ use crate::interpret::{
 
 impl<'tcx> InterpCx<'tcx, CompileTimeMachine<'tcx>> {
     /// Equivalent to `project_downcast`, but identifies the variant by name instead of index.
-    fn downcast<'a>(
+    pub fn downcast<'a>(
         &self,
         place: &(impl Writeable<'tcx, CtfeProvenance> + 'a),
         name: Symbol,
@@ -217,23 +217,6 @@ impl<'tcx> InterpCx<'tcx, CompileTimeMachine<'tcx>> {
                         | ty::Error(_) => self.downcast(&field_dest, sym::Other)?.0,
                     };
                     self.write_discriminant(variant_index, &field_dest)?
-                }
-                sym::size => {
-                    let layout = self.layout_of(ty)?;
-                    let variant_index = if layout.is_sized() {
-                        let (variant, variant_place) = self.downcast(&field_dest, sym::Some)?;
-                        let size_field_place =
-                            self.project_field(&variant_place, FieldIdx::ZERO)?;
-                        self.write_scalar(
-                            ScalarInt::try_from_target_usize(layout.size.bytes(), self.tcx.tcx)
-                                .unwrap(),
-                            &size_field_place,
-                        )?;
-                        variant
-                    } else {
-                        self.downcast(&field_dest, sym::None)?.0
-                    };
-                    self.write_discriminant(variant_index, &field_dest)?;
                 }
                 other => span_bug!(self.tcx.span, "unknown `Type` field {other}"),
             }
