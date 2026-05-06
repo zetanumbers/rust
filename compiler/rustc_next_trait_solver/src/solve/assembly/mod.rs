@@ -1129,7 +1129,7 @@ where
                         // FIXME(trait-system-refactor-initiative#229): This isn't
                         // perfect yet as it still allows us to incorrectly constrain
                         // other inference variables.
-                        Err(NoSolution)
+                        Err(NoSolution.into())
                     }
                 }) {
                     Ok(candidate) => candidates.push(candidate),
