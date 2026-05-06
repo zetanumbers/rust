@@ -2483,6 +2483,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 // `tests/ui/imports/issue-55884-2.rs`
                 continue;
             }
+            // In nested imports `dedup_span` is just the inner ident, so a full path
+            // substitution would produce invalid code. See #156060.
+            if single_nested {
+                break;
+            }
             let path = join_path_idents(sugg);
             let sugg = if reexport {
                 errors::ImportIdent::ThroughReExport { span: dedup_span, ident, path }
