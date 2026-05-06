@@ -439,7 +439,7 @@ fn layout_of_uncached<'tcx>(
                             Unnormalized::new_wip(tcx.struct_tail_raw(
                                 pointee,
                                 &ObligationCause::dummy(),
-                                |ty| ty,
+                                |ty| ty.skip_norm_wip(),
                                 || {},
                             )),
                         ) {

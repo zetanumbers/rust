@@ -220,7 +220,7 @@ impl<'tcx> TyCtxt<'tcx> {
         tcx.struct_tail_raw(
             ty,
             &ObligationCause::dummy(),
-            |ty| tcx.normalize_erasing_regions(typing_env, Unnormalized::new_wip(ty)),
+            |ty| tcx.normalize_erasing_regions(typing_env, ty),
             || {},
         )
     }
@@ -255,7 +255,7 @@ impl<'tcx> TyCtxt<'tcx> {
         self,
         mut ty: Ty<'tcx>,
         cause: &ObligationCause<'tcx>,
-        mut normalize: impl FnMut(Ty<'tcx>) -> Ty<'tcx>,
+        mut normalize: impl FnMut(Unnormalized<'tcx, Ty<'tcx>>) -> Ty<'tcx>,
         // This is currently used to allow us to walk a ValTree
         // in lockstep with the type in order to get the ValTree branch that
         // corresponds to an unsized field.
@@ -302,7 +302,7 @@ impl<'tcx> TyCtxt<'tcx> {
                 }
 
                 ty::Alias(..) => {
-                    let normalized = normalize(ty);
+                    let normalized = normalize(Unnormalized::new(ty));
                     if ty == normalized {
                         return ty;
                     } else {

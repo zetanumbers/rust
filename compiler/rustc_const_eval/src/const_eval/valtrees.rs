@@ -202,7 +202,7 @@ fn reconstruct_place_meta<'tcx>(
     let tail = tcx.struct_tail_raw(
         layout.ty,
         &ObligationCause::dummy(),
-        |ty| ty,
+        |ty| ty.skip_normalization(),
         || {
             let branches = last_valtree.to_branch();
             last_valtree = branches.last().unwrap().to_value().valtree;

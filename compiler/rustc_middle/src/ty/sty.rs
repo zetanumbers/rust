@@ -1730,7 +1730,7 @@ impl<'tcx> Ty<'tcx> {
     pub fn ptr_metadata_ty_or_tail(
         self,
         tcx: TyCtxt<'tcx>,
-        normalize: impl FnMut(Ty<'tcx>) -> Ty<'tcx>,
+        normalize: impl FnMut(Unnormalized<'tcx, Ty<'tcx>>) -> Ty<'tcx>,
     ) -> Result<Ty<'tcx>, Ty<'tcx>> {
         let tail = tcx.struct_tail_raw(self, &ObligationCause::dummy(), normalize, || {});
         match tail.kind() {
@@ -1789,7 +1789,7 @@ impl<'tcx> Ty<'tcx> {
     pub fn ptr_metadata_ty(
         self,
         tcx: TyCtxt<'tcx>,
-        normalize: impl FnMut(Ty<'tcx>) -> Ty<'tcx>,
+        normalize: impl FnMut(Unnormalized<'tcx, Ty<'tcx>>) -> Ty<'tcx>,
     ) -> Ty<'tcx> {
         match self.ptr_metadata_ty_or_tail(tcx, normalize) {
             Ok(metadata) => metadata,
@@ -1815,7 +1815,7 @@ impl<'tcx> Ty<'tcx> {
         if pointee_ty.has_trivial_sizedness(tcx, SizedTraitKind::Sized) {
             tcx.types.unit
         } else {
-            match pointee_ty.ptr_metadata_ty_or_tail(tcx, |x| x) {
+            match pointee_ty.ptr_metadata_ty_or_tail(tcx, |x| x.skip_normalization()) {
                 Ok(metadata_ty) => metadata_ty,
                 Err(tail_ty) => {
                     let metadata_def_id = tcx.require_lang_item(LangItem::Metadata, DUMMY_SP);

@@ -392,9 +392,7 @@ impl<'tcx> SizeSkeleton<'tcx> {
                 let tail = tcx.struct_tail_raw(
                     pointee,
                     &ObligationCause::dummy(),
-                    |ty| match tcx
-                        .try_normalize_erasing_regions(typing_env, Unnormalized::new_wip(ty))
-                    {
+                    |ty| match tcx.try_normalize_erasing_regions(typing_env, ty) {
                         Ok(ty) => ty,
                         Err(e) => Ty::new_error_with_message(
                             tcx,

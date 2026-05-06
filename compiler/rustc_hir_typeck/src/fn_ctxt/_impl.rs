@@ -473,7 +473,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             let tail = self.tcx.struct_tail_raw(
                 ty,
                 &self.misc(span),
-                |ty| self.normalize(span, Unnormalized::new_wip(ty)),
+                |ty| self.normalize(span, ty),
                 || {},
             );
             // Sized types have static alignment, and so do slices.

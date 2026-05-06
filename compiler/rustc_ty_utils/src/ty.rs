@@ -363,7 +363,7 @@ fn impl_self_is_guaranteed_unsized<'tcx>(tcx: TyCtxt<'tcx>, impl_def_id: DefId) 
         &cause,
         |ty| {
             // FIXME: ambiguity is just ignored.
-            ocx.normalize(&cause, param_env, Unnormalized::new_wip(ty))
+            ocx.normalize(&cause, param_env, ty)
         },
         || (),
     );

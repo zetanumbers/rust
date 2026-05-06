@@ -81,7 +81,7 @@ impl<'a, 'tcx> Expectation<'tcx> {
         let cause = ObligationCause::misc(span, fcx.body_id);
 
         // FIXME: This is not right, even in the old solver...
-        match fcx.tcx.struct_tail_raw(ty, &cause, |ty| ty, || {}).kind() {
+        match fcx.tcx.struct_tail_raw(ty, &cause, |ty| ty.skip_normalization(), || {}).kind() {
             ty::Slice(_) | ty::Str | ty::Dynamic(..) => ExpectRvalueLikeUnsized(ty),
             _ => ExpectHasType(ty),
         }
