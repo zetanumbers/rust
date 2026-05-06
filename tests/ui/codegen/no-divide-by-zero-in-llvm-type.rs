@@ -1,3 +1,4 @@
+// Regression test for https://github.com/rust-lang/rust/issues/50761
 // Confirm that we don't accidentally divide or mod by zero in llvm_type
 
 //@ build-pass
