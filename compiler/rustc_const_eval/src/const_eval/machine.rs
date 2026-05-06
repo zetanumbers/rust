@@ -609,7 +609,7 @@ impl<'tcx> interpret::Machine<'tcx> for CompileTimeMachine<'tcx> {
                 let ty = ecx.read_type_id(&args[0])?;
                 let layout = ecx.layout_of(ty)?;
                 let variant_index = if layout.is_sized() {
-                    let (variant, variant_place) = ecx.downcast(dest, sym::Some)?;
+                    let (variant, variant_place) = ecx.project_downcast_named(dest, sym::Some)?;
                     let size_field_place = ecx.project_field(&variant_place, FieldIdx::ZERO)?;
                     ecx.write_scalar(
                         ScalarInt::try_from_target_usize(layout.size.bytes(), ecx.tcx.tcx).unwrap(),
@@ -617,7 +617,7 @@ impl<'tcx> interpret::Machine<'tcx> for CompileTimeMachine<'tcx> {
                     )?;
                     variant
                 } else {
-                    ecx.downcast(dest, sym::None)?.0
+                    ecx.project_downcast_named(dest, sym::None)?.0
                 };
                 ecx.write_discriminant(variant_index, dest)?;
             }
