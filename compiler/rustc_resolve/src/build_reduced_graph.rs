@@ -38,8 +38,8 @@ use crate::ref_mut::CmCell;
 use crate::{
     BindingKey, Decl, DeclData, DeclKind, DelayedVisResolutionError, ExternModule,
     ExternPreludeEntry, Finalize, IdentKey, LocalModule, MacroData, Module, ModuleKind,
-    ModuleOrUniformRoot, ParentScope, PathResult, Res, Resolver, Segment, Used, VisResolutionError,
-    errors,
+    ModuleOrUniformRoot, ParentScope, PathResult, Res, Resolver, Segment, SyntaxExtension, Used,
+    VisResolutionError, errors,
 };
 
 impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
@@ -207,10 +207,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
     }
 
-    pub(crate) fn get_macro(&self, res: Res) -> Option<&'ra MacroData> {
+    /// Gets the `SyntaxExtension` corresponding to `res`.
+    pub(crate) fn get_macro(&self, res: Res) -> Option<&Arc<SyntaxExtension>> {
         match res {
-            Res::Def(DefKind::Macro(..), def_id) => Some(self.get_macro_by_def_id(def_id)),
-            Res::NonMacroAttr(_) => Some(self.non_macro_attr),
+            Res::Def(DefKind::Macro(..), def_id) => Some(&self.get_macro_by_def_id(def_id).ext),
+            Res::NonMacroAttr(_) => Some(&self.non_macro_attr),
             _ => None,
         }
     }
