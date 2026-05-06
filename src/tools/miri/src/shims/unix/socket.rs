@@ -602,11 +602,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ),
         }
 
-        // Mio returns a potentially unconnected stream.
-        // We can be ensured that the connection is established when
-        // [`TcpStream::take_err`] and [`TcpStream::peer_addr`] both
-        // don't return an error after receiving an [`Interest::WRITEABLE`]
-        // event on the stream.
+        // This begins establishing the connection, but does not block until the stream is fully connected.
+        // We deal with that below.
         match TcpStream::connect(address) {
             Ok(stream) => {
                 *socket.state.borrow_mut() = SocketState::Connecting(stream);
@@ -1112,22 +1109,45 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(LibcError("ENOTCONN"));
         };
 
-        let shut_rd = this.eval_libc_i32("SHUT_RD");
-        let shut_wr = this.eval_libc_i32("SHUT_WR");
-        let shut_rdwr = this.eval_libc_i32("SHUT_RDWR");
+        let is_read_shutdown = how == this.eval_libc_i32("SHUT_RD");
+        let is_write_shutdown = how == this.eval_libc_i32("SHUT_WR");
+        let is_read_write_shutdown = how == this.eval_libc_i32("SHUT_RDWR");
 
         let how = match () {
-            _ if how == shut_rd => Shutdown::Read,
-            _ if how == shut_wr => Shutdown::Write,
-            _ if how == shut_rdwr => Shutdown::Both,
+            _ if is_read_shutdown => Shutdown::Read,
+            _ if is_write_shutdown => Shutdown::Write,
+            _ if is_read_write_shutdown => Shutdown::Both,
             // An invalid value was passed to `how`.
             _ => return this.set_last_error_and_return_i32(LibcError("EINVAL")),
         };
 
-        match stream.shutdown(how) {
-            Ok(_) => interp_ok(Scalar::from_i32(0)),
-            Err(e) => this.set_last_error_and_return_i32(e),
-        }
+        if let Err(e) = stream.shutdown(how) {
+            return this.set_last_error_and_return_i32(e);
+        };
+
+        drop(state);
+
+        // Because we map cross platform mio readiness to epoll readiness and
+        // the different platforms don't treat `shutdown` the same way, we set
+        // the readiness after a `shutdown` manually to achieve more consistent
+        // epoll readiness. Otherwise we do not generate enough epoll events
+        // on partial shutdowns on Windows hosts.
+        let mut readiness = socket.io_readiness.borrow_mut();
+        // Closing the read end of a socket causes an EPOLLRDHUP event.
+        readiness.read_closed |= is_read_shutdown || is_read_write_shutdown;
+        // Only shutting down the write end doesn't cause an EPOLLHUP event
+        // and thus we won't set the `write_closed` readiness for it here.
+        readiness.write_closed |= is_read_write_shutdown;
+        // The Linux kernel also sets EPOLLIN when both ends of a socket are closed:
+        // <https://github.com/torvalds/linux/blob/HEAD/net/ipv4/tcp.c#L584-L588>
+        readiness.readable |= is_read_write_shutdown;
+
+        drop(readiness);
+
+        // Update the epoll readiness for the socket.
+        this.update_epoll_active_events(socket, /* force_edge */ false)?;
+
+        interp_ok(Scalar::from_i32(0))
     }
 }
 
@@ -1506,24 +1526,20 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         return action.call(this, Err(()))
                     }
 
-                    // There was no error during connecting. We still need to ensure that
-                    // the wakeup wasn't spurious. We do this by attempting to read the
-                    // peer address of the socket (following the advice given by mio):
+                    // There was no error during connecting. Mio advises also reading the peer address
+                    // to ensure that socket is actually connected and that it wasn't a spurious wake-up:
                     // <https://docs.rs/mio/latest/mio/net/struct.TcpStream.html#notes>
-
-                    match stream.peer_addr() {
-                        Ok(_) => { /* fall-through to below */},
-                        Err(e) if matches!(e.kind(), io::ErrorKind::NotConnected | io::ErrorKind::InProgress) => {
-                            // We received a spurious wakeup from the OS. This should be considered an OS bug:
-                            // <https://github.com/tokio-rs/mio/issues/1942#issuecomment-4169378308>
-                            panic!("{foreign_name}: received writable event from OS but socket is not yet connected")
-                        },
-                        Err(_) => {
-                            // For all other errors the socket is connected. Since we're not interested in the
-                            // peer address and only want to know whether the socket is connected, we can ignore
-                            // the error and continue.
-                        }
-                    }
+                    //
+                    // Attempting to read the peer address would introduce an edge-case where the
+                    // write end of the socket could already be shutdown before it received a
+                    // writable event. When we then call [`TcpStream::peer_addr`] we receive an
+                    // error. This would need extra state for storing whether the write end was
+                    // manually closed using `shutdown`.
+                    // Also, tokio doesn't read the peer address and everything seems to be fine,
+                    // so we don't do that either:
+                    // <https://github.com/tokio-rs/mio/issues/1942#issuecomment-4162607761>
+                    // In other words, we are assuming that there will be no spurious
+                    // wakeups while establishing the connection.
 
                     // The connection is established.
 
