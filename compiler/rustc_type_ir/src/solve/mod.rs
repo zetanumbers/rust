@@ -6,9 +6,9 @@ use std::hash::Hash;
 use derive_where::derive_where;
 #[cfg(feature = "nightly")]
 use rustc_macros::{Decodable_NoContext, Encodable_NoContext, StableHash, StableHash_NoContext};
-#[cfg(feature = "nightly")]
-use rustc_type_ir_macros::GenericTypeVisitable;
-use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
+use rustc_type_ir_macros::{
+    GenericTypeVisitable, Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic,
+};
 use tracing::debug;
 
 use crate::lang_items::SolverTraitLangItem;
@@ -60,8 +60,8 @@ impl From<NoSolution> for NoSolutionOrOpaquesAccessed {
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, GenericTypeVisitable)]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub enum SmallCopyList<T: Copy + Debug + Hash + Eq> {
     Empty,
     One([T; 1]),
@@ -137,8 +137,8 @@ impl<T: Copy + Debug + Hash + Eq> AsRef<[T]> for SmallCopyList<T> {
 ///
 /// Some variant names contain an `Or` here. They rerun when any of the two conditions applies
 #[derive_where(Copy, Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
-#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, GenericTypeVisitable)]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub enum RerunCondition<I: Interner> {
     Never,
 
@@ -243,6 +243,7 @@ impl<I: Interner> RerunCondition<I> {
 /// Mainly for debugging, to keep track of the source of the rerunning
 /// in [`TypingMode::ErasedNotCoherence`].
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(TypeVisitable_Generic, GenericTypeVisitable)]
 #[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub enum RerunReason {
     NormalizeOpaqueTypeRemoteCrate,
@@ -257,10 +258,10 @@ pub enum RerunReason {
 }
 
 #[derive_where(Copy, Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
-#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
-#[cfg_attr(feature = "nightly", derive(StableHash_NoContext, GenericTypeVisitable))]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, GenericTypeVisitable)]
+#[cfg_attr(feature = "nightly", derive(StableHash_NoContext))]
 pub struct AccessedOpaques<I: Interner> {
-    #[type_visitable(ignore)]
+    #[cfg_attr(feature = "nightly", type_visitable(ignore))]
     #[type_foldable(identity)]
     pub reason: Option<RerunReason>,
     pub rerun: RerunCondition<I>,
@@ -333,10 +334,10 @@ impl<I: Interner> AccessedOpaques<I> {
 /// we're currently typechecking while the `predicate` is some trait bound.
 #[derive_where(Clone, Hash, PartialEq, Debug; I: Interner, P)]
 #[derive_where(Copy; I: Interner, P: Copy)]
-#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic, GenericTypeVisitable)]
 #[cfg_attr(
     feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, StableHash_NoContext, GenericTypeVisitable,)
+    derive(Decodable_NoContext, Encodable_NoContext, StableHash_NoContext)
 )]
 pub struct Goal<I: Interner, P> {
     pub param_env: I::ParamEnv,
@@ -395,7 +396,7 @@ pub enum GoalSource {
 
 #[derive_where(Clone, Hash, PartialEq, Debug; I: Interner, Goal<I, P>)]
 #[derive_where(Copy; I: Interner, Goal<I, P>: Copy)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, GenericTypeVisitable)]
 #[cfg_attr(
     feature = "nightly",
     derive(Decodable_NoContext, Encodable_NoContext, StableHash_NoContext)
