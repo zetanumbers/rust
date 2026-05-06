@@ -276,7 +276,7 @@ where
         &mut self,
         infcx: &InferCtxt<'tcx>,
     ) -> PredicateObligations<'tcx> {
-        let stalled_coroutines = match infcx.typing_mode() {
+        let stalled_coroutines = match infcx.typing_mode_raw().assert_not_erased() {
             TypingMode::Analysis { defining_opaque_types_and_generators } => {
                 defining_opaque_types_and_generators
             }

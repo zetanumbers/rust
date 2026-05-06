@@ -155,7 +155,7 @@ fn resolve_associated_item<'tcx>(
                 // and the obligation is monomorphic, otherwise passes such as
                 // transmute checking and polymorphic MIR optimizations could
                 // get a result which isn't correct for all monomorphizations.
-                match typing_env.typing_mode() {
+                match typing_env.typing_mode().assert_not_erased() {
                     ty::TypingMode::Coherence
                     | ty::TypingMode::Analysis { .. }
                     | ty::TypingMode::Borrowck { .. }
