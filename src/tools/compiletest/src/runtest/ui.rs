@@ -157,45 +157,61 @@ impl TestCx<'_> {
             } else {
                 RunResult::Crash
             };
+
             // Help users understand why the test failed by including the actual
             // exit code and actual run result in the failure message.
             let pass_hint = format!("code={code:?} so test would pass with `{run_result}`");
-            if pass_fail == PassFailMode::RunPass {
-                if run_result != RunResult::Pass {
-                    self.fatal_proc_rec(
-                        &format!("test did not exit with success! {pass_hint}"),
-                        &proc_res,
-                    );
+            match pass_fail {
+                PassFailMode::CheckFail
+                | PassFailMode::CheckPass
+                | PassFailMode::BuildFail
+                | PassFailMode::BuildPass => {
+                    unreachable!("test program should not have run in mode {pass_fail:?}")
                 }
-            } else if pass_fail == PassFailMode::RunFail {
-                // If the test is marked as `run-fail` but do not support
-                // unwinding we allow it to crash, since a panic will trigger an
-                // abort (crash) instead of unwind (exit with code 101).
-                let crash_ok = !self.config.can_unwind();
-                if run_result != RunResult::Fail && !(crash_ok && run_result == RunResult::Crash) {
-                    let err = if crash_ok {
-                        format!(
-                            "test did not exit with failure or crash (`{}` can't unwind)! {pass_hint}",
-                            self.config.target
-                        )
-                    } else {
-                        format!("test did not exit with failure! {pass_hint}")
-                    };
-                    self.fatal_proc_rec(&err, &proc_res);
+
+                PassFailMode::RunPass => {
+                    if run_result != RunResult::Pass {
+                        self.fatal_proc_rec(
+                            &format!("test did not exit with success! {pass_hint}"),
+                            &proc_res,
+                        );
+                    }
                 }
-            } else if pass_fail == PassFailMode::RunCrash {
-                if run_result != RunResult::Crash {
-                    self.fatal_proc_rec(&format!("test did not crash! {pass_hint}"), &proc_res);
+
+                PassFailMode::RunFail => {
+                    // If the test is marked as `run-fail` but do not support
+                    // unwinding we allow it to crash, since a panic will trigger an
+                    // abort (crash) instead of unwind (exit with code 101).
+                    let crash_ok = !self.config.can_unwind();
+                    if run_result != RunResult::Fail
+                        && !(crash_ok && run_result == RunResult::Crash)
+                    {
+                        let err = if crash_ok {
+                            format!(
+                                "test did not exit with failure or crash (`{}` can't unwind)! {pass_hint}",
+                                self.config.target
+                            )
+                        } else {
+                            format!("test did not exit with failure! {pass_hint}")
+                        };
+                        self.fatal_proc_rec(&err, &proc_res);
+                    }
                 }
-            } else if pass_fail == PassFailMode::RunFailOrCrash {
-                if run_result != RunResult::Fail && run_result != RunResult::Crash {
-                    self.fatal_proc_rec(
-                        &format!("test did not exit with failure or crash! {pass_hint}"),
-                        &proc_res,
-                    );
+
+                PassFailMode::RunCrash => {
+                    if run_result != RunResult::Crash {
+                        self.fatal_proc_rec(&format!("test did not crash! {pass_hint}"), &proc_res);
+                    }
                 }
-            } else {
-                unreachable!("run_ui_test() must not be called if the test should not run");
+
+                PassFailMode::RunFailOrCrash => {
+                    if run_result != RunResult::Fail && run_result != RunResult::Crash {
+                        self.fatal_proc_rec(
+                            &format!("test did not exit with failure or crash! {pass_hint}"),
+                            &proc_res,
+                        );
+                    }
+                }
             }
 
             let output = self.get_output(&proc_res);
