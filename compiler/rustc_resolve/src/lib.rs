@@ -1265,18 +1265,6 @@ struct DeriveData {
     has_derive_copy: bool,
 }
 
-struct MacroData {
-    ext: Arc<SyntaxExtension>,
-    nrules: usize,
-    macro_rules: bool,
-}
-
-impl MacroData {
-    fn new(ext: Arc<SyntaxExtension>) -> MacroData {
-        MacroData { ext, nrules: 0, macro_rules: false }
-    }
-}
-
 pub struct ResolverOutputs<'tcx> {
     pub global_ctxt: ResolverGlobalCtxt,
     pub ast_lowering: ResolverAstLowering<'tcx>,
@@ -1396,9 +1384,9 @@ pub struct Resolver<'ra, 'tcx> {
     registered_tools: &'tcx RegisteredTools,
     macro_use_prelude: FxIndexMap<Symbol, Decl<'ra>>,
     /// Eagerly populated map of all local macro definitions.
-    local_macro_map: FxHashMap<LocalDefId, &'ra MacroData> = default::fx_hash_map(),
+    local_macro_map: FxHashMap<LocalDefId, &'ra Arc<SyntaxExtension>> = default::fx_hash_map(),
     /// Lazily populated cache of macro definitions loaded from external crates.
-    extern_macro_map: CacheRefCell<FxHashMap<DefId, &'ra MacroData>>,
+    extern_macro_map: CacheRefCell<FxHashMap<DefId, &'ra Arc<SyntaxExtension>>>,
     dummy_ext_bang: Arc<SyntaxExtension>,
     dummy_ext_derive: Arc<SyntaxExtension>,
     non_macro_attr: Arc<SyntaxExtension>,
@@ -1520,7 +1508,7 @@ pub struct ResolverArenas<'ra> {
     imports: TypedArena<ImportData<'ra>>,
     name_resolutions: TypedArena<CmRefCell<NameResolution<'ra>>>,
     ast_paths: TypedArena<ast::Path>,
-    macros: TypedArena<MacroData>,
+    macros: TypedArena<Arc<SyntaxExtension>>,
     dropless: DroplessArena,
 }
 
@@ -1599,8 +1587,8 @@ impl<'ra> ResolverArenas<'ra> {
     fn alloc_ast_paths(&'ra self, paths: &[ast::Path]) -> &'ra [ast::Path] {
         self.ast_paths.alloc_from_iter(paths.iter().cloned())
     }
-    fn alloc_macro(&'ra self, macro_data: MacroData) -> &'ra MacroData {
-        self.macros.alloc(macro_data)
+    fn alloc_macro(&'ra self, ext: Arc<SyntaxExtension>) -> &'ra Arc<SyntaxExtension> {
+        self.macros.alloc(ext)
     }
     fn alloc_pattern_spans(&'ra self, spans: impl Iterator<Item = Span>) -> &'ra [Span] {
         self.dropless.alloc_from_iter(spans)
@@ -1888,8 +1876,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         module
     }
 
-    fn new_local_macro(&mut self, def_id: LocalDefId, macro_data: MacroData) -> &'ra MacroData {
-        let mac = self.arenas.alloc_macro(macro_data);
+    fn new_local_macro(
+        &mut self,
+        def_id: LocalDefId,
+        ext: Arc<SyntaxExtension>,
+    ) -> &'ra Arc<SyntaxExtension> {
+        let mac = self.arenas.alloc_macro(ext);
         self.local_macro_map.insert(def_id, mac);
         mac
     }

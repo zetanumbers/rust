@@ -43,7 +43,7 @@ use crate::hygiene::Macros20NormalizedSyntaxContext;
 use crate::imports::Import;
 use crate::{
     BindingKey, CacheCell, CmResolver, Decl, DeclKind, DeriveData, Determinacy, Finalize, IdentKey,
-    InvocationParent, MacroData, ModuleKind, ModuleOrUniformRoot, ParentScope, PathResult, Res,
+    InvocationParent, ModuleKind, ModuleOrUniformRoot, ParentScope, PathResult, Res,
     ResolutionError, Resolver, ScopeSet, Segment, Used,
 };
 
@@ -360,8 +360,8 @@ impl<'ra, 'tcx> ResolverExpand for Resolver<'ra, 'tcx> {
             if unused_arms.is_empty() {
                 continue;
             }
-            let m = &self.local_macro_map[&def_id];
-            let SyntaxExtensionKind::MacroRules(ref m) = m.ext.kind else {
+            let ext = self.local_macro_map[&def_id];
+            let SyntaxExtensionKind::MacroRules(ref m) = ext.kind else {
                 continue;
             };
             for arm_i in unused_arms.iter() {
@@ -1229,8 +1229,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         span: Span,
         node_id: NodeId,
         edition: Edition,
-    ) -> MacroData {
-        let (mut ext, mut nrules) = compile_declarative_macro(
+    ) -> SyntaxExtension {
+        let mut ext = compile_declarative_macro(
             self.tcx.sess,
             self.tcx.features(),
             macro_def,
@@ -1247,13 +1247,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 // The macro is a built-in, replace its expander function
                 // while still taking everything else from the source code.
                 ext.kind = builtin_ext_kind.clone();
-                nrules = 0;
             } else {
                 self.dcx().emit_err(errors::CannotFindBuiltinMacroWithName { span, ident });
             }
         }
 
-        MacroData { ext: Arc::new(ext), nrules, macro_rules: macro_def.macro_rules }
+        ext
     }
 
     fn path_accessible(
