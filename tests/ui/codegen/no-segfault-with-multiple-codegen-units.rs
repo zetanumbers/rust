@@ -1,3 +1,5 @@
+//! Regression test for https://github.com/rust-lang/rust/issues/47364
+
 //@ run-pass
 #![allow(unused_variables)]
 //@ compile-flags: -C codegen-units=8 -O
