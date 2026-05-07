@@ -1687,7 +1687,7 @@ pub struct Closure<'hir> {
 
 /// A HIR local that must be captured by value even if ordinary closure capture
 /// analysis would infer a weaker capture kind from its uses in the body.
-#[derive(Debug, Clone, Copy, HashStable)]
+#[derive(Debug, Clone, Copy, StableHash)]
 pub struct ExplicitCapture {
     pub var_hir_id: HirId,
 }
