@@ -1,0 +1,25 @@
+error[E0603]: struct import `One` is private
+  --> $DIR/private-import-suggestion-path-156244.rs:15:21
+   |
+LL |     use crate::two::One;
+   |                     ^^^ private struct import
+   |
+note: the struct import `One` is defined here...
+  --> $DIR/private-import-suggestion-path-156244.rs:11:9
+   |
+LL |     use crate::one::One;
+   |         ^^^^^^^^^^^^^^^
+note: ...and refers to the struct `One` which is defined here
+  --> $DIR/private-import-suggestion-path-156244.rs:7:5
+   |
+LL |     pub struct One();
+   |     ^^^^^^^^^^^^^^^^^ you could import this directly
+help: import `One` through the re-export
+   |
+LL -     use crate::two::One;
+LL +     use crate::one::One;
+   |
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.

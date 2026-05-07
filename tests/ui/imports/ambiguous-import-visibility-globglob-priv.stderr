@@ -17,7 +17,7 @@ LL |     pub struct S {}
 help: import `S` through the re-export
    |
 LL - use crate::both::private::S;
-LL + use m::S;
+LL + use crate::m::S;
    |
 
 error[E0603]: struct import `S` is private
@@ -39,7 +39,7 @@ LL |     pub struct S {}
 help: import `S` through the re-export
    |
 LL -     use crate::both::private::S;
-LL +     use m::S;
+LL +     use crate::m::S;
    |
 
 error: aborting due to 2 previous errors

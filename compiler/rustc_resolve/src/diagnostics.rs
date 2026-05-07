@@ -2429,7 +2429,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
             match binding.kind {
                 DeclKind::Import { import, .. } => {
-                    for segment in import.module_path.iter().skip(1) {
+                    for segment in &import.module_path {
                         // Don't include `{{root}}` in suggestions - it's an internal symbol
                         // that should never be shown to users.
                         if segment.ident.name != kw::PathRoot {
@@ -2474,19 +2474,16 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
         // We prioritize shorter paths, non-core imports and direct imports over the alternatives.
         sugg_paths.sort_by_key(|(p, reexport)| (p.len(), p[0].name == sym::core, *reexport));
+        // In nested imports `dedup_span` is just the inner ident, so a full path
+        // substitution would produce invalid code. See #156060.
         for (sugg, reexport) in sugg_paths {
-            if not_publicly_reexported {
+            if not_publicly_reexported || single_nested {
                 break;
             }
             if sugg.len() <= 1 {
                 // A single path segment suggestion is wrong. This happens on circular imports.
                 // `tests/ui/imports/issue-55884-2.rs`
                 continue;
-            }
-            // In nested imports `dedup_span` is just the inner ident, so a full path
-            // substitution would produce invalid code. See #156060.
-            if single_nested {
-                break;
             }
             let path = join_path_idents(sugg);
             let sugg = if reexport {
