@@ -822,6 +822,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 for decl in [resolution.non_glob_decl, resolution.glob_decl] {
                     if let Some(decl) = decl
                         && let DeclKind::Import { source_decl, import } = decl.kind
+                        // FIXME: Do not check visibility-ambiguous imports for now. To check them
+                        // properly we need to preserve all imports in ambiguous glob sets and
+                        // check them all individually.
+                        && decl.ambiguity_vis_max.get().is_none()
                     {
                         // The source entity is too private to be reexported
                         // with the given import declaration's visibility.

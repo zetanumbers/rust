@@ -1,5 +1,7 @@
 // Regression test for issue #156264
 
+//@ check-pass
+
 mod m_pub {
     pub struct S {}
 }
@@ -9,7 +11,6 @@ mod m_crate {
 }
 
 pub(crate) use m_crate::*;
-//~^ ERROR `S` is only public within the crate, and cannot be re-exported outside
 pub use m_pub::*;
 
 fn main() {}
