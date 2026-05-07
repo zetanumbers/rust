@@ -295,7 +295,7 @@ impl<'ast, 'tcx> visit::Visitor<'ast> for LanguageItemCollector<'ast, 'tcx> {
 
         self.check_for_lang(
             target,
-            self.resolver.owners[&i.id].node_id_to_def_id[&i.id],
+            self.resolver.owners[&i.id].def_id,
             &i.attrs,
             i.span,
             i.opt_generics(),
@@ -346,13 +346,7 @@ impl<'ast, 'tcx> visit::Visitor<'ast> for LanguageItemCollector<'ast, 'tcx> {
             }
         };
 
-        self.check_for_lang(
-            target,
-            self.resolver.owners[&i.id].node_id_to_def_id[&i.id],
-            &i.attrs,
-            i.span,
-            generics,
-        );
+        self.check_for_lang(target, self.resolver.owners[&i.id].def_id, &i.attrs, i.span, generics);
 
         visit::walk_assoc_item(self, i, ctxt);
     }

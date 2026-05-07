@@ -2778,8 +2778,9 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
                         ast::AssocItemKind::Delegation(..)
                             if self
                                 .r
-                                .delegation_fn_sigs
-                                .get(&self.r.local_def_id(assoc_item.id))
+                                .owners
+                                .get(&assoc_item.id)
+                                .and_then(|o| self.r.delegation_fn_sigs.get(&o.def_id))
                                 .is_some_and(|sig| sig.has_self) =>
                         {
                             AssocSuggestion::MethodWithSelf { called }

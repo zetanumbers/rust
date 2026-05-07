@@ -319,7 +319,7 @@ impl<'tcx> ResolverAstLowering<'tcx> {
     }
 
     fn owner_def_id(&self, id: NodeId) -> LocalDefId {
-        self.owners[&id].node_id_to_def_id[&id]
+        self.owners[&id].def_id
     }
 
     fn lifetime_elision_allowed(&self, id: NodeId) -> bool {
@@ -694,7 +694,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
 
     /// Given the id of an owner node in the AST, returns the corresponding `OwnerId`.
     fn owner_id(&self, node: NodeId) -> hir::OwnerId {
-        hir::OwnerId { def_id: self.resolver.owners[&node].node_id_to_def_id[&node] }
+        hir::OwnerId { def_id: self.resolver.owners[&node].def_id }
     }
 
     /// Freshen the `LoweringContext` and ready it to lower a nested item.
@@ -1804,7 +1804,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
 
         let output = match coro {
             Some(coro) => {
-                let fn_def_id = self.local_def_id(fn_node_id);
+                let fn_def_id = self.owner.def_id;
                 self.lower_coroutine_fn_ret_ty(&decl.output, fn_def_id, coro, kind)
             }
             None => match &decl.output {
@@ -1812,19 +1812,19 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     let itctx = match kind {
                         FnDeclKind::Fn | FnDeclKind::Inherent => ImplTraitContext::OpaqueTy {
                             origin: hir::OpaqueTyOrigin::FnReturn {
-                                parent: self.local_def_id(fn_node_id),
+                                parent: self.owner.def_id,
                                 in_trait_or_impl: None,
                             },
                         },
                         FnDeclKind::Trait => ImplTraitContext::OpaqueTy {
                             origin: hir::OpaqueTyOrigin::FnReturn {
-                                parent: self.local_def_id(fn_node_id),
+                                parent: self.owner.def_id,
                                 in_trait_or_impl: Some(hir::RpitContext::Trait),
                             },
                         },
                         FnDeclKind::Impl => ImplTraitContext::OpaqueTy {
                             origin: hir::OpaqueTyOrigin::FnReturn {
-                                parent: self.local_def_id(fn_node_id),
+                                parent: self.owner.def_id,
                                 in_trait_or_impl: Some(hir::RpitContext::TraitImpl),
                             },
                         },

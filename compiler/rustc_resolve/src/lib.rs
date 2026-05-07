@@ -46,7 +46,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexMap, FxIndexSet, de
 use rustc_data_structures::intern::Interned;
 use rustc_data_structures::steal::Steal;
 use rustc_data_structures::sync::{FreezeReadGuard, FreezeWriteGuard};
-use rustc_data_structures::unord::{UnordMap, UnordSet};
+use rustc_data_structures::unord::{UnordItems, UnordMap, UnordSet};
 use rustc_errors::{Applicability, Diag, ErrCode, ErrorGuaranteed, LintBuffer};
 use rustc_expand::base::{DeriveResolution, SyntaxExtension, SyntaxExtensionKind};
 use rustc_feature::BUILTIN_ATTRIBUTES;
@@ -1648,8 +1648,8 @@ impl<'tcx> Resolver<'_, 'tcx> {
     /// Only call this in analyses after the resolver has finished.
     /// Panics if the node id is currently not in the owner storage,
     /// e.g. because it's further up in the current visitor stack.
-    fn owner_def_id(&self, node: NodeId) -> LocalDefId {
-        self.child_def_id(node, node)
+    fn owner_def_id(&self, owner: NodeId) -> LocalDefId {
+        self.owners[&owner].def_id
     }
 
     /// Only call this in analyses after the resolver has finished.
@@ -1669,10 +1669,6 @@ impl<'tcx> Resolver<'_, 'tcx> {
         self.opt_local_def_id(node).unwrap_or_else(|| panic!("no entry for node id: `{node:?}`"))
     }
 
-    fn local_def_kind(&self, node: NodeId) -> DefKind {
-        self.tcx.def_kind(self.local_def_id(node))
-    }
-
     /// Adds a definition with a parent definition.
     fn create_def(
         &mut self,
@@ -1682,6 +1678,7 @@ impl<'tcx> Resolver<'_, 'tcx> {
         def_kind: DefKind,
         expn_id: ExpnId,
         span: Span,
+        is_owner: bool,
     ) -> TyCtxtFeed<'tcx, LocalDefId> {
         assert!(
             !self.current_owner.node_id_to_def_id.contains_key(&node_id),
@@ -1713,7 +1710,7 @@ impl<'tcx> Resolver<'_, 'tcx> {
         // Some things for which we allocate `LocalDefId`s don't correspond to
         // anything in the AST, so they don't have a `NodeId`. For these cases
         // we don't need a mapping from `NodeId` to `LocalDefId`.
-        if node_id != ast::DUMMY_NODE_ID {
+        if node_id != ast::DUMMY_NODE_ID && !is_owner {
             debug!("create_def: def_id_to_node_id[{:?}] <-> {:?}", def_id, node_id);
             self.current_owner.node_id_to_def_id.insert(node_id, def_id);
         }
@@ -1768,7 +1765,11 @@ impl<'tcx> Resolver<'_, 'tcx> {
     fn def_id_to_node_id(&self, def_id: LocalDefId) -> NodeId {
         self.owners
             .items()
-            .flat_map(|(_, data)| data.node_id_to_def_id.items())
+            .flat_map(|(_, data)| {
+                data.node_id_to_def_id
+                    .items()
+                    .chain(UnordItems::new([(&data.id, &data.def_id)].into_iter()))
+            })
             .filter(|(_, v)| **v == def_id)
             .map(|(k, _)| *k)
             .get_only()
@@ -1806,11 +1807,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             arenas,
         );
 
-        let mut owner_data = PerOwnerResolverData::new(CRATE_NODE_ID);
+        let owner_data = PerOwnerResolverData::new(CRATE_NODE_ID, CRATE_DEF_ID);
         let crate_feed = tcx.create_local_crate_def_id(crate_span);
 
         crate_feed.def_kind(DefKind::Mod);
-        owner_data.node_id_to_def_id.insert(CRATE_NODE_ID, crate_feed.key());
         let mut owners = NodeMap::default();
         owners.insert(CRATE_NODE_ID, owner_data);
 
@@ -1876,7 +1876,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             multi_segment_macro_resolutions: Default::default(),
             lint_buffer: LintBuffer::default(),
             owners,
-            current_owner: PerOwnerResolverData::new(DUMMY_NODE_ID),
+            current_owner: PerOwnerResolverData::new(DUMMY_NODE_ID, CRATE_DEF_ID),
             invocation_parents,
             trait_impls: Default::default(),
             confused_type_with_std_module: Default::default(),
@@ -1978,12 +1978,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             .stripped_cfg_items
             .into_iter()
             .filter_map(|item| {
-                let parent_scope = self
-                    .owners
-                    .get(&item.parent_scope)?
-                    .node_id_to_def_id
-                    .get(&item.parent_scope)?
-                    .to_def_id();
+                let parent_scope = self.owners.get(&item.parent_scope)?.def_id.to_def_id();
                 Some(StrippedCfgItem { parent_scope, ident: item.ident, cfg: item.cfg })
             })
             .collect();

@@ -32,7 +32,6 @@ pub(crate) fn collect_definitions<'ra>(
     with_owner(resolver, invocation_parent.owner, |r| {
         let mut visitor = DefCollector { r, invocation_parent, parent_scope };
         fragment.visit_with(&mut visitor);
-
         visitor.parent_scope.macro_rules
     })
 }
@@ -64,6 +63,7 @@ impl<'a, 'ra, 'tcx> DefCollector<'a, 'ra, 'tcx> {
             def_kind,
             self.parent_scope.expansion.to_expn_id(),
             span.with_parent(None),
+            false,
         )
     }
 
@@ -73,23 +73,33 @@ impl<'a, 'ra, 'tcx> DefCollector<'a, 'ra, 'tcx> {
         self.invocation_parent.parent_def = orig_parent_def;
     }
 
-    pub(super) fn with_owner<F: FnOnce(&mut Self)>(&mut self, owner: NodeId, f: F) {
+    pub(super) fn with_owner<F: FnOnce(&mut Self, TyCtxtFeed<'tcx, LocalDefId>)>(
+        &mut self,
+        owner: NodeId,
+        name: Option<Symbol>,
+        def_kind: DefKind,
+        span: Span,
+        f: F,
+    ) {
         debug_assert_ne!(owner, DUMMY_NODE_ID);
-        if owner == CRATE_NODE_ID {
-            // Special case: we always have an invocation parent (set in `collect_definitions`)
-            // of at least the crate root, even for visiting the crate root,
-            // which would then remove the crate root from the tables
-            // list twice and try to insert it twice afterwards.
-            debug_assert_eq!(self.r.current_owner.id, CRATE_NODE_ID);
-            return f(self);
-        }
+        debug_assert_ne!(owner, CRATE_NODE_ID);
         // We only get here if the owner didn't exist yet. After the owner has been created,
         // future invocations of `collect_definitions` will get the owner out of the `owners`
         // table.
-        let tables = PerOwnerResolverData::new(owner);
+        let parent_def = self.invocation_parent.parent_def;
+        let feed = self.r.create_def(
+            parent_def,
+            owner,
+            name,
+            def_kind,
+            self.parent_scope.expansion.to_expn_id(),
+            span.with_parent(None),
+            true,
+        );
+        let tables = PerOwnerResolverData::new(owner, feed.key());
 
         let orig_invoc_owner = mem::replace(&mut self.invocation_parent.owner, owner);
-        with_owner_tables(self, owner, tables, f);
+        with_owner_tables(self, owner, tables, |this| f(this, feed));
         let old = mem::replace(&mut self.invocation_parent.owner, orig_invoc_owner);
         assert_eq!(old, owner);
     }
@@ -200,8 +210,7 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
             ItemKind::GlobalAsm(..) => DefKind::GlobalAsm,
             ItemKind::Use(_) => {
-                return self.with_owner(i.id, |this| {
-                    let feed = this.create_def(i.id, None, DefKind::Use, i.span);
+                return self.with_owner(i.id, None, DefKind::Use, i.span, |this, feed| {
                     this.brg_visit_item(i, feed);
                 });
             }
@@ -212,20 +221,23 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
             ItemKind::DelegationMac(..) => unreachable!(),
         };
-        self.with_owner(i.id, |this| {
-            let feed =
-                this.create_def(i.id, i.kind.ident().map(|ident| ident.name), def_kind, i.span);
+        self.with_owner(
+            i.id,
+            i.kind.ident().map(|ident| ident.name),
+            def_kind,
+            i.span,
+            |this, feed| {
+                if let Some(ext) = opt_syn_ext {
+                    this.r.local_macro_map.insert(feed.def_id(), self.r.arenas.alloc_macro(ext));
+                }
 
-            if let Some(ext) = opt_syn_ext {
-                this.r.local_macro_map.insert(feed.def_id(), self.r.arenas.alloc_macro(ext));
-            }
-
-            this.with_parent(feed.def_id(), |this| {
-                this.with_impl_trait(ImplTraitContext::Existential, |this| {
-                    this.brg_visit_item(i, feed)
-                })
-            });
-        });
+                this.with_parent(feed.def_id(), |this| {
+                    this.with_impl_trait(ImplTraitContext::Existential, |this| {
+                        this.brg_visit_item(i, feed)
+                    })
+                });
+            },
+        );
     }
 
     fn visit_block(&mut self, block: &'a Block) {
@@ -316,9 +328,7 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
         };
 
-        self.with_owner(fi.id, |this| {
-            let def = this.create_def(fi.id, Some(ident.name), def_kind, fi.span);
-
+        self.with_owner(fi.id, Some(ident.name), def_kind, fi.span, |this, def| {
             this.with_parent(def.def_id(), |this| {
                 this.build_reduced_graph_for_foreign_item(fi, ident, def);
                 visit::walk_item(this, fi)
@@ -402,8 +412,7 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
             }
         };
 
-        self.with_owner(i.id, |this| {
-            let feed = this.create_def(i.id, Some(ident.name), def_kind, i.span);
+        self.with_owner(i.id, Some(ident.name), def_kind, i.span, |this, feed| {
             this.with_parent(feed.def_id(), |this| {
                 this.brg_visit_assoc_item(i, ctxt, ident, ns, feed)
             });
@@ -604,11 +613,16 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
         } else {
             // Visit attributes after items for backward compatibility.
             // This way they can use `macro_rules` defined later.
-            self.with_owner(CRATE_NODE_ID, |this| {
-                visit::walk_list!(this, visit_item, &krate.items);
-                visit::walk_list!(this, visit_attribute, &krate.attrs);
-                this.contains_macro_use(&krate.attrs);
-            })
+
+            // We always have an invocation parent (set in `collect_definitions`)
+            // of at least the crate root, even for visiting the crate root,
+            // which would then remove the crate root from the tables
+            // list twice and try to insert it twice afterwards.
+            debug_assert_eq!(self.r.current_owner.id, CRATE_NODE_ID);
+
+            visit::walk_list!(self, visit_item, &krate.items);
+            visit::walk_list!(self, visit_attribute, &krate.attrs);
+            self.contains_macro_use(&krate.attrs);
         }
     }
 
