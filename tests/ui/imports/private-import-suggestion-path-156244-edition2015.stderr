@@ -1,20 +1,20 @@
 error[E0603]: struct import `One` is private
-  --> $DIR/private-import-suggestion-path-156244-edition2015.rs:16:14
+  --> $DIR/private-import-suggestion-path-156244-edition2015.rs:12:14
    |
 LL |     use two::One;
    |              ^^^ private struct import
    |
 note: the struct import `One` is defined here...
-  --> $DIR/private-import-suggestion-path-156244-edition2015.rs:12:9
+  --> $DIR/private-import-suggestion-path-156244-edition2015.rs:8:9
    |
 LL |     use one::One;
    |         ^^^^^^^^
 note: ...and refers to the struct `One` which is defined here
-  --> $DIR/private-import-suggestion-path-156244-edition2015.rs:8:5
+  --> $DIR/private-import-suggestion-path-156244-edition2015.rs:4:5
    |
 LL |     pub struct One();
    |     ^^^^^^^^^^^^^^^^^ you could import this directly
-help: import `One` through the re-export
+help: import `One` directly
    |
 LL -     use two::One;
 LL +     use one::One;
