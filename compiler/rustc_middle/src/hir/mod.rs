@@ -237,7 +237,7 @@ impl<'tcx> TyCtxt<'tcx> {
         attrs: &SortedMap<ItemLocalId, &[Attribute]>,
         define_opaque: Option<&[(Span, LocalDefId)]>,
     ) -> Hashes {
-        if !self.needs_crate_hash() {
+        if !self.needs_hir_hash() {
             return Hashes { opt_hash_including_bodies: None, attrs_hash: None };
         }
 
@@ -300,8 +300,8 @@ impl<'tcx> TyCtxt<'tcx> {
             Node::Expr(parent_expr) => {
                 match parent_expr.kind {
                     // Addr-of, field projections, and LHS of assignment don't constitute reads.
-                    // Assignment does call `drop_in_place`, though, but its safety
-                    // requirements are not the same.
+                    // Assignment does call `drop_glue`, though, but its safety requirements are
+                    // not the same.
                     ExprKind::AddrOf(..) | ExprKind::Field(..) => false,
 
                     // Place-preserving expressions only constitute reads if their
