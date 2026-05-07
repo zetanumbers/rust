@@ -1929,6 +1929,7 @@ symbols! {
         sinf128,
         size,
         size_of,
+        size_of_type_id,
         size_of_val,
         sized,
         sized_hierarchy,
