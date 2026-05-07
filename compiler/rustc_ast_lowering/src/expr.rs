@@ -506,10 +506,11 @@ impl<'hir> LoweringContext<'_, 'hir> {
     pub(crate) fn lower_const_block(&mut self, c: &AnonConst) -> hir::ConstBlock {
         self.with_new_scopes(c.value.span, |this| {
             let def_id = this.local_def_id(c.id);
+            let hir_id = this.lower_node_id(c.id);
             let (body, _) = this.with_move_expr_bindings(None, |this| {
                 this.lower_const_body(c.value.span, Some(&c.value))
             });
-            hir::ConstBlock { def_id, hir_id: this.lower_node_id(c.id), body }
+            hir::ConstBlock { def_id, hir_id, body }
         })
     }
 
