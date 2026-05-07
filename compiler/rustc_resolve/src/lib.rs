@@ -1387,9 +1387,9 @@ pub struct Resolver<'ra, 'tcx> {
     local_macro_map: FxHashMap<LocalDefId, &'ra Arc<SyntaxExtension>> = default::fx_hash_map(),
     /// Lazily populated cache of macro definitions loaded from external crates.
     extern_macro_map: CacheRefCell<FxHashMap<DefId, &'ra Arc<SyntaxExtension>>>,
-    dummy_ext_bang: Arc<SyntaxExtension>,
-    dummy_ext_derive: Arc<SyntaxExtension>,
-    non_macro_attr: Arc<SyntaxExtension>,
+    dummy_ext_bang: &'ra Arc<SyntaxExtension>,
+    dummy_ext_derive: &'ra Arc<SyntaxExtension>,
+    non_macro_attr: &'ra Arc<SyntaxExtension>,
     local_macro_def_scopes: FxHashMap<LocalDefId, LocalModule<'ra>> = default::fx_hash_map(),
     ast_transform_scopes: FxHashMap<LocalExpnId, LocalModule<'ra>> = default::fx_hash_map(),
     unused_macros: FxIndexMap<LocalDefId, (NodeId, Ident)>,
@@ -1587,8 +1587,8 @@ impl<'ra> ResolverArenas<'ra> {
     fn alloc_ast_paths(&'ra self, paths: &[ast::Path]) -> &'ra [ast::Path] {
         self.ast_paths.alloc_from_iter(paths.iter().cloned())
     }
-    fn alloc_macro(&'ra self, ext: Arc<SyntaxExtension>) -> &'ra Arc<SyntaxExtension> {
-        self.macros.alloc(ext)
+    fn alloc_macro(&'ra self, ext: SyntaxExtension) -> &'ra Arc<SyntaxExtension> {
+        self.macros.alloc(Arc::new(ext))
     }
     fn alloc_pattern_spans(&'ra self, spans: impl Iterator<Item = Span>) -> &'ra [Span] {
         self.dropless.alloc_from_iter(spans)
@@ -1807,9 +1807,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             registered_tools,
             macro_use_prelude: Default::default(),
             extern_macro_map: Default::default(),
-            dummy_ext_bang: Arc::new(SyntaxExtension::dummy_bang(edition)),
-            dummy_ext_derive: Arc::new(SyntaxExtension::dummy_derive(edition)),
-            non_macro_attr: Arc::new(SyntaxExtension::non_macro_attr(edition)),
+            dummy_ext_bang: arenas.alloc_macro(SyntaxExtension::dummy_bang(edition)),
+            dummy_ext_derive: arenas.alloc_macro(SyntaxExtension::dummy_derive(edition)),
+            non_macro_attr: arenas.alloc_macro(SyntaxExtension::non_macro_attr(edition)),
             unused_macros: Default::default(),
             unused_macro_rules: Default::default(),
             single_segment_macro_resolutions: Default::default(),
@@ -1874,16 +1874,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             .expect_extern();
         self.extern_module_map.borrow_mut().insert(module.def_id(), module);
         module
-    }
-
-    fn new_local_macro(
-        &mut self,
-        def_id: LocalDefId,
-        ext: Arc<SyntaxExtension>,
-    ) -> &'ra Arc<SyntaxExtension> {
-        let mac = self.arenas.alloc_macro(ext);
-        self.local_macro_map.insert(def_id, mac);
-        mac
     }
 
     fn next_node_id(&mut self) -> NodeId {
@@ -1980,11 +1970,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         CStore::from_tcx_mut(self.tcx)
     }
 
-    fn dummy_ext(&self, macro_kind: MacroKind) -> Arc<SyntaxExtension> {
+    fn dummy_ext(&self, macro_kind: MacroKind) -> &'ra Arc<SyntaxExtension> {
         match macro_kind {
-            MacroKind::Bang => Arc::clone(&self.dummy_ext_bang),
-            MacroKind::Derive => Arc::clone(&self.dummy_ext_derive),
-            MacroKind::Attr => Arc::clone(&self.non_macro_attr),
+            MacroKind::Bang => self.dummy_ext_bang,
+            MacroKind::Derive => self.dummy_ext_derive,
+            MacroKind::Attr => self.non_macro_attr,
         }
     }
 

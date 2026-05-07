@@ -207,10 +207,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     }
 
     /// Gets the `SyntaxExtension` corresponding to `res`.
-    pub(crate) fn get_macro(&self, res: Res) -> Option<&Arc<SyntaxExtension>> {
+    pub(crate) fn get_macro(&self, res: Res) -> Option<&'ra Arc<SyntaxExtension>> {
         match res {
             Res::Def(DefKind::Macro(..), def_id) => Some(self.get_macro_by_def_id(def_id)),
-            Res::NonMacroAttr(_) => Some(&self.non_macro_attr),
+            Res::NonMacroAttr(_) => Some(self.non_macro_attr),
             _ => None,
         }
     }
@@ -228,7 +228,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     LoadedMacro::ProcMacro(ext) => ext,
                 };
 
-                self.arenas.alloc_macro(Arc::new(ext))
+                self.arenas.alloc_macro(ext)
             }),
         }
     }
@@ -1300,7 +1300,7 @@ impl<'a, 'ra, 'tcx> DefCollector<'a, 'ra, 'tcx> {
                     Some((macro_kind, ident, span)) => {
                         let macro_kinds = macro_kind.into();
                         let res = Res::Def(DefKind::Macro(macro_kinds), def_id.to_def_id());
-                        self.r.new_local_macro(def_id, self.r.dummy_ext(macro_kind));
+                        self.r.local_macro_map.insert(def_id, self.r.dummy_ext(macro_kind));
                         self.r.proc_macro_stubs.insert(def_id);
                         (res, ident, span, false)
                     }

@@ -1,5 +1,4 @@
 use std::mem;
-use std::sync::Arc;
 
 use rustc_ast::visit::FnKind;
 use rustc_ast::*;
@@ -187,7 +186,7 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
         let feed = self.create_def(i.id, i.kind.ident().map(|ident| ident.name), def_kind, i.span);
 
         if let Some(ext) = opt_syn_ext {
-            self.r.new_local_macro(feed.def_id(), Arc::new(ext));
+            self.r.local_macro_map.insert(feed.def_id(), self.r.arenas.alloc_macro(ext));
         }
 
         self.with_parent(feed.def_id(), |this| {

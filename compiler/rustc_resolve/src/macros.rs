@@ -335,7 +335,7 @@ impl<'ra, 'tcx> ResolverExpand for Resolver<'ra, 'tcx> {
             )
         });
 
-        Ok(ext)
+        Ok(Arc::clone(ext))
     }
 
     fn record_macro_rule_usage(&mut self, id: NodeId, rule_i: usize) {
@@ -404,7 +404,7 @@ impl<'ra, 'tcx> ResolverExpand for Resolver<'ra, 'tcx> {
         let parent_scope = self.invocation_parent_scopes[&expn_id];
         for (i, resolution) in entry.resolutions.iter_mut().enumerate() {
             if resolution.exts.is_none() {
-                resolution.exts = Some(
+                resolution.exts = Some(Arc::clone(
                     match self.cm().resolve_derive_macro_path(
                         &resolution.path,
                         &parent_scope,
@@ -431,7 +431,7 @@ impl<'ra, 'tcx> ResolverExpand for Resolver<'ra, 'tcx> {
                             return Err(Indeterminate);
                         }
                     },
-                );
+                ));
             }
         }
         // Sort helpers in a stable way independent from the derive resolution order.
@@ -573,7 +573,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         deleg_impl: Option<(LocalDefId, Span)>,
         invoc_in_mod_inert_attr: Option<LocalDefId>,
         suggestion_span: Option<Span>,
-    ) -> Result<(Arc<SyntaxExtension>, Res), Indeterminate> {
+    ) -> Result<(&'ra Arc<SyntaxExtension>, Res), Indeterminate> {
         let (ext, res) = match self.cm().resolve_macro_or_delegation_path(
             path,
             kind,
@@ -765,7 +765,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         parent_scope: &ParentScope<'ra>,
         force: bool,
         ignore_import: Option<Import<'ra>>,
-    ) -> Result<(Option<Arc<SyntaxExtension>>, Res), Determinacy> {
+    ) -> Result<(Option<&'r Arc<SyntaxExtension>>, Res), Determinacy> {
         self.resolve_macro_or_delegation_path(
             path,
             MacroKind::Derive,
@@ -788,7 +788,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         invoc_in_mod_inert_attr: Option<(LocalDefId, NodeId)>,
         ignore_import: Option<Import<'ra>>,
         suggestion_span: Option<Span>,
-    ) -> Result<(Option<Arc<SyntaxExtension>>, Res), Determinacy> {
+    ) -> Result<(Option<&'ra Arc<SyntaxExtension>>, Res), Determinacy> {
         let path_span = ast_path.span;
         let mut path = Segment::from_path(ast_path);
 
@@ -872,7 +872,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             Some((impl_def_id, star_span)) => match res {
                 Res::Def(DefKind::Trait, def_id) => {
                     let edition = self.tcx.sess.edition();
-                    Some(Arc::new(SyntaxExtension::glob_delegation(
+                    Some(self.arenas.alloc_macro(SyntaxExtension::glob_delegation(
                         def_id,
                         impl_def_id,
                         star_span,
@@ -881,7 +881,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 }
                 _ => None,
             },
-            None => self.get_macro(res).map(Arc::clone),
+            None => self.get_macro(res),
         };
         Ok((ext, res))
     }
