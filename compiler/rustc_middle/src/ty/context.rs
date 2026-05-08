@@ -106,6 +106,10 @@ impl<'tcx> rustc_type_ir::inherent::Features<TyCtxt<'tcx>> for &'tcx rustc_featu
         self.generic_const_exprs()
     }
 
+    fn generic_const_args(self) -> bool {
+        self.generic_const_args()
+    }
+
     fn coroutine_clone(self) -> bool {
         self.coroutine_clone()
     }
@@ -623,23 +627,8 @@ impl<'tcx> TyCtxtFeed<'tcx, LocalDefId> {
     // Fills in all the important parts needed by HIR queries
     pub fn feed_hir(&self) {
         self.local_def_id_to_hir_id(HirId::make_owner(self.def_id()));
-
-        let node = hir::OwnerNode::Synthetic;
-        let bodies = Default::default();
-        let attrs = hir::AttributeMap::EMPTY;
-
-        let rustc_middle::hir::Hashes { opt_hash_including_bodies, .. } =
-            self.tcx.hash_owner_nodes(node, &bodies, &attrs.map, attrs.define_opaque);
-        let node = node.into();
-        self.opt_hir_owner_nodes(Some(self.tcx.arena.alloc(hir::OwnerNodes {
-            opt_hash_including_bodies,
-            nodes: IndexVec::from_elem_n(
-                hir::ParentedNode { parent: hir::ItemLocalId::INVALID, node },
-                1,
-            ),
-            bodies,
-        })));
-        self.feed_owner_id().hir_attr_map(attrs);
+        self.opt_hir_owner_nodes(Some(self.tcx.arena.alloc(hir::OwnerNodes::synthetic())));
+        self.feed_owner_id().hir_attr_map(hir::AttributeMap::EMPTY);
     }
 }
 
@@ -1127,12 +1116,12 @@ impl<'tcx> TyCtxt<'tcx> {
         })
     }
 
-    pub fn needs_crate_hash(self) -> bool {
-        // Why is the crate hash needed for these configurations?
+    pub fn needs_hir_hash(self) -> bool {
+        // Why is the hir hash needed for these configurations?
         // - debug_assertions: for the "fingerprint the result" check in
         //   `rustc_query_impl::execution::execute_job`.
         // - incremental: for query lookups.
-        // - needs_metadata: for putting into crate metadata.
+        // - needs_metadata: it is included in the crate metadata through the crate_hash query
         // - instrument_coverage: for putting into coverage data (see
         //   `hash_mir_source`).
         // - metrics_dir: metrics use the strict version hash in the filenames
@@ -2655,6 +2644,10 @@ impl<'tcx> TyCtxt<'tcx> {
 
     pub fn next_trait_solver_in_coherence(self) -> bool {
         self.sess.opts.unstable_opts.next_solver.coherence
+    }
+
+    pub fn disable_trait_solver_fast_paths(self) -> bool {
+        self.sess.opts.unstable_opts.disable_fast_paths
     }
 
     #[allow(rustc::bad_opt_access)]
