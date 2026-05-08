@@ -269,12 +269,12 @@ fn test_send_peek_recv() {
 
         // Write the bytes into the stream.
         unsafe {
-            errno_result(libc_utils::write_all_generic(
+            libc_utils::write_all_generic(
                 TEST_BYTES.as_ptr().cast(),
                 TEST_BYTES.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::send(peerfd, buf, count, 0),
-            ))
+            )
             .unwrap()
         };
     });
@@ -301,12 +301,12 @@ fn test_send_peek_recv() {
 
     let mut buffer = [0; TEST_BYTES.len()];
     unsafe {
-        errno_result(libc_utils::read_all_generic(
+        libc_utils::read_exact_generic(
             buffer.as_mut_ptr().cast(),
             buffer.len(),
             libc_utils::NoRetry,
             |buf, count| libc::recv(client_sockfd, buf, count, 0),
-        ))
+        )
         .unwrap()
     };
     assert_eq!(&buffer, TEST_BYTES);
@@ -328,24 +328,13 @@ fn test_write_read() {
         let (peerfd, _) = net::accept_ipv4(server_sockfd).unwrap();
 
         // Write some bytes into the stream.
-        let bytes_written = unsafe {
-            errno_result(libc_utils::write_all(
-                peerfd,
-                TEST_BYTES.as_ptr().cast(),
-                TEST_BYTES.len(),
-            ))
-            .unwrap()
-        };
-        assert_eq!(bytes_written as usize, TEST_BYTES.len());
+        libc_utils::write_all(peerfd, TEST_BYTES).unwrap();
     });
 
     net::connect_ipv4(client_sockfd, addr).unwrap();
 
     let mut buffer = [0; TEST_BYTES.len()];
-    unsafe {
-        errno_result(libc_utils::read_all(client_sockfd, buffer.as_mut_ptr().cast(), buffer.len()))
-            .unwrap()
-    };
+    libc_utils::read_exact(client_sockfd, &mut buffer).unwrap();
     assert_eq!(&buffer, TEST_BYTES);
 
     server_thread.join().unwrap();
