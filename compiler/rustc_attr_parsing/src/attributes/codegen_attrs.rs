@@ -594,8 +594,10 @@ impl SingleAttributeParser for SanitizeParser {
                         return;
                     }
                     None => {
-                        cx.adcx()
-                            .expected_string_literal(value.value_span, Some(value.value_as_lit()));
+                        cx.adcx().expected_specific_argument_strings(
+                            value.value_span,
+                            &[sym::on, sym::off],
+                        );
                         return;
                     }
                 };
