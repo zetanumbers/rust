@@ -1,0 +1,59 @@
+error[E0603]: struct import `One` is private
+  --> $DIR/private-import-no-suggestion-156244.rs:24:20
+   |
+LL |     use crate::b::{One, Two};
+   |                    ^^^ private struct import
+   |
+note: the struct import `One` is defined here...
+  --> $DIR/private-import-no-suggestion-156244.rs:9:9
+   |
+LL |     use crate::a::One;
+   |         ^^^^^^^^^^^^^
+note: ...and refers to the struct `One` which is defined here
+  --> $DIR/private-import-no-suggestion-156244.rs:4:5
+   |
+LL |     pub struct One;
+   |     ^^^^^^^^^^^^^^^ you could import this directly
+
+error[E0603]: struct import `Two` is private
+  --> $DIR/private-import-no-suggestion-156244.rs:24:25
+   |
+LL |     use crate::b::{One, Two};
+   |                         ^^^ private struct import
+   |
+note: the struct import `Two` is defined here...
+  --> $DIR/private-import-no-suggestion-156244.rs:10:9
+   |
+LL |     use crate::a::Two;
+   |         ^^^^^^^^^^^^^
+note: ...and refers to the struct `Two` which is defined here
+  --> $DIR/private-import-no-suggestion-156244.rs:5:5
+   |
+LL |     pub struct Two;
+   |     ^^^^^^^^^^^^^^^ you could import this directly
+
+error[E0603]: module import `inner` is private
+  --> $DIR/private-import-no-suggestion-156244.rs:27:24
+   |
+LL |     use crate::rename::inner::Item as Item1;
+   |                        ^^^^^ private module import
+   |
+note: the module import `inner` is defined here...
+  --> $DIR/private-import-no-suggestion-156244.rs:20:9
+   |
+LL |     use crate::outer::actual as inner;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: ...and refers to the module `actual` which is defined here
+  --> $DIR/private-import-no-suggestion-156244.rs:14:5
+   |
+LL |     pub mod actual {
+   |     ^^^^^^^^^^^^^^ you could import this directly
+help: consider importing this struct instead
+   |
+LL -     use crate::rename::inner::Item as Item1;
+LL +     use crate::outer::actual::Item as Item1;
+   |
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0603`.
