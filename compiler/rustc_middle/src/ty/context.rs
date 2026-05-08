@@ -6,6 +6,7 @@ mod impl_interner;
 pub mod tls;
 
 use std::borrow::{Borrow, Cow};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::env::VarError;
 use std::ffi::OsStr;
@@ -59,7 +60,7 @@ use crate::middle::codegen_fn_attrs::{CodegenFnAttrs, TargetFeature};
 use crate::middle::resolve_bound_vars;
 use crate::mir::interpret::{self, Allocation, ConstAllocation};
 use crate::mir::{Body, Local, Place, PlaceElem, ProjectionKind, Promoted};
-use crate::query::{IntoQueryKey, LocalCrate, Providers, QuerySystem, TyCtxtAt};
+use crate::query::{IntoQueryKey, LocalCrate, Providers, QuerySystem, QueryWaiter, TyCtxtAt};
 use crate::thir::Thir;
 use crate::traits;
 use crate::traits::solve::{ExternalConstraints, ExternalConstraintsData, PredefinedOpaques};
@@ -692,6 +693,7 @@ impl<'tcx> Deref for TyCtxt<'tcx> {
 pub struct GlobalCtxt<'tcx> {
     pub arena: &'tcx WorkerLocal<Arena<'tcx>>,
     pub hir_arena: &'tcx WorkerLocal<hir::Arena<'tcx>>,
+    pub waiters: WorkerLocal<RefCell<Option<QueryWaiter<'tcx>>>>,
 
     interners: CtxtInterners<'tcx>,
 
@@ -949,6 +951,7 @@ impl<'tcx> TyCtxt<'tcx> {
             stable_crate_id,
             arena,
             hir_arena,
+            waiters: Default::default(),
             interners,
             dep_graph,
             hooks,

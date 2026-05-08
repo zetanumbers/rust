@@ -617,7 +617,7 @@ impl Registry {
 /// Mark a Rayon worker thread as blocked. This triggers the deadlock handler
 /// if no other worker thread is active
 #[inline]
-pub fn park<T>(mut mutex_guard: parking_lot::MutexGuard<'_, T>) {
+pub fn park<T, R>(mut mutex_guard: parking_lot::MutexGuard<'_, T>, f: impl FnOnce(&mut T) -> R) -> R {
     let worker_thread = WorkerThread::current();
     assert!(!worker_thread.is_null());
     unsafe {
@@ -626,9 +626,12 @@ pub fn park<T>(mut mutex_guard: parking_lot::MutexGuard<'_, T>) {
         registry.sleep.mark_blocked(&registry.deadlock_handler);
         registry.release_thread();
         registry.thread_infos[worker_thread.index].condvar.wait(&mut mutex_guard);
+        let res = f(&mut mutex_guard);
         // Release the lock before we potentially block in `acquire_thread`
+        // NOTE: This mutex is used for synchronization
         drop(mutex_guard);
         registry.acquire_thread();
+        res
     }
 }
 

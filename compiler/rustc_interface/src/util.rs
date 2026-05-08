@@ -258,7 +258,7 @@ internal compiler error: query cycle handler thread panicked, aborting process";
                                         )
                                     },
                                 );
-                                break_query_cycle(job_map, &registry);
+                                break_query_cycle(tcx, job_map, &registry);
                             })
                         })
                     });
