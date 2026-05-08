@@ -140,6 +140,9 @@ fn abstracted_waiters_of(job_map: &QueryJobMap<'_>, query: QueryJobId) -> Vec<Ab
     // Add the explicit waiters which use condvars and are resumable
     if let Some(latch) = job_map.latch_of(query) {
         for (i, waiter) in latch.waiters.lock().as_ref().unwrap().iter().enumerate() {
+            let Some(waiter) = waiter else {
+                continue
+            };
             result.push(AbstractedWaiter {
                 span: waiter.span,
                 parent: waiter.parent,

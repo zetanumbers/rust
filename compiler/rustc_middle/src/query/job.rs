@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use rustc_span::Span;
+use rustc_thread_pool::current_num_threads;
 
 use crate::query::Cycle;
 
@@ -50,7 +51,7 @@ impl<'tcx> QueryJob<'tcx> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct QueryWaiter<'tcx> {
     pub parent: Option<QueryJobId>,
     // FIXME: could be made u16 due to rustc_thread_pool limiting number of threads
@@ -62,12 +63,12 @@ pub struct QueryWaiter<'tcx> {
 #[derive(Clone, Debug)]
 pub struct QueryLatch<'tcx> {
     /// The `Option` is `Some(..)` when the job is active, and `None` once completed.
-    pub waiters: Arc<Mutex<Option<Vec<QueryWaiter<'tcx>>>>>,
+    pub waiters: Arc<Mutex<Option<Box<[Option<QueryWaiter<'tcx>>]>>>>,
 }
 
 impl<'tcx> QueryLatch<'tcx> {
     fn new() -> Self {
-        QueryLatch { waiters: Arc::new(Mutex::new(Some(Vec::new()))) }
+        QueryLatch { waiters: Arc::new(Mutex::new(Some(vec![None; current_num_threads()].into_boxed_slice()))) }
     }
 
     /// Awaits for the query job to complete.
@@ -85,7 +86,9 @@ impl<'tcx> QueryLatch<'tcx> {
         // the `wait` call below, by 1) the `set` method or 2) by deadlock detection.
         // Both of these will remove it from the `waiters` list before resuming
         // this thread.
-        waiters.push(waiter);
+        if waiters[thread_index].replace(waiter).is_some() {
+            panic!("tried to place a waiter twice for a worker thread")
+        }
 
         // Awaits the caller on this latch by blocking the current thread.
         // If this detects a deadlock and the deadlock handler wants to resume this thread
@@ -107,6 +110,9 @@ impl<'tcx> QueryLatch<'tcx> {
         let waiters = waiters_guard.take().unwrap(); // mark the latch as complete
         let registry = rustc_thread_pool::Registry::current();
         for waiter in waiters {
+            let Some(waiter) = waiter else {
+                continue
+            };
             // Return waiter thread's index to resume and drop `waiter` for resumed thread
             // to use `Arc::get_mut` on its cycle arc pointer.
             let waiter_thread = waiter.thread_index;
@@ -121,6 +127,6 @@ impl<'tcx> QueryLatch<'tcx> {
         let mut waiters_guard = self.waiters.lock();
         let waiters = waiters_guard.as_mut().expect("non-empty waiters vec");
         // Remove the waiter from the list of waiters
-        waiters.remove(waiter)
+        waiters[waiter].take().unwrap()
     }
 }
