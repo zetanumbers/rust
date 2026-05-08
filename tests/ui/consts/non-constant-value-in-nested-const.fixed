@@ -1,3 +1,5 @@
+//! Regression test for https://github.com/rust-lang/rust/issues/27433
+
 //@ run-rustfix
 fn main() {
     let foo = 42u32;
