@@ -2406,7 +2406,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let first_binding = decl;
         let mut next_binding = Some(decl);
         let mut next_ident = ident;
-        let mut path = vec![];
         while let Some(binding) = next_binding {
             let name = next_ident;
             next_binding = match binding.kind {
@@ -2427,18 +2426,17 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
             match binding.kind {
                 DeclKind::Import { source_decl, import, .. } => {
-                    for segment in &import.module_path {
-                        // Don't include `{{root}}` in suggestions - it's an internal symbol
-                        // that should never be shown to users.
-                        if segment.ident.name != kw::PathRoot {
-                            path.push(segment.ident);
-                        }
-                    }
+                    // Don't include `{{root}}` in suggestions - it's an internal symbol
+                    // that should never be shown to users.
+                    let path = import
+                        .module_path
+                        .iter()
+                        .filter(|seg| seg.ident.name != kw::PathRoot)
+                        .map(|seg| seg.ident.clone())
+                        .chain(std::iter::once(ident))
+                        .collect::<Vec<_>>();
                     let through_reexport = !matches!(source_decl.kind, DeclKind::Def(_));
-                    sugg_paths.push((
-                        path.iter().cloned().chain(std::iter::once(ident)).collect::<Vec<_>>(),
-                        through_reexport,
-                    ));
+                    sugg_paths.push((path, through_reexport));
                 }
                 DeclKind::Def(_) => {}
             }
