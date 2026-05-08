@@ -54,8 +54,6 @@ impl<'tcx> QueryJob<'tcx> {
 #[derive(Clone, Debug)]
 pub struct QueryWaiter<'tcx> {
     pub parent: Option<QueryJobId>,
-    // FIXME: could be made u16 due to rustc_thread_pool limiting number of threads
-    pub thread_index: usize,
     pub span: Span,
     pub cycle: Arc<Mutex<Option<Cycle<'tcx>>>>,
 }
@@ -80,7 +78,7 @@ impl<'tcx> QueryLatch<'tcx> {
         };
 
         let mut cycle = Arc::new(Mutex::new(None));
-        let waiter = QueryWaiter { parent: query, span, cycle: Arc::clone(&cycle), thread_index };
+        let waiter = QueryWaiter { parent: query, span, cycle: Arc::clone(&cycle) };
 
         // We push the waiter on to the `waiters` list. It can be accessed inside
         // the `wait` call below, by 1) the `set` method or 2) by deadlock detection.
@@ -109,13 +107,12 @@ impl<'tcx> QueryLatch<'tcx> {
         let mut waiters_guard = self.waiters.lock();
         let waiters = waiters_guard.take().unwrap(); // mark the latch as complete
         let registry = rustc_thread_pool::Registry::current();
-        for waiter in waiters {
+        for (waiter_thread, waiter) in waiters.into_iter().enumerate() {
             let Some(waiter) = waiter else {
                 continue
             };
             // Return waiter thread's index to resume and drop `waiter` for resumed thread
             // to use `Arc::get_mut` on its cycle arc pointer.
-            let waiter_thread = waiter.thread_index;
             drop(waiter);
             rustc_thread_pool::unpark(&registry, waiter_thread);
         }

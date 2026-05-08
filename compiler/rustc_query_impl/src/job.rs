@@ -328,7 +328,7 @@ fn find_and_process_cycle<'tcx>(job_map: &QueryJobMap<'tcx>, query: QueryJobId) 
 
         // Return waiter thread's index to resume and drop `QueryWaiter::cycle` for resumed thread
         // to use `Arc::get_mut`.
-        Some(waiter.thread_index)
+        Some(waiter_idx)
     } else {
         None
     }
