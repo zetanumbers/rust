@@ -1,9 +1,12 @@
 //! Logic for `-Zassumptions-on-binders` stuff
 
+#[cfg(feature = "nightly")]
 use rustc_data_structures::transitive_relation::TransitiveRelationBuilder;
 use rustc_type_ir::ClauseKind::*;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::outlives::{Component, push_outlives_components};
+#[cfg(not(feature = "nightly"))]
+use rustc_type_ir::region_constraint::TransitiveRelationBuilder;
 use rustc_type_ir::region_constraint::{
     Assumptions, RegionConstraint, eagerly_handle_placeholders_in_universe, max_universe,
 };

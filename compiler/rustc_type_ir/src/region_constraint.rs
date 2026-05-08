@@ -4,8 +4,46 @@ use derive_where::derive_where;
 use indexmap::IndexSet;
 #[cfg(feature = "nightly")]
 use rustc_data_structures::stable_hasher::{StableHash, StableHashCtxt, StableHasher};
+#[cfg(feature = "nightly")]
 use rustc_data_structures::transitive_relation::{TransitiveRelation, TransitiveRelationBuilder};
 use tracing::{debug, instrument};
+
+// Workaround for TransitiveRelation being in rustc_data_structures which isn't accessible on stable
+#[cfg(not(feature = "nightly"))]
+#[derive(Default, Clone, Debug)]
+pub struct TransitiveRelation<T>(T);
+#[cfg(not(feature = "nightly"))]
+impl<T> TransitiveRelation<T> {
+    pub fn reachable_from(&self, _data: T) -> Vec<T> {
+        unreachable!("-Zassumptions-on-binders is not supported for r-a")
+    }
+
+    pub fn base_edges(&self) -> impl Iterator<Item = (T, T)> {
+        unreachable!("-Zassumptions-on-binders is not supported for r-a");
+
+        #[allow(unreachable_code)]
+        [].into_iter()
+    }
+}
+#[derive(Clone, Debug)]
+#[cfg(not(feature = "nightly"))]
+pub struct TransitiveRelationBuilder<T>(T);
+#[cfg(not(feature = "nightly"))]
+impl<T> TransitiveRelationBuilder<T> {
+    pub fn freeze(self) -> TransitiveRelation<T> {
+        unreachable!("-Zassumptions-on-binders is not supported for r-a")
+    }
+
+    pub fn add(&mut self, _: T, _: T) {
+        unreachable!("-Zassumptions-on-binders is not supported for r-a")
+    }
+}
+#[cfg(not(feature = "nightly"))]
+impl<T> Default for TransitiveRelationBuilder<T> {
+    fn default() -> Self {
+        unreachable!("-Zassumptions-on-binders is not supported for r-a")
+    }
+}
 
 use crate::data_structures::IndexMap;
 use crate::fold::TypeSuperFoldable;
