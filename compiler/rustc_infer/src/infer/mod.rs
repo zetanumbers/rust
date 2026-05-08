@@ -124,7 +124,7 @@ pub struct InferCtxtInner<'tcx> {
     /// region constraints would've been added.
     region_constraint_storage: Option<RegionConstraintStorage<'tcx>>,
 
-    /// Used by the next solver when `-Zhigher-ranked-assumptions=v2` is set.
+    /// Used by the next solver when `-Zassumptions-on-binders` is set.
     solver_region_constraint_storage: SolverRegionConstraintStorage<'tcx>,
 
     /// A set of constraints that regionck must validate.

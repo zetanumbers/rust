@@ -92,7 +92,7 @@ where
     ) -> QueryResultOrRerunNonErased<I> {
         let ty::OutlivesPredicate(ty, lt) = goal.predicate;
 
-        if self.assumptions_on_binders() {
+        if self.cx().assumptions_on_binders() {
             // FIXME(-Zassumptions-on-binders): we need to normalize `ty`
             let constraint = self.destructure_type_outlives(ty, lt);
             self.register_solver_region_constraint(constraint);
@@ -110,7 +110,7 @@ where
     ) -> QueryResultOrRerunNonErased<I> {
         let ty::OutlivesPredicate(a, b) = goal.predicate;
 
-        if self.assumptions_on_binders() {
+        if self.cx().assumptions_on_binders() {
             let constraint =
                 rustc_type_ir::region_constraint::RegionConstraint::RegionOutlives(a, b);
             self.register_solver_region_constraint(constraint);

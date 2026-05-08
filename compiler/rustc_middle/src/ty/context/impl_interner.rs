@@ -328,7 +328,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     }
 
     fn assumptions_on_binders(self) -> bool {
-        self.sess.opts.unstable_opts.assumptions_on_binders
+        self.assumptions_on_binders()
     }
 
     fn coroutine_hidden_types(

@@ -338,10 +338,6 @@ pub trait InferCtxtLike: Sized {
     fn universe(&self) -> ty::UniverseIndex;
     fn create_next_universe(&self) -> ty::UniverseIndex;
 
-    fn assumptions_on_binders(&self) -> bool {
-        false
-    }
-
     fn insert_placeholder_assumptions(
         &self,
         u: ty::UniverseIndex,

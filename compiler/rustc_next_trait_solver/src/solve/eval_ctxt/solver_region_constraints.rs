@@ -35,6 +35,8 @@ where
         u: UniverseIndex,
         param_env: I::ParamEnv,
     ) -> Option<Assumptions<I>> {
+        assert!(self.cx().assumptions_on_binders());
+
         struct RawAssumptions<'a, 'b, D: SolverDelegate<Interner = I>, I: Interner> {
             ecx: &'a mut EvalCtxt<'b, D, I>,
             param_env: I::ParamEnv,
@@ -46,6 +48,8 @@ where
             I: Interner,
             D: SolverDelegate<Interner = I>,
         {
+            type Result = ();
+
             fn visit_ty(&mut self, t: I::Ty) {
                 self.out.extend(
                     self.ecx

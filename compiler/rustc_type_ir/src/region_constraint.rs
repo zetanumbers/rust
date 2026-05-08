@@ -3,7 +3,7 @@
 use derive_where::derive_where;
 use indexmap::IndexSet;
 #[cfg(feature = "nightly")]
-use rustc_data_structures::stable_hasher::{StableHash, StableHashCtxt, StableHasher};
+use rustc_data_structures::stable_hash::{StableHash, StableHashCtxt, StableHasher};
 #[cfg(feature = "nightly")]
 use rustc_data_structures::transitive_relation::{TransitiveRelation, TransitiveRelationBuilder};
 use tracing::{debug, instrument};

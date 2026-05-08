@@ -30,10 +30,6 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.typing_mode_raw()
     }
 
-    fn assumptions_on_binders(&self) -> bool {
-        self.tcx.sess.opts.unstable_opts.assumptions_on_binders
-    }
-
     fn universe(&self) -> ty::UniverseIndex {
         self.universe()
     }

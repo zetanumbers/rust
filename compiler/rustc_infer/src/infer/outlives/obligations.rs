@@ -147,7 +147,7 @@ impl<'tcx> InferCtxt<'tcx> {
         sub_region: Region<'tcx>,
         cause: &ObligationCause<'tcx>,
     ) {
-        assert!(!self.tcx.sess.opts.unstable_opts.assumptions_on_binders);
+        assert!(!self.tcx.assumptions_on_binders());
 
         // `is_global` means the type has no params, infer, placeholder, or non-`'static`
         // free regions. If the type has none of these things, then we can skip registering
@@ -237,10 +237,7 @@ impl<'tcx> InferCtxt<'tcx> {
         mut conversion: impl TypeOutlivesDelegate<'tcx>,
         span: Span,
     ) {
-        if !self.tcx.sess.opts.unstable_opts.assumptions_on_binders {
-            return;
-        }
-
+        assert!(self.tcx.assumptions_on_binders());
         assert!(self.next_trait_solver());
 
         let origin = SubregionOrigin::SolverRegionConstraint(span);
@@ -277,8 +274,7 @@ impl<'tcx> InferCtxt<'tcx> {
                 }
                 // FIXME(-Zassumptions-on-binders): actually implement OR as an  OR
                 And(nested) | Or(nested) => constraints.extend(nested),
-                AliasTyOutlivesViaEnv(..) => unreachable!(),
-                PlaceholderTyOutlives(..) => unreachable!(),
+                AliasTyOutlivesViaEnv(..) | PlaceholderTyOutlives(..) => unreachable!(),
             }
         }
     }
@@ -305,7 +301,9 @@ impl<'tcx> InferCtxt<'tcx> {
     ) -> Result<(), (PolyTypeOutlivesPredicate<'tcx>, SubregionOrigin<'tcx>)> {
         assert!(!self.in_snapshot(), "cannot process registered region obligations in a snapshot");
 
-        self.destructure_solver_region_constraints_for_regionck(outlives_env, span);
+        if self.tcx.assumptions_on_binders() {
+            self.destructure_solver_region_constraints_for_regionck(outlives_env, span);
+        }
 
         // Must loop since the process of normalizing may itself register region obligations.
         for iteration in 0.. {

@@ -1342,7 +1342,7 @@ where
     ) -> U {
         self.delegate.enter_forall(value, |value| {
             let u = self.delegate.universe();
-            let assumptions = if self.assumptions_on_binders() {
+            let assumptions = if self.cx().assumptions_on_binders() {
                 self.region_assumptions_for_placeholders_in_universe(value.clone(), u, param_env)
             } else {
                 None
@@ -1377,10 +1377,6 @@ where
             self.inspect.add_var_value(arg);
         }
         args
-    }
-
-    pub(super) fn assumptions_on_binders(&self) -> bool {
-        self.delegate.assumptions_on_binders()
     }
 
     pub(super) fn register_solver_region_constraint(&self, c: RegionConstraint<I>) {
@@ -1578,7 +1574,7 @@ where
             previous call to `try_evaluate_added_goals!`"
         );
 
-        let goals_certainty = match self.delegate.assumptions_on_binders() {
+        let goals_certainty = match self.delegate.cx().assumptions_on_binders() {
             true => {
                 let certainty = self.eagerly_handle_placeholders()?;
                 certainty.and(goals_certainty)
@@ -1707,15 +1703,18 @@ where
         // region constraints from an ambiguous nested goal. This is tested in both
         // `tests/ui/higher-ranked/leak-check/leak-check-in-selection-5-ambig.rs` and
         // `tests/ui/higher-ranked/leak-check/leak-check-in-selection-6-ambig-unify.rs`.
-        let region_constraints = match self.assumptions_on_binders() {
-            true if let Certainty::Yes = certainty => {
-                ExternalRegionConstraints::NextGen(self.delegate.get_solver_region_constraint())
-            }
-            true => ExternalRegionConstraints::NextGen(RegionConstraint::new_true()),
-            false if let Certainty::Yes = certainty => {
-                ExternalRegionConstraints::Old(self.delegate.make_deduplicated_region_constraints())
-            }
-            false => ExternalRegionConstraints::Old(vec![]),
+        let region_constraints = if self.cx().assumptions_on_binders() {
+            ExternalRegionConstraints::NextGen(if let Certainty::Yes = certainty {
+                self.delegate.get_solver_region_constraint()
+            } else {
+                RegionConstraint::new_true()
+            })
+        } else {
+            ExternalRegionConstraints::Old(if let Certainty::Yes = certainty {
+                self.delegate.make_deduplicated_region_constraints()
+            } else {
+                vec![]
+            })
         };
 
         // We only return *newly defined* opaque types from canonical queries.

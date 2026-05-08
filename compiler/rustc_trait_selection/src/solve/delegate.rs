@@ -74,7 +74,10 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
         span: Span,
     ) -> Option<Certainty> {
         // FIXME(-Zassumptions-on-binders): actually handle fast path
-        let assumptions_on_binders = self.tcx.sess.opts.unstable_opts.assumptions_on_binders;
+        if self.tcx.assumptions_on_binders() {
+            return None;
+        }
+
         let pred = goal.predicate.kind();
         match pred.skip_binder() {
             ty::PredicateKind::Clause(ty::ClauseKind::Trait(trait_pred)) => {
@@ -124,9 +127,7 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
             ty::PredicateKind::DynCompatible(def_id) if self.0.tcx.is_dyn_compatible(def_id) => {
                 Some(Certainty::Yes)
             }
-            ty::PredicateKind::Clause(ty::ClauseKind::RegionOutlives(outlives))
-                if !assumptions_on_binders =>
-            {
+            ty::PredicateKind::Clause(ty::ClauseKind::RegionOutlives(outlives)) => {
                 if outlives.has_escaping_bound_vars() {
                     return None;
                 }
@@ -139,9 +140,7 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
                 );
                 Some(Certainty::Yes)
             }
-            ty::PredicateKind::Clause(ty::ClauseKind::TypeOutlives(outlives))
-                if !assumptions_on_binders =>
-            {
+            ty::PredicateKind::Clause(ty::ClauseKind::TypeOutlives(outlives)) => {
                 if outlives.has_escaping_bound_vars() {
                     return None;
                 }
