@@ -1340,7 +1340,7 @@ impl AttributeExt for Attribute {
 
     #[inline]
     fn value_str(&self) -> Option<Symbol> {
-        self.value_lit().and_then(|x| x.value_str())
+        self.value_lit().and_then(|x| x.value_as_str())
     }
 
     #[inline]

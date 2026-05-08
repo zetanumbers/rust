@@ -43,7 +43,7 @@ impl CombineAttributeParser for ReprParser {
         }
 
         for param in list.mixed() {
-            if let Some(_) = param.lit() {
+            if let Some(_) = param.as_lit() {
                 cx.emit_err(session_diagnostics::ReprIdent { span: cx.attr_span });
                 continue;
             }
@@ -212,7 +212,7 @@ fn parse_repr_align(
         return None;
     };
 
-    let Some(lit) = align.lit() else {
+    let Some(lit) = align.as_lit() else {
         match align_kind {
             Packed => {
                 cx.emit_err(session_diagnostics::IncorrectReprFormatPackedExpectInteger {
@@ -293,7 +293,7 @@ impl RustcAlignParser {
             return;
         };
 
-        let Some(lit) = align.lit() else {
+        let Some(lit) = align.as_lit() else {
             cx.emit_err(session_diagnostics::IncorrectReprFormatExpectInteger {
                 span: align.span(),
             });
