@@ -128,7 +128,11 @@ struct AbstractedWaiter {
 
 /// Returns all the non-resumable and resumable waiters of a query.
 /// This is used so we can uniformly loop over both non-resumable and resumable waiters.
-fn abstracted_waiters_of<'tcx>(tcx: TyCtxt<'tcx>, job_map: &QueryJobMap<'tcx>, query: QueryJobId) -> Vec<AbstractedWaiter> {
+fn abstracted_waiters_of<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    job_map: &QueryJobMap<'tcx>,
+    query: QueryJobId,
+) -> Vec<AbstractedWaiter> {
     let mut result = Vec::new();
 
     // Add the parent which is a non-resumable waiter since it's on the same stack
@@ -144,9 +148,9 @@ fn abstracted_waiters_of<'tcx>(tcx: TyCtxt<'tcx>, job_map: &QueryJobMap<'tcx>, q
         debug_assert!(*waiters_guard != usize::MAX);
         for i in 0..usize::BITS - 1 {
             if *waiters_guard & (1 << i) == 0 {
-                continue
+                continue;
             }
-            let waiter = unsafe { WorkerLocal::as_slice_unchecked(&tcx.waiters)[i as usize].0.borrow() };
+            let waiter = WorkerLocal::as_slice(&tcx.waiters)[i as usize].0.lock();
             let waiter = waiter.as_ref().unwrap();
             result.push(AbstractedWaiter {
                 span: waiter.span,
@@ -239,7 +243,11 @@ fn connected_to_root<'tcx>(
 }
 
 /// Processes a found query cycle into a `Cycle`
-fn process_cycle<'tcx>(tcx: TyCtxt<'tcx>, job_map: &QueryJobMap<'tcx>, stack: Vec<(Span, QueryJobId)>) -> Cycle<'tcx> {
+fn process_cycle<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    job_map: &QueryJobMap<'tcx>,
+    stack: Vec<(Span, QueryJobId)>,
+) -> Cycle<'tcx> {
     // The stack is a vector of pairs of spans and queries; reverse it so that
     // the earlier entries require later entries
     let (mut spans, queries): (Vec<_>, Vec<_>) = stack.into_iter().rev().unzip();
@@ -314,7 +322,11 @@ fn process_cycle<'tcx>(tcx: TyCtxt<'tcx>, job_map: &QueryJobMap<'tcx>, stack: Ve
 
 /// Looks for a query cycle starting at `query`.
 /// Returns a waiter thread's index to resume if a cycle is found.
-fn find_and_process_cycle<'tcx>(tcx: TyCtxt<'tcx>, job_map: &QueryJobMap<'tcx>, query: QueryJobId) -> Option<usize> {
+fn find_and_process_cycle<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    job_map: &QueryJobMap<'tcx>,
+    query: QueryJobId,
+) -> Option<(usize, QueryJobId)> {
     let mut visited = FxHashSet::default();
     let mut stack = Vec::new();
     if let ControlFlow::Break(resumable) =
@@ -328,19 +340,19 @@ fn find_and_process_cycle<'tcx>(tcx: TyCtxt<'tcx>, job_map: &QueryJobMap<'tcx>, 
         let (waitee_query, waiter_idx) = resumable.unwrap();
 
         // Disable the waiter we want to resume
-        let mut waiters_guard = job_map.latch_of(waitee_query).unwrap().waiters.lock();
-        *waiters_guard &= !(1 << waiter_idx);
+        let _g = job_map.latch_of(waitee_query).unwrap().waiters.lock();
 
         // Set the cycle error so it will be picked up when resumed
         //
         // SAFETY: We are in a deadlock, so we are synced with whatever tcx.waiters contains.
         // Also it's later synced though `waiters_guard` unlocking the mutex and park call reclaiming
         // its lock through a condvar after being unparked.
-        unsafe { WorkerLocal::as_slice_unchecked(&tcx.waiters)[waiter_idx].0.borrow_mut().as_mut().unwrap().cycle = Some(error) };
+        WorkerLocal::as_slice(&tcx.waiters)[waiter_idx].0.lock().as_mut().unwrap().cycle =
+            Some(error);
 
         // Return waiter thread's index to resume and drop `QueryWaiter::cycle` for resumed thread
         // to use `Arc::get_mut`.
-        Some(waiter_idx)
+        Some((waiter_idx, waitee_query))
     } else {
         None
     }
@@ -353,14 +365,21 @@ fn find_and_process_cycle<'tcx>(tcx: TyCtxt<'tcx>, job_map: &QueryJobMap<'tcx>, 
 /// There may be multiple cycles involved in a deadlock, but this only breaks one at a time so
 /// there will be multiple rounds through the deadlock handler if multiple cycles are present.
 #[allow(rustc::potential_query_instability)]
-pub fn break_query_cycle<'tcx>(tcx: TyCtxt<'tcx>, job_map: QueryJobMap<'tcx>, registry: &rustc_thread_pool::Registry) {
+pub fn break_query_cycle<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    job_map: QueryJobMap<'tcx>,
+    registry: &rustc_thread_pool::Registry,
+) {
     // Look for a cycle starting at each query job
-    let waiter_thread = job_map
+    let (waiter_thread, waitee_query) = job_map
         .map
         .keys()
         .find_map(|query| find_and_process_cycle(tcx, &job_map, *query))
         .expect("unable to find a query cycle");
 
+    let mut waiters_guard = job_map.latch_of(waitee_query).unwrap().waiters.lock();
+    debug_assert!(*waiters_guard & (1 << waiter_thread) != 0);
+    *waiters_guard &= !(1 << waiter_thread);
     // Unpark one waiter thread.
     assert!(rustc_thread_pool::unpark(registry, waiter_thread), "unable to wake the waiter");
 }

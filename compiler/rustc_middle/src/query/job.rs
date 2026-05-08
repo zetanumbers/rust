@@ -73,7 +73,12 @@ impl<'tcx> QueryLatch<'tcx> {
     }
 
     /// Awaits for the query job to complete.
-    pub fn wait_on(&self, tcx: TyCtxt<'tcx>, query: Option<QueryJobId>, span: Span) -> Result<(), Cycle<'tcx>> {
+    pub fn wait_on(
+        &self,
+        tcx: TyCtxt<'tcx>,
+        query: Option<QueryJobId>,
+        span: Span,
+    ) -> Result<(), Cycle<'tcx>> {
         let thread_index = rustc_thread_pool::current_thread_index().unwrap();
         let mut waiters_guard = self.waiters.lock();
         if *waiters_guard == usize::MAX {
@@ -87,11 +92,12 @@ impl<'tcx> QueryLatch<'tcx> {
         // the `wait` call below, by 1) the `set` method or 2) by deadlock detection.
         // Both of these will remove it from the `waiters` list before resuming
         // this thread.
-        if tcx.waiters.replace(Some(waiter)).is_some() {
+        let mut waiters_state = tcx.waiters.lock();
+        if mem::replace(&mut *waiters_state, Some(waiter)).is_some() {
             panic!("tried to place a waiter twice for a worker thread")
         }
-
         *waiters_guard |= 1 << thread_index;
+        drop(waiters_state);
 
         // Awaits the caller on this latch by blocking the current thread.
         // If this detects a deadlock and the deadlock handler wants to resume this thread
@@ -99,8 +105,8 @@ impl<'tcx> QueryLatch<'tcx> {
         // getting the self.info lock.
         rustc_thread_pool::park(waiters_guard, |_| {
             // Reset our QueryWaiter to None
-            let mut waiter = tcx.waiters.take().unwrap();
-            match waiter.cycle.take() {
+            let waiter = tcx.waiters.lock().take().unwrap();
+            match waiter.cycle {
                 None => Ok(()),
                 Some(cycle) => Err(cycle),
             }

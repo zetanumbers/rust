@@ -617,7 +617,10 @@ impl Registry {
 /// Mark a Rayon worker thread as blocked. This triggers the deadlock handler
 /// if no other worker thread is active
 #[inline]
-pub fn park<T, R>(mut mutex_guard: parking_lot::MutexGuard<'_, T>, f: impl FnOnce(&mut T) -> R) -> R {
+pub fn park<T, R>(
+    mut mutex_guard: parking_lot::MutexGuard<'_, T>,
+    f: impl FnOnce(&mut T) -> R,
+) -> R {
     let worker_thread = WorkerThread::current();
     assert!(!worker_thread.is_null());
     unsafe {

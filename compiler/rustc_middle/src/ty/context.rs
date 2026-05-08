@@ -6,7 +6,6 @@ mod impl_interner;
 pub mod tls;
 
 use std::borrow::{Borrow, Cow};
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::env::VarError;
 use std::ffi::OsStr;
@@ -16,6 +15,7 @@ use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 use std::{fmt, iter, mem};
 
+use parking_lot::Mutex;
 use rustc_abi::{ExternAbi, FieldIdx, Layout, LayoutData, TargetDataLayout, VariantIdx};
 use rustc_ast as ast;
 use rustc_data_structures::defer;
@@ -693,7 +693,7 @@ impl<'tcx> Deref for TyCtxt<'tcx> {
 pub struct GlobalCtxt<'tcx> {
     pub arena: &'tcx WorkerLocal<Arena<'tcx>>,
     pub hir_arena: &'tcx WorkerLocal<hir::Arena<'tcx>>,
-    pub waiters: WorkerLocal<RefCell<Option<QueryWaiter<'tcx>>>>,
+    pub waiters: WorkerLocal<Mutex<Option<QueryWaiter<'tcx>>>>,
 
     interners: CtxtInterners<'tcx>,
 
