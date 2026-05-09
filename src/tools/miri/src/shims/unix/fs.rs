@@ -236,15 +236,10 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // which can be different between the libc used by std and the libc used by everyone else.
         let buf = this.deref_pointer(buf_op)?;
 
-        // `libc::S_IF*` constants are of type `mode_t`, which varies in width across targets
-        // (`u16` on macOS, `u32` on Linux). Read the scalar using `mode_t`'s size on the target.
-        let mode_t_size = this.libc_ty_layout("mode_t").size;
-        let mode: u32 = metadata.mode.to_uint(mode_t_size)?.try_into().unwrap();
-
         this.write_int_fields_named(
             &[
                 ("st_dev", metadata.dev.unwrap_or(0).into()),
-                ("st_mode", mode.into()),
+                ("st_mode", metadata.mode.into()),
                 ("st_nlink", metadata.nlink.unwrap_or(0).into()),
                 ("st_ino", metadata.ino.unwrap_or(0).into()),
                 ("st_uid", metadata.uid.unwrap_or(0).into()),
@@ -766,15 +761,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             mask |= this.eval_libc_u32("STATX_BLOCKS");
         }
 
-        // `statx.stx_mode` is `__u16`. `libc::S_IF*` are of type `mode_t`, which varies in
-        // width across targets (`u16` on macOS, `u32` on Linux). Read using `mode_t`'s size.
-        let mode_t_size = this.libc_ty_layout("mode_t").size;
-        let mode: u16 = metadata
-            .mode
-            .to_uint(mode_t_size)?
-            .try_into()
-            .unwrap_or_else(|_| bug!("libc contains bad value for constant"));
-
         // We need to set the corresponding bits of `mask` if the access, creation and modification
         // times were available. Otherwise we let them be zero.
         let (access_sec, access_nsec) = metadata
@@ -805,12 +791,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.write_int_fields_named(
             &[
                 ("stx_mask", mask.into()),
+                ("stx_mode", metadata.mode.into()),
                 ("stx_blksize", metadata.blksize.unwrap_or(0).into()),
                 ("stx_attributes", 0),
                 ("stx_nlink", metadata.nlink.unwrap_or(0).into()),
                 ("stx_uid", metadata.uid.unwrap_or(0).into()),
                 ("stx_gid", metadata.gid.unwrap_or(0).into()),
-                ("stx_mode", mode.into()),
                 ("stx_ino", metadata.ino.unwrap_or(0).into()),
                 ("stx_size", metadata.size.into()),
                 ("stx_blocks", metadata.blocks.unwrap_or(0).into()),
@@ -1684,7 +1670,8 @@ fn file_type_to_mode_name(file_type: std::fs::FileType) -> &'static str {
 /// expose it. `statx` must only advertise the corresponding `STATX_*` bit when the field is `Some`;
 /// legacy `stat` writes zero for `None` to preserve the old fallback behavior.
 struct FileMetadata {
-    mode: Scalar,
+    /// This holds both the file type (dir, regular, symlink, ...) and permissions.
+    mode: u32,
     size: u64,
     created: Option<(u64, u32)>,
     accessed: Option<(u64, u32)>,
@@ -1728,6 +1715,9 @@ impl FileMetadata {
         mode_name: &str,
     ) -> InterpResult<'tcx, Result<FileMetadata, IoError>> {
         let mode = ecx.eval_libc(mode_name);
+        let mode: u32 = mode.to_uint(ecx.libc_ty_layout("mode_t").size)?.try_into().unwrap();
+        // We observed 0x777 on sockets and 0x600 on pipes...
+        let mode = mode | 0o666;
         interp_ok(Ok(FileMetadata {
             mode,
             size: 0,
@@ -1757,6 +1747,7 @@ impl FileMetadata {
 
         let file_type = metadata.file_type();
         let mode = ecx.eval_libc(file_type_to_mode_name(file_type));
+        let mut mode = mode.to_uint(ecx.libc_ty_layout("mode_t").size)?.try_into().unwrap();
 
         let size = metadata.len();
 
@@ -1769,6 +1760,8 @@ impl FileMetadata {
         cfg_select! {
             unix => {
                 use std::os::unix::fs::MetadataExt;
+                use std::os::unix::fs::PermissionsExt;
+
                 let dev = metadata.dev();
                 let ino = metadata.ino();
                 let nlink = metadata.nlink();
@@ -1776,6 +1769,8 @@ impl FileMetadata {
                 let gid = metadata.gid();
                 let blksize = metadata.blksize();
                 let blocks = metadata.blocks();
+
+                mode |= metadata.permissions().mode();
 
                 interp_ok(Ok(FileMetadata {
                     mode,
@@ -1792,20 +1787,25 @@ impl FileMetadata {
                     blocks: Some(blocks),
                 }))
             }
-            _ => interp_ok(Ok(FileMetadata {
-                mode,
-                size,
-                created,
-                accessed,
-                modified,
-                dev: None,
-                ino: None,
-                nlink: None,
-                uid: None,
-                gid: None,
-                blksize: None,
-                blocks: None,
-            })),
+            _ => {
+                // Emulate "everyone can read" or "everyone can read and write".
+                mode |= if metadata.permissions().readonly() { 0o111 } else { 0o333 };
+
+                interp_ok(Ok(FileMetadata {
+                    mode,
+                    size,
+                    created,
+                    accessed,
+                    modified,
+                    dev: None,
+                    ino: None,
+                    nlink: None,
+                    uid: None,
+                    gid: None,
+                    blksize: None,
+                    blocks: None,
+                }))
+            },
         }
     }
 }
