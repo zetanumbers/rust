@@ -183,14 +183,7 @@ fn test_recv_nonblock() {
         // Yield back to client so that it starts receiving before we start sending.
         thread::sleep(Duration::from_millis(10));
 
-        unsafe {
-            errno_result(libc_utils::write_all(
-                peerfd,
-                TEST_BYTES.as_ptr().cast(),
-                TEST_BYTES.len(),
-            ))
-            .unwrap()
-        };
+        libc_utils::write_all(peerfd, TEST_BYTES).unwrap();
     });
 
     net::connect_ipv4(client_sockfd, addr).unwrap();
@@ -324,12 +317,12 @@ fn test_send_nonblock() {
         let mut buffer = Vec::with_capacity(total_written / 2);
         buffer.fill(0u8);
         unsafe {
-            errno_result(libc_utils::read_all_generic(
+            libc_utils::read_exact_generic(
                 buffer.as_mut_ptr().cast(),
                 total_written / 2,
                 libc_utils::NoRetry,
                 |buf, count| libc::recv(peerfd, buf, count, 0),
-            ))
+            )
             .unwrap()
         };
     });

@@ -267,12 +267,12 @@ fn test_send_recv_nonblock() {
         thread::sleep(Duration::from_millis(10));
 
         unsafe {
-            errno_result(libc_utils::write_all_generic(
+            libc_utils::write_all_generic(
                 TEST_BYTES.as_ptr().cast(),
                 TEST_BYTES.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::send(peerfd, buf, count, 0),
-            ))
+            )
             .unwrap()
         };
 
@@ -280,12 +280,12 @@ fn test_send_recv_nonblock() {
         // This will block until the client sent us this data.
         let mut buffer = [0; TEST_BYTES.len()];
         unsafe {
-            errno_result(libc_utils::read_all_generic(
+            libc_utils::read_exact_generic(
                 buffer.as_mut_ptr().cast(),
                 buffer.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::recv(peerfd, buf, count, 0),
-            ))
+            )
             .unwrap()
         };
         assert_eq!(&buffer, TEST_BYTES);
@@ -314,12 +314,12 @@ fn test_send_recv_nonblock() {
     // sleep multiple times until we received everything.
 
     unsafe {
-        errno_result(libc_utils::read_all_generic(
+        libc_utils::read_exact_generic(
             buffer.as_mut_ptr().cast(),
             buffer.len(),
             libc_utils::RetryAfter(Duration::from_millis(10)),
             |buf, count| libc::recv(client_sockfd, buf, count, 0),
-        ))
+        )
         .unwrap()
     };
     assert_eq!(&buffer, TEST_BYTES);
@@ -328,12 +328,12 @@ fn test_send_recv_nonblock() {
 
     // Sending into the empty buffer should succeed without blocking.
     unsafe {
-        errno_result(libc_utils::write_all_generic(
+        libc_utils::write_all_generic(
             TEST_BYTES.as_ptr().cast(),
             TEST_BYTES.len(),
             libc_utils::NoRetry,
             |buf, count| libc::send(client_sockfd, buf, count, 0),
-        ))
+        )
         .unwrap()
     };
 
@@ -345,12 +345,12 @@ fn test_send_recv_nonblock() {
         let fill_buf = [1u8; 5_000_000];
         // This fills the socket receive buffer and thus should start blocking.
         let err = unsafe {
-            errno_result(libc_utils::write_all_generic(
+            libc_utils::write_all_generic(
                 fill_buf.as_ptr().cast(),
                 fill_buf.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::send(client_sockfd, buf, count, 0),
-            ))
+            )
             .unwrap_err()
         };
         assert_eq!(err.kind(), ErrorKind::WouldBlock)
@@ -383,12 +383,12 @@ fn test_send_recv_dontwait() {
         thread::sleep(Duration::from_millis(10));
 
         unsafe {
-            errno_result(libc_utils::write_all_generic(
+            libc_utils::write_all_generic(
                 TEST_BYTES.as_ptr().cast(),
                 TEST_BYTES.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::send(peerfd, buf, count, 0),
-            ))
+            )
             .unwrap()
         };
 
@@ -396,12 +396,12 @@ fn test_send_recv_dontwait() {
         // This will block until the client sent us this data.
         let mut buffer = [0; TEST_BYTES.len()];
         unsafe {
-            errno_result(libc_utils::read_all_generic(
+            libc_utils::read_exact_generic(
                 buffer.as_mut_ptr().cast(),
                 buffer.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::recv(peerfd, buf, count, 0),
-            ))
+            )
             .unwrap()
         };
         assert_eq!(&buffer, TEST_BYTES);
@@ -430,12 +430,12 @@ fn test_send_recv_dontwait() {
     // sleep multiple times until we received everything.
 
     unsafe {
-        errno_result(libc_utils::read_all_generic(
+        libc_utils::read_exact_generic(
             buffer.as_mut_ptr().cast(),
             buffer.len(),
             libc_utils::RetryAfter(Duration::from_millis(10)),
             |buf, count| libc::recv(client_sockfd, buf, count, libc::MSG_DONTWAIT),
-        ))
+        )
         .unwrap()
     };
     assert_eq!(&buffer, TEST_BYTES);
@@ -444,12 +444,12 @@ fn test_send_recv_dontwait() {
 
     // Sending into the empty buffer should succeed without blocking.
     unsafe {
-        errno_result(libc_utils::write_all_generic(
+        libc_utils::write_all_generic(
             TEST_BYTES.as_ptr().cast(),
             TEST_BYTES.len(),
             libc_utils::NoRetry,
             |buf, count| libc::send(client_sockfd, buf, count, libc::MSG_DONTWAIT),
-        ))
+        )
         .unwrap()
     };
 
@@ -461,12 +461,12 @@ fn test_send_recv_dontwait() {
         let fill_buf = [1u8; 5_000_000];
         // This fills the socket receive buffer and thus should start blocking.
         let err = unsafe {
-            errno_result(libc_utils::write_all_generic(
+            libc_utils::write_all_generic(
                 fill_buf.as_ptr().cast(),
                 fill_buf.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::send(client_sockfd, buf, count, libc::MSG_DONTWAIT),
-            ))
+            )
             .unwrap_err()
         };
         assert_eq!(err.kind(), ErrorKind::WouldBlock)
@@ -489,23 +489,12 @@ fn test_write_read_nonblock() {
         // Yield back to client so that it starts receiving before we start sending.
         thread::sleep(Duration::from_millis(10));
 
-        let bytes_written = unsafe {
-            errno_result(libc_utils::write_all(
-                peerfd,
-                TEST_BYTES.as_ptr().cast(),
-                TEST_BYTES.len(),
-            ))
-            .unwrap()
-        };
-        assert_eq!(bytes_written as usize, TEST_BYTES.len());
+        libc_utils::write_all(peerfd, TEST_BYTES).unwrap();
 
         // The buffer should contain `TEST_BYTES` at the beginning.
         // This will block until the client sent us this data.
         let mut buffer = [0; TEST_BYTES.len()];
-        unsafe {
-            errno_result(libc_utils::read_all(peerfd, buffer.as_mut_ptr().cast(), buffer.len()))
-                .unwrap()
-        };
+        libc_utils::read_exact(peerfd, &mut buffer).unwrap();
         assert_eq!(&buffer, TEST_BYTES);
     });
 
@@ -536,12 +525,12 @@ fn test_write_read_nonblock() {
     // sleep multiple times until we read everything.
 
     unsafe {
-        errno_result(libc_utils::read_all_generic(
+        libc_utils::read_exact_generic(
             buffer.as_mut_ptr().cast(),
             buffer.len(),
             libc_utils::RetryAfter(Duration::from_millis(10)),
             |buf, count| libc::read(client_sockfd, buf, count),
-        ))
+        )
         .unwrap()
     };
     assert_eq!(&buffer, TEST_BYTES);
@@ -549,15 +538,7 @@ fn test_write_read_nonblock() {
     // Now we test non-blocking writing.
 
     // Writing into the empty buffer should succeed without blocking.
-    let bytes_written = unsafe {
-        errno_result(libc_utils::write_all(
-            client_sockfd,
-            TEST_BYTES.as_ptr().cast(),
-            TEST_BYTES.len(),
-        ))
-        .unwrap()
-    };
-    assert_eq!(bytes_written as usize, TEST_BYTES.len());
+    libc_utils::write_all(client_sockfd, TEST_BYTES).unwrap();
 
     if !cfg!(windows_host) {
         // Keep sending data until the buffer is full and we block.
@@ -567,12 +548,12 @@ fn test_write_read_nonblock() {
         let fill_buf = [1u8; 5_000_000];
         // This fills the socket receive buffer and thus should start blocking.
         let err = unsafe {
-            errno_result(libc_utils::write_all_generic(
+            libc_utils::write_all_generic(
                 fill_buf.as_ptr().cast(),
                 fill_buf.len(),
                 libc_utils::NoRetry,
                 |buf, count| libc::write(client_sockfd, buf, count),
-            ))
+            )
             .unwrap_err()
         };
         assert_eq!(err.kind(), ErrorKind::WouldBlock)
