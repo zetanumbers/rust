@@ -362,6 +362,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.stat(path, buf)?;
                 this.write_scalar(result, dest)?;
             }
+            "chmod" => {
+                let [path, mode] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*const _, libc::mode_t) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                let result = this.chmod(path, mode)?;
+                this.write_scalar(result, dest)?;
+            }
+            "fchmod" => {
+                let [fd, mode] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, libc::mode_t) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                let result = this.fchmod(fd, mode)?;
+                this.write_scalar(result, dest)?;
+            }
             "rename" => {
                 // FIXME: This does not have a direct test (#3179).
                 let [oldpath, newpath] = this.check_shim_sig(
@@ -536,7 +556,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
 
-            // Unnamed sockets and pipes
+            // Sockets and pipes
             "socketpair" => {
                 let [domain, type_, protocol, sv] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, i32, i32, *mut _) -> i32),

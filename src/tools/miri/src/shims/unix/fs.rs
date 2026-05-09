@@ -2,10 +2,7 @@
 
 use std::borrow::Cow;
 use std::ffi::OsString;
-use std::fs::{
-    self, DirBuilder, File, FileType, OpenOptions, TryLockError, read_dir, remove_dir, remove_file,
-    rename,
-};
+use std::fs::{self, DirBuilder, File, FileType, OpenOptions, TryLockError};
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{self, Path, PathBuf};
 use std::time::SystemTime;
@@ -341,6 +338,17 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 },
         })
     }
+
+    #[cfg(unix)]
+    fn host_permissions_from_mode(&self, mode: u32) -> InterpResult<'tcx, fs::Permissions> {
+        use std::os::unix::fs::PermissionsExt;
+        interp_ok(fs::Permissions::from_mode(mode))
+    }
+
+    #[cfg(not(unix))]
+    fn host_permissions_from_mode(&self, _mode: u32) -> InterpResult<'tcx, fs::Permissions> {
+        throw_unsup_format!("setting file permissions is only supported on Unix hosts")
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -542,7 +550,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(ErrorKind::PermissionDenied);
         }
 
-        let result = remove_file(path).map(|_| 0);
+        let result = fs::remove_file(path).map(|_| 0);
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
     }
 
@@ -844,6 +852,47 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_i32(0))
     }
 
+    fn chmod(&mut self, path_op: &OpTy<'tcx>, mode_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let path_ptr = this.read_pointer(path_op)?;
+        let mode = this.read_scalar(mode_op)?.to_uint(this.libc_ty_layout("mode_t").size)?;
+
+        if this.ptr_is_null(path_ptr)? {
+            return this.set_last_error_and_return_i32(LibcError("EFAULT"));
+        }
+        let path = this.read_path_from_c_str(path_ptr)?;
+
+        let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
+        if let Err(err) = fs::set_permissions(path, permissions) {
+            return this.set_last_error_and_return_i32(IoError::HostError(err));
+        }
+
+        interp_ok(Scalar::from_i32(0))
+    }
+
+    fn fchmod(&mut self, fd_op: &OpTy<'tcx>, mode_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let fd_num = this.read_scalar(fd_op)?.to_i32()?;
+        let mode = this.read_scalar(mode_op)?.to_uint(this.libc_ty_layout("mode_t").size)?;
+
+        let Some(fd) = this.machine.fds.get(fd_num) else {
+            return this.set_last_error_and_return_i32(LibcError("EBADF"));
+        };
+        let Some(file) = fd.downcast::<FileHandle>() else {
+            // The docs don't talk about what happens for non-regular files...
+            throw_unsup_format!("`fchmod` is only supported on regular files")
+        };
+
+        let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
+        if let Err(err) = file.file.set_permissions(permissions) {
+            return this.set_last_error_and_return_i32(IoError::HostError(err));
+        }
+
+        interp_ok(Scalar::from_i32(0))
+    }
+
     fn rename(
         &mut self,
         oldpath_op: &OpTy<'tcx>,
@@ -867,7 +916,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(ErrorKind::PermissionDenied);
         }
 
-        let result = rename(oldpath, newpath).map(|_| 0);
+        let result = fs::rename(oldpath, newpath).map(|_| 0);
 
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
     }
@@ -917,7 +966,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(ErrorKind::PermissionDenied);
         }
 
-        let result = remove_dir(path).map(|_| 0i32);
+        let result = fs::remove_dir(path).map(|_| 0i32);
 
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
     }
@@ -934,7 +983,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return interp_ok(Scalar::null_ptr(this));
         }
 
-        let result = read_dir(name);
+        let result = fs::read_dir(name);
 
         match result {
             Ok(dir_iter) => {
