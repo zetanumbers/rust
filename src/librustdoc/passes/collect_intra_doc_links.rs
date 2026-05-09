@@ -2022,7 +2022,8 @@ fn resolution_failure(
                 )
             };
             // ignore duplicates
-            let mut variants_seen = SmallVec::<[_; 3]>::new();
+            let mut variants_seen =
+                SmallVec::<[_; const { mem::variant_count::<ResolutionFailure<'_>>() }]>::new();
             for mut failure in kinds {
                 let variant = mem::discriminant(&failure);
                 if variants_seen.contains(&variant) {
