@@ -246,6 +246,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.write_null(dest)?;
             }
+            "gnu_get_libc_version"
+                if this.frame_in_std()
+                    && this.tcx.sess.target.env == rustc_target::spec::Env::Gnu =>
+            {
+                let [] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                // We have to be at least version 2.26 so that std does not call `res_init`.
+                // This returns a C string, so we have to add a null terminator.
+                let version = "2.26\0";
+                let version = this.allocate_str_dedup(version)?;
+                this.write_pointer(version.ptr(), dest)?;
+            }
 
             _ => return interp_ok(EmulateItemResult::NotSupported),
         };
