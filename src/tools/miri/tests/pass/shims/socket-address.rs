@@ -1,5 +1,6 @@
 //@ignore-target: windows # No socket address support on Windows
 //@compile-flags: -Zmiri-disable-isolation
+//@normalize-stderr-test: "address resolution failed: .*" -> "address resolution failed: $$MSG"
 
 use std::net::{
     IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, ToSocketAddrs,
@@ -29,5 +30,9 @@ fn test_address_resolution() {
         }
     }
     // We expect an IPv4 and an IPv6 address.
-    assert!(addr_count == 2)
+    assert!(addr_count == 2);
+
+    // Resolving an invalid name should error. Needs the port to even hit `getaddrinfo`.
+    let addr_str = "this-is-not-a-valid-address:80";
+    addr_str.to_socket_addrs().unwrap_err();
 }
