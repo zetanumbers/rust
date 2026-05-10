@@ -103,6 +103,89 @@ const UNIX_IO_ERROR_TABLE: &[(&str, std::io::ErrorKind)] = {
         ("EAGAIN", WouldBlock),
     ]
 };
+// On Unix hosts are can avoid round-tripping via `ErrorKind`, which can preserve more
+// details and leads to nicer output in `strerror_r`.
+#[cfg(unix)]
+const UNIX_ERRNO_TABLE: &[(&str, libc::c_int)] = &[
+    ("E2BIG", libc::E2BIG),
+    ("EACCES", libc::EACCES),
+    ("EADDRINUSE", libc::EADDRINUSE),
+    ("EADDRNOTAVAIL", libc::EADDRNOTAVAIL),
+    ("EAFNOSUPPORT", libc::EAFNOSUPPORT),
+    ("EAGAIN", libc::EAGAIN),
+    ("EALREADY", libc::EALREADY),
+    ("EBADF", libc::EBADF),
+    ("EBADMSG", libc::EBADMSG),
+    ("EBUSY", libc::EBUSY),
+    ("ECANCELED", libc::ECANCELED),
+    ("ECHILD", libc::ECHILD),
+    ("ECONNABORTED", libc::ECONNABORTED),
+    ("ECONNREFUSED", libc::ECONNREFUSED),
+    ("ECONNRESET", libc::ECONNRESET),
+    ("EDEADLK", libc::EDEADLK),
+    ("EDESTADDRREQ", libc::EDESTADDRREQ),
+    ("EDOM", libc::EDOM),
+    ("EDQUOT", libc::EDQUOT),
+    ("EEXIST", libc::EEXIST),
+    ("EFAULT", libc::EFAULT),
+    ("EFBIG", libc::EFBIG),
+    ("EHOSTUNREACH", libc::EHOSTUNREACH),
+    ("EIDRM", libc::EIDRM),
+    ("EILSEQ", libc::EILSEQ),
+    ("EINPROGRESS", libc::EINPROGRESS),
+    ("EINTR", libc::EINTR),
+    ("EINVAL", libc::EINVAL),
+    ("EIO", libc::EIO),
+    ("EISCONN", libc::EISCONN),
+    ("EISDIR", libc::EISDIR),
+    ("ELOOP", libc::ELOOP),
+    ("EMFILE", libc::EMFILE),
+    ("EMLINK", libc::EMLINK),
+    ("EMSGSIZE", libc::EMSGSIZE),
+    ("EMULTIHOP", libc::EMULTIHOP),
+    ("ENAMETOOLONG", libc::ENAMETOOLONG),
+    ("ENETDOWN", libc::ENETDOWN),
+    ("ENETRESET", libc::ENETRESET),
+    ("ENETUNREACH", libc::ENETUNREACH),
+    ("ENFILE", libc::ENFILE),
+    ("ENOBUFS", libc::ENOBUFS),
+    ("ENODEV", libc::ENODEV),
+    ("ENOENT", libc::ENOENT),
+    ("ENOEXEC", libc::ENOEXEC),
+    ("ENOLCK", libc::ENOLCK),
+    ("ENOLINK", libc::ENOLINK),
+    ("ENOMEM", libc::ENOMEM),
+    ("ENOMSG", libc::ENOMSG),
+    ("ENOPROTOOPT", libc::ENOPROTOOPT),
+    ("ENOSPC", libc::ENOSPC),
+    ("ENOSYS", libc::ENOSYS),
+    ("ENOTCONN", libc::ENOTCONN),
+    ("ENOTDIR", libc::ENOTDIR),
+    ("ENOTEMPTY", libc::ENOTEMPTY),
+    ("ENOTRECOVERABLE", libc::ENOTRECOVERABLE),
+    ("ENOTSOCK", libc::ENOTSOCK),
+    ("ENOTSUP", libc::ENOTSUP),
+    ("ENOTTY", libc::ENOTTY),
+    ("ENXIO", libc::ENXIO),
+    ("EOPNOTSUPP", libc::EOPNOTSUPP),
+    ("EOVERFLOW", libc::EOVERFLOW),
+    ("EOWNERDEAD", libc::EOWNERDEAD),
+    ("EPERM", libc::EPERM),
+    ("EPIPE", libc::EPIPE),
+    ("EPROTO", libc::EPROTO),
+    ("EPROTONOSUPPORT", libc::EPROTONOSUPPORT),
+    ("EPROTOTYPE", libc::EPROTOTYPE),
+    ("ERANGE", libc::ERANGE),
+    ("EROFS", libc::EROFS),
+    ("ESOCKTNOSUPPORT", libc::ESOCKTNOSUPPORT),
+    ("ESPIPE", libc::ESPIPE),
+    ("ESRCH", libc::ESRCH),
+    ("ESTALE", libc::ESTALE),
+    ("ETIMEDOUT", libc::ETIMEDOUT),
+    ("ETXTBSY", libc::ETXTBSY),
+    ("EWOULDBLOCK", libc::EWOULDBLOCK),
+    ("EXDEV", libc::EXDEV),
+];
 // This mapping should match `decode_error_kind` in
 // <https://github.com/rust-lang/rust/blob/HEAD/library/std/src/sys/io/error/windows.rs>.
 const WINDOWS_IO_ERROR_TABLE: &[(&str, std::io::ErrorKind)] = {
@@ -289,17 +372,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // That lets us use `Error::from_raw_os_error`, which has a much better `Display`
             // impl than what we get by going through `ErrorKind`.
             #[cfg(unix)]
-            {
-                // For now, we only add the constants we need to make `std` tests happy.
-                const ERRNOS: &[(&str, libc::c_int)] = &[
-                    ("ENOENT", libc::ENOENT),
-                    ("ENOTDIR", libc::ENOTDIR),
-                    ("ENOTSOCK", libc::ENOTSOCK),
-                ];
-                for &(name, errno) in ERRNOS {
-                    if target_errnum == this.eval_libc_i32(name) {
-                        return interp_ok(Some(io::Error::from_raw_os_error(errno)));
-                    }
+            for &(name, errno) in UNIX_ERRNO_TABLE {
+                if target_errnum == this.eval_libc_i32(name) {
+                    return interp_ok(Some(io::Error::from_raw_os_error(errno)));
                 }
             }
             // For other hosts or other constants, we fall back to translating via `ErrorKind`.
