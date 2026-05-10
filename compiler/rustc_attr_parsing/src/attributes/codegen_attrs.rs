@@ -119,10 +119,7 @@ impl SingleAttributeParser for ExportNameParser {
 
     fn convert(cx: &mut AcceptContext<'_, '_>, args: &ArgParser) -> Option<AttributeKind> {
         let nv = cx.expect_name_value(args, cx.attr_span, None)?;
-        let Some(name) = nv.value_as_str() else {
-            cx.adcx().expected_string_literal(nv.value_span, Some(nv.value_as_lit()));
-            return None;
-        };
+        let name = cx.expect_string_literal(nv)?;
         if name.as_str().contains('\0') {
             // `#[export_name = ...]` will be converted to a null-terminated string,
             // so it may not contain any null characters.
@@ -484,8 +481,7 @@ fn parse_tf_attribute(
         }
 
         // Use value
-        let Some(value_str) = value.value_as_str() else {
-            cx.adcx().expected_string_literal(value.value_span, Some(value.value_as_lit()));
+        let Some(value_str) = cx.expect_string_literal(value) else {
             return features;
         };
         for feature in value_str.as_str().split(",") {
@@ -600,8 +596,10 @@ impl SingleAttributeParser for SanitizeParser {
                         return;
                     }
                     None => {
-                        cx.adcx()
-                            .expected_string_literal(value.value_span, Some(value.value_as_lit()));
+                        cx.adcx().expected_specific_argument_strings(
+                            value.value_span,
+                            &[sym::on, sym::off],
+                        );
                         return;
                     }
                 };
