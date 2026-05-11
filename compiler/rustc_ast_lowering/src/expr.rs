@@ -1157,8 +1157,10 @@ impl<'hir> LoweringContext<'_, 'hir> {
         hir::ExprKind::Use(self.lower_expr(expr), self.lower_span(use_kw_span))
     }
 
-    // Lowers closure expressions, including the `move(...)` desugaring for
-    // plain closures.
+    // Entry point for `ExprKind::Closure`. Plain closures go through
+    // `lower_expr_plain_closure_with_move_exprs`, which can wrap the lowered
+    // closure in `let` initializers for `move(...)`. Coroutine closures keep the
+    // existing coroutine-specific path and reject `move(...)` for now.
     fn lower_expr_closure_expr(&mut self, e: &Expr, closure: &Closure) -> hir::Expr<'hir> {
         let expr_hir_id = self.lower_node_id(e.id);
         let attrs = self.lower_attrs(expr_hir_id, &e.attrs, e.span, Target::from_expr(e));
@@ -1199,6 +1201,36 @@ impl<'hir> LoweringContext<'_, 'hir> {
         }
     }
 
+    /// Lowers a plain closure expression and wraps it in an outer block if the
+    /// closure body used `move(...)`.
+    ///
+    /// The lowering is split this way because `move(...)` initializers must be
+    /// evaluated before the closure is created, but the closure body must still
+    /// lower each `move(...)` occurrence as a use of the synthetic local that
+    /// will be introduced by that outer block. For example:
+    ///
+    /// ```ignore (illustrative)
+    /// || (move(move(foo.clone()))).len()
+    /// ```
+    ///
+    /// first lowers the closure body roughly as `|| __move_expr_1.len()` while
+    /// recording two occurrences:
+    ///
+    /// ```ignore (illustrative)
+    /// move(foo.clone()) -> __move_expr_0
+    /// move(move(foo.clone())) -> __move_expr_1
+    /// ```
+    ///
+    /// This method then lowers the recorded initializers in order and builds the
+    /// surrounding block:
+    ///
+    /// ```ignore (illustrative)
+    /// {
+    ///     let __move_expr_0 = foo.clone();
+    ///     let __move_expr_1 = __move_expr_0;
+    ///     || __move_expr_1.len()
+    /// }
+    /// ```
     fn lower_expr_plain_closure_with_move_exprs(
         &mut self,
         expr_hir_id: HirId,
@@ -1283,6 +1315,9 @@ impl<'hir> LoweringContext<'_, 'hir> {
         self.expr(whole_span, hir::ExprKind::Block(block, None))
     }
 
+    // Lowers the actual plain closure node and body. The body is lowered while a
+    // `MoveExprState` is active, so `move(...)` occurrences become synthetic
+    // local uses and the caller can later add the matching initializers.
     fn lower_expr_closure(
         &mut self,
         attrs: &[rustc_hir::Attribute],
@@ -1393,6 +1428,10 @@ impl<'hir> LoweringContext<'_, 'hir> {
         (binder, params)
     }
 
+    // Coroutine closures are lowered separately because they build a different
+    // body shape. This path pushes `None` for `move_expr_bindings`, so any
+    // `move(...)` in the coroutine body gets a targeted unsupported-position
+    // error instead of being collected like a plain closure occurrence.
     fn lower_expr_coroutine_closure(
         &mut self,
         binder: &ClosureBinder,
