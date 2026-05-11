@@ -1641,7 +1641,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let rng = this.machine.rng.get_mut();
 
             // Generate a random unique suffix.
-            let unique_suffix = SUBSTITUTIONS.choose_multiple(rng, 6).collect::<String>();
+            let unique_suffix =
+                (0..6).map(|_| SUBSTITUTIONS.choose(rng).unwrap()).collect::<String>();
 
             // Replace the template string with the random string.
             template_bytes[start_pos..end_pos].copy_from_slice(unique_suffix.as_bytes());
