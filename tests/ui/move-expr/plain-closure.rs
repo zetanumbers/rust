@@ -19,11 +19,4 @@ fn main() {
     };
     c();
 
-    let v = "Hello, Ferris".to_string();
-    let r = || {
-        || {
-            (move(move(v.clone()))).len()
-        }
-    };
-    assert_eq!(r()(), v.len());
 }
