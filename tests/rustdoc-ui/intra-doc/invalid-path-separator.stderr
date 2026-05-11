@@ -2,7 +2,7 @@ error: unresolved link to `std:path`
   --> $DIR/invalid-path-separator.rs:5:6
    |
 LL | //! [std:path]
-   |      ^^^^^^^^ has invalid path separator
+   |      ^^^^^^^^ invalid path separator
    |
    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
 note: the lint level is defined here
@@ -15,25 +15,25 @@ error: unresolved link to `std:::path`
   --> $DIR/invalid-path-separator.rs:8:6
    |
 LL | //! [std:::path]
-   |      ^^^^^^^^^^ has invalid path separator
+   |      ^^^^^^^^^^ invalid path separator
 
 error: unresolved link to `std::::path`
   --> $DIR/invalid-path-separator.rs:11:6
    |
 LL | //! [std::::path]
-   |      ^^^^^^^^^^^ has invalid path separator
+   |      ^^^^^^^^^^^ invalid path separator
 
 error: unresolved link to `std:::::path`
   --> $DIR/invalid-path-separator.rs:14:6
    |
 LL | //! [std:::::path]
-   |      ^^^^^^^^^^^^ has invalid path separator
+   |      ^^^^^^^^^^^^ invalid path separator
 
 error: unresolved link to `std2::::path`
   --> $DIR/invalid-path-separator.rs:17:6
    |
 LL | //! [std2::::path]
-   |      ^^^^^^^^^^^^ has invalid path separator
+   |      ^^^^^^^^^^^^ invalid path separator
 
 error: aborting due to 5 previous errors
 

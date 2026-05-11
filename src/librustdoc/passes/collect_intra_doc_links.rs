@@ -2105,7 +2105,7 @@ fn resolution_failure(
                     // See if this was a module: `[path]` or `[std::io::nope]`
                     if let Some(module) = last_found_module {
                         let note = if path_is_invalid {
-                            "has invalid path separator".into()
+                            "invalid path separator".into()
                         } else if partial_res.is_some() {
                             // Part of the link resolved; e.g. `std::io::nonexistent`
                             let module_name = tcx.item_name(module);
@@ -2340,7 +2340,7 @@ fn report_malformed_generics(
                     );
                     "fully-qualified syntax is unsupported"
                 }
-                MalformedGenerics::InvalidPathSeparator => "has invalid path separator",
+                MalformedGenerics::InvalidPathSeparator => "invalid path separator",
                 MalformedGenerics::TooManyAngleBrackets => "too many angle brackets",
                 MalformedGenerics::EmptyAngleBrackets => "empty angle brackets",
             };
