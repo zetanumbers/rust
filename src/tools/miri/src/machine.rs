@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::{fmt, process};
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rustc_abi::{Align, ExternAbi, Size};
 use rustc_apfloat::{Float, FloatConvert};
 use rustc_ast::expand::allocator::{self, SpecialAllocatorMethod};
