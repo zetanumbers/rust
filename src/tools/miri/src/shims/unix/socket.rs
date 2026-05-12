@@ -1470,8 +1470,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // This is a *non-blocking* write.
         let result = this.write_to_host(stream, length, buffer_ptr)?;
-        // FIXME: When the host does a short write, we should emit an epoll edge -- at least for targets for which tokio assumes no short writes:
-        // <https://github.com/tokio-rs/tokio/blob/6c03e03898d71eca976ee1ad8481cf112ae722ba/tokio/src/io/poll_evented.rs#L240>
         match result {
             Err(IoError::HostError(e))
                 if matches!(e.kind(), io::ErrorKind::NotConnected | io::ErrorKind::WouldBlock) =>
@@ -1483,6 +1481,45 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // On Windows hosts, `send` can return WSAENOTCONN where EAGAIN or EWOULDBLOCK
                 // would be returned on UNIX-like systems. We thus remap this error to an EWOULDBLOCK.
                 interp_ok(Err(IoError::HostError(io::ErrorKind::WouldBlock.into())))
+            }
+            Ok(bytes_written) if bytes_written < length => {
+                // We had a short write. On Unix hosts using the `epoll` and `kqueue` backends, a
+                // short write means that the write buffer is full. We update the readiness
+                // accordingly, which means that next time we see "writable" we will report an epoll
+                // edge. Some applications (e.g. tokio) rely on this behavior; see
+                // <https://github.com/tokio-rs/tokio/blob/HEAD/tokio/src/io/poll_evented.rs#L244-L264>.
+                if cfg!(any(
+                    // epoll
+                    target_os = "android",
+                    target_os = "illumos",
+                    target_os = "linux",
+                    target_os = "redox",
+                    // kqueue
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "ios",
+                    target_os = "macos",
+                    target_os = "netbsd",
+                    target_os = "openbsd",
+                    target_os = "tvos",
+                    target_os = "visionos",
+                    target_os = "watchos",
+                )) {
+                    socket.io_readiness.borrow_mut().writable = false;
+                    this.update_epoll_active_events(socket.clone(), /* force_edge */ false)?;
+                } else {
+                    // On hosts which don't use the `epoll` or `kqueue` backends, a short write
+                    // doesn't imply a full write buffer. However, the target we are emulating might
+                    // guarantee this behavior. To prevent applications from being stuck on such
+                    // targets waiting on a new readiness event, we emit a new edge which still
+                    // contains a writable readiness. This should trick the applications into trying
+                    // another write which would then return EWOULDBLOCK should it really be full.
+                    // This results in an unrealistic execution but we don't have another way of
+                    // finding out whether the write buffer is full. The "default case" of linux
+                    // host and linux target isn't affected by this.
+                    this.update_epoll_active_events(socket.clone(), /* force_edge */ true)?;
+                }
+                interp_ok(result)
             }
             result => interp_ok(result),
         }
@@ -1556,8 +1593,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             length,
             buffer_ptr,
         )?;
-        // FIXME: When the host does a short read, we should emit an epoll edge -- at least for targets for which tokio assumes no short reads:
-        // <https://github.com/tokio-rs/tokio/blob/6c03e03898d71eca976ee1ad8481cf112ae722ba/tokio/src/io/poll_evented.rs#L182>
         match result {
             Err(IoError::HostError(e))
                 if matches!(e.kind(), io::ErrorKind::NotConnected | io::ErrorKind::WouldBlock) =>
@@ -1569,6 +1604,47 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // On Windows hosts, `recv` can return WSAENOTCONN where EAGAIN or EWOULDBLOCK
                 // would be returned on UNIX-like systems. We thus remap this error to an EWOULDBLOCK.
                 interp_ok(Err(IoError::HostError(io::ErrorKind::WouldBlock.into())))
+            }
+            Ok(bytes_read) if bytes_read < length && bytes_read > 0 => {
+                // We had a short read. (Note that reading 0 bytes is guaranteed to indicate EOF,
+                // and can never happen spuriously, so we have to exclude that case.) On Unix hosts
+                // using the `epoll` and `kqueue` backends, a short read means that the read buffer
+                // is empty. We update the readiness accordingly, which means that next time we see
+                // "readable" we will report an epoll edge. Some applications (e.g. tokio) rely on
+                // this behavior; see
+                // <https://github.com/tokio-rs/tokio/blob/HEAD/tokio/src/io/poll_evented.rs#L190-L210>
+                if cfg!(any(
+                    // epoll
+                    target_os = "android",
+                    target_os = "illumos",
+                    target_os = "linux",
+                    target_os = "redox",
+                    // kqueue
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "ios",
+                    target_os = "macos",
+                    target_os = "netbsd",
+                    target_os = "openbsd",
+                    target_os = "tvos",
+                    target_os = "visionos",
+                    target_os = "watchos",
+                )) {
+                    socket.io_readiness.borrow_mut().readable = false;
+                    this.update_epoll_active_events(socket.clone(), /* force_edge */ false)?;
+                } else {
+                    // On hosts which don't use the `epoll` or `kqueue` backends, a short read
+                    // doesn't imply an empty read buffer. However, the target we are emulating
+                    // might guarantee this behavior. To prevent applications from being stuck on
+                    // such targets waiting on a new readiness event, we emit a new edge which still
+                    // contains a readable readiness. This should trick the applications into trying
+                    // another read which would then return EWOULDBLOCK should it really be empty.
+                    // This results in an unrealistic execution but we don't have another way of
+                    // finding out whether the read buffer is empty. The "default case" of linux
+                    // host and linux target isn't affected by this.
+                    this.update_epoll_active_events(socket.clone(), /* force_edge */ true)?;
+                }
+                interp_ok(result)
             }
             result => interp_ok(result),
         }
