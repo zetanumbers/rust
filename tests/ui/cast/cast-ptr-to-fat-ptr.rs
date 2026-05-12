@@ -1,4 +1,6 @@
 //! Regression test for https://github.com/rust-lang/rust/issues/30615
+//! This test confirms that valid code casting a thin pointer to a fat pointer does not cause ICE
+//! and compiles.
 
 //@ run-pass
 fn main() {
