@@ -871,7 +871,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
         if let Err(err) = fs::set_permissions(path, permissions) {
-            return this.set_last_error_and_return_i32(IoError::HostError(err));
+            return this.set_last_error_and_return_i32(err);
         }
 
         interp_ok(Scalar::from_i32(0))
@@ -899,7 +899,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
         if let Err(err) = file.file.set_permissions(permissions) {
-            return this.set_last_error_and_return_i32(IoError::HostError(err));
+            return this.set_last_error_and_return_i32(err);
         }
 
         interp_ok(Scalar::from_i32(0))
