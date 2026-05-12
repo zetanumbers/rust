@@ -490,10 +490,18 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         }
         trace!(?curr_projected_ty);
 
-        // Need to renormalize `a` as typecheck may have failed to normalize
-        // higher-ranked aliases if normalization was ambiguous due to inference.
-        let a = self.normalize(ty::Unnormalized::new_wip(a), locations);
-        let ty = self.normalize(ty::Unnormalized::new_wip(curr_projected_ty.ty), locations);
+        // Need to renormalize `a` in the old solver as typecheck may have failed
+        // to normalize higher-ranked aliases if normalization was ambiguous due
+        // to inference.
+        //
+        // We properly normalize higher-ranked aliases during writeback with the
+        // new solver, so this is no longer necessary.
+        let mut a = a;
+        let mut ty = curr_projected_ty.ty;
+        if !self.infcx.next_trait_solver() {
+            a = self.normalize(ty::Unnormalized::new_wip(a), locations);
+            ty = self.normalize(ty::Unnormalized::new_wip(ty), locations);
+        }
         self.relate_types(ty, v.xform(ty::Contravariant), a, locations, category)?;
 
         Ok(())
