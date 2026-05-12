@@ -109,7 +109,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
 
         let all_fields_1zst = |variant: &VariantDef| -> InterpResult<'tcx, _> {
             for field in &variant.fields {
-                let ty = field.ty(*self.tcx, args);
+                let ty = field.ty(*self.tcx, args).skip_norm_wip();
                 let layout = self.layout_of(ty)?;
                 if !layout.is_1zst() {
                     return interp_ok(false);
@@ -134,7 +134,8 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         if relevant_variant.fields.len() != 1 {
             return interp_ok(layout);
         }
-        let inner = relevant_variant.fields[FieldIdx::from_u32(0)].ty(*self.tcx, args);
+        let inner =
+            relevant_variant.fields[FieldIdx::from_u32(0)].ty(*self.tcx, args).skip_norm_wip();
         let inner = self.layout_of(inner)?;
 
         // Check if the inner type is one of the NPO-guaranteed ones.

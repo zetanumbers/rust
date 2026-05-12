@@ -1423,10 +1423,14 @@ impl Hash for FieldDef {
 }
 
 impl<'tcx> FieldDef {
-    /// Returns the type of this field. The resulting type is not normalized. The `arg` is
-    /// typically obtained via the second field of [`TyKind::Adt`].
-    pub fn ty(&self, tcx: TyCtxt<'tcx>, args: GenericArgsRef<'tcx>) -> Ty<'tcx> {
-        tcx.type_of(self.did).instantiate(tcx, args).skip_norm_wip()
+    /// Returns the type of this field. The `args` are typically obtained via
+    /// the second field of [`TyKind::Adt`].
+    pub fn ty(
+        &self,
+        tcx: TyCtxt<'tcx>,
+        args: GenericArgsRef<'tcx>,
+    ) -> Unnormalized<'tcx, Ty<'tcx>> {
+        tcx.type_of(self.did).instantiate(tcx, args)
     }
 
     /// Computes the `Ident` of this variant by looking up the `Span`
@@ -2496,8 +2500,13 @@ fn typetree_from_ty_impl_inner<'tcx>(
 
                 for (field_idx, field_def) in adt_def.all_fields().enumerate() {
                     let field_ty = field_def.ty(tcx, args);
-                    let field_tree =
-                        typetree_from_ty_impl_inner(tcx, field_ty, depth + 1, visited, false);
+                    let field_tree = typetree_from_ty_impl_inner(
+                        tcx,
+                        field_ty.skip_norm_wip(),
+                        depth + 1,
+                        visited,
+                        false,
+                    );
 
                     let field_offset = layout.fields.offset(field_idx).bytes_usize();
 

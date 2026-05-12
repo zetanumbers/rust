@@ -389,6 +389,7 @@ impl<'tcx> SizeSkeleton<'tcx> {
             ty::Ref(_, pointee, _) | ty::RawPtr(pointee, _) => {
                 let non_zero = !ty.is_raw_ptr();
 
+                tcx.assert_fully_normalized(typing_env, pointee);
                 let tail = tcx.struct_tail_raw(
                     pointee,
                     &ObligationCause::dummy(),
@@ -463,7 +464,7 @@ impl<'tcx> SizeSkeleton<'tcx> {
                     let i = VariantIdx::from_usize(i);
                     let fields = def.variant(i).fields.iter().map(|field| {
                         SizeSkeleton::compute_inner(
-                            field.ty(tcx, args),
+                            field.ty(tcx, args).skip_norm_wip(),
                             tcx,
                             typing_env,
                             span,
@@ -950,7 +951,7 @@ where
                     match this.variants {
                         Variants::Single { index } => {
                             let field = &def.variant(index).fields[FieldIdx::from_usize(i)];
-                            TyMaybeWithLayout::Ty(field.ty(tcx, args))
+                            TyMaybeWithLayout::Ty(field.ty(tcx, args).skip_norm_wip())
                         }
                         Variants::Empty => panic!("there is no field in Variants::Empty types"),
 

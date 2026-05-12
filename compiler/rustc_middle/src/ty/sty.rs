@@ -1277,7 +1277,10 @@ impl<'tcx> Ty<'tcx> {
             ScalableElt::ElementCount(_) => (NumScalableVectors::for_non_tuple(), *def),
             ScalableElt::Container => (
                 NumScalableVectors::from_field_count(def.non_enum_variant().fields.len())?,
-                def.non_enum_variant().fields[FieldIdx::ZERO].ty(tcx, args).ty_adt_def()?,
+                def.non_enum_variant().fields[FieldIdx::ZERO]
+                    .ty(tcx, args)
+                    .skip_norm_wip()
+                    .ty_adt_def()?,
             ),
         };
         let Some(ScalableElt::ElementCount(element_count)) = vec_def.repr().scalable else {
@@ -1286,7 +1289,7 @@ impl<'tcx> Ty<'tcx> {
         let variant = vec_def.non_enum_variant();
         assert_eq!(variant.fields.len(), 1);
         let field_ty = variant.fields[FieldIdx::ZERO].ty(tcx, args);
-        Some((element_count, field_ty, num_vectors))
+        Some((element_count, field_ty.skip_norm_wip(), num_vectors))
     }
 
     pub fn simd_size_and_type(self, tcx: TyCtxt<'tcx>) -> (u64, Ty<'tcx>) {
@@ -1297,7 +1300,7 @@ impl<'tcx> Ty<'tcx> {
         let variant = def.non_enum_variant();
         assert_eq!(variant.fields.len(), 1);
         let field_ty = variant.fields[FieldIdx::ZERO].ty(tcx, args);
-        let Array(f0_elem_ty, f0_len) = field_ty.kind() else {
+        let Array(f0_elem_ty, f0_len) = field_ty.skip_norm_wip().kind() else {
             bug!("Simd type has non-array field type {field_ty:?}")
         };
         // FIXME(repr_simd): https://github.com/rust-lang/rust/pull/78863#discussion_r522784112

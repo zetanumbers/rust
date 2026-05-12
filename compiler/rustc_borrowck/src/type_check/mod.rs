@@ -481,7 +481,9 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 tcx,
                 proj,
                 |ty| self.normalize(ty::Unnormalized::new_wip(ty), locations),
-                |ty, variant_index, field, ()| PlaceTy::field_ty(tcx, ty, variant_index, field),
+                |ty, variant_index, field, ()| {
+                    PlaceTy::field_ty(tcx, ty, variant_index, field).skip_norm_wip()
+                },
                 |_| unreachable!(),
             );
             curr_projected_ty = projected_ty;
@@ -1878,7 +1880,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
             ProjectionElem::Field(field, fty) => {
                 let fty = self.normalize(ty::Unnormalized::new_wip(fty), location);
                 let ty = PlaceTy::field_ty(tcx, base_ty.ty, base_ty.variant_index, field);
-                let ty = self.normalize(ty::Unnormalized::new_wip(ty), location);
+                let ty = self.normalize(ty, location);
                 debug!(?fty, ?ty);
 
                 if let Err(terr) = self.relate_types(
@@ -2198,7 +2200,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 let variant = &def.variant(variant_index);
                 let adj_field_index = active_field_index.unwrap_or(field_index);
                 if let Some(field) = variant.fields.get(adj_field_index) {
-                    Ok(self.normalize(ty::Unnormalized::new_wip(field.ty(tcx, args)), location))
+                    Ok(self.normalize(field.ty(tcx, args), location))
                 } else {
                     Err(FieldAccessError::OutOfRange { field_count: variant.fields.len() })
                 }
@@ -2513,8 +2515,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 else {
                     continue;
                 };
-                let dest_ty = dest_field.ty(tcx, dest_args);
-                let borrowed_ty = borrowed_field.ty(tcx, borrowed_args);
+                let dest_ty = dest_field.ty(tcx, dest_args).skip_norm_wip();
+                let borrowed_ty = borrowed_field.ty(tcx, borrowed_args).skip_norm_wip();
                 if let (
                     ty::Ref(borrow_region, _, Mutability::Mut),
                     ty::Ref(ref_region, _, Mutability::Not),
