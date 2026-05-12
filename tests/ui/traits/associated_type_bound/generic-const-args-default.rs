@@ -1,11 +1,12 @@
 //! Regression test for <https://github.com/rust-lang/rust/issues/156293>
-//@ edition: 2024
 //@ check-pass
 
-#![feature(min_generic_const_args, transmutability)]
+#![feature(min_generic_const_args)]
+
+trait Bar<const N: bool = false> {}
 
 trait Foo {
-    type AssocB: std::mem::TransmuteFrom<()>;
+    type AssocB: Bar;
 }
 
 fn main() {}
