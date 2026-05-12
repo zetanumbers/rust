@@ -159,13 +159,14 @@ impl EarlyLintPass for NonAsciiIdents {
         use rustc_span::Span;
         use unicode_security::GeneralSecurityProfile;
 
-        let check_non_ascii_idents = cx.builder.lint_level(NON_ASCII_IDENTS).level != Level::Allow;
+        let check_non_ascii_idents =
+            cx.builder.lint_level_spec(NON_ASCII_IDENTS).level != Level::Allow;
         let check_uncommon_codepoints =
-            cx.builder.lint_level(UNCOMMON_CODEPOINTS).level != Level::Allow;
+            cx.builder.lint_level_spec(UNCOMMON_CODEPOINTS).level != Level::Allow;
         let check_confusable_idents =
-            cx.builder.lint_level(CONFUSABLE_IDENTS).level != Level::Allow;
+            cx.builder.lint_level_spec(CONFUSABLE_IDENTS).level != Level::Allow;
         let check_mixed_script_confusables =
-            cx.builder.lint_level(MIXED_SCRIPT_CONFUSABLES).level != Level::Allow;
+            cx.builder.lint_level_spec(MIXED_SCRIPT_CONFUSABLES).level != Level::Allow;
 
         if !check_non_ascii_idents
             && !check_uncommon_codepoints

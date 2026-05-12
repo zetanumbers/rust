@@ -1,4 +1,4 @@
-use rustc_middle::lint::LevelAndSource;
+use rustc_middle::lint::LevelSpec;
 use rustc_session::lint::builtin::NON_EXHAUSTIVE_OMITTED_PATTERNS;
 use rustc_span::ErrorGuaranteed;
 use tracing::instrument;
@@ -65,7 +65,9 @@ pub(crate) fn lint_nonexhaustive_missing_variants<'p, 'tcx>(
     scrut_ty: RevealedTy<'tcx>,
 ) -> Result<(), ErrorGuaranteed> {
     if !matches!(
-        rcx.tcx.lint_level_at_node(NON_EXHAUSTIVE_OMITTED_PATTERNS, rcx.match_lint_level).level,
+        rcx.tcx
+            .lint_level_spec_at_node(NON_EXHAUSTIVE_OMITTED_PATTERNS, rcx.match_lint_level)
+            .level,
         rustc_session::lint::Level::Allow
     ) {
         let witnesses = collect_nonexhaustive_missing_variants(rcx, pat_column)?;
@@ -89,8 +91,8 @@ pub(crate) fn lint_nonexhaustive_missing_variants<'p, 'tcx>(
         // arm. This no longer makes sense so we warn users, to avoid silently breaking their
         // usage of the lint.
         for arm in arms {
-            let LevelAndSource { level, src, .. } =
-                rcx.tcx.lint_level_at_node(NON_EXHAUSTIVE_OMITTED_PATTERNS, arm.arm_data);
+            let LevelSpec { level, src, .. } =
+                rcx.tcx.lint_level_spec_at_node(NON_EXHAUSTIVE_OMITTED_PATTERNS, arm.arm_data);
             if !matches!(level, rustc_session::lint::Level::Allow) {
                 rcx.tcx.dcx().emit_warn(NonExhaustiveOmittedPatternLintOnArm {
                     span: arm.pat.data().span,

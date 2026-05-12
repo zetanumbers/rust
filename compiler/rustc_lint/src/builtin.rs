@@ -30,7 +30,6 @@ use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LocalDefId};
 use rustc_hir::intravisit::FnKind as HirFnKind;
 use rustc_hir::{self as hir, Body, FnDecl, ImplItemImplKind, PatKind, PredicateOrigin, find_attr};
 use rustc_middle::bug;
-use rustc_middle::lint::LevelAndSource;
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{
@@ -695,8 +694,8 @@ impl<'tcx> LateLintPass<'tcx> for MissingDebugImplementations {
         }
 
         // Avoid listing trait impls if the trait is allowed.
-        let LevelAndSource { level, .. } =
-            cx.tcx.lint_level_at_node(MISSING_DEBUG_IMPLEMENTATIONS, item.hir_id());
+        let level =
+            cx.tcx.lint_level_spec_at_node(MISSING_DEBUG_IMPLEMENTATIONS, item.hir_id()).level;
         if level == Level::Allow {
             return;
         }

@@ -7,7 +7,7 @@
 
 use rustc_hir as hir;
 use rustc_macros::Diagnostic;
-use rustc_middle::lint::{LevelAndSource, LintLevelSource};
+use rustc_middle::lint::{LevelSpec, LintLevelSource};
 use rustc_session::lint;
 use tracing::debug;
 
@@ -110,7 +110,7 @@ pub(crate) fn should_have_doc_example(cx: &DocContext<'_>, item: &clean::Item) -
     {
         return false;
     }
-    let LevelAndSource { level, src, .. } = cx.tcx.lint_level_at_node(
+    let LevelSpec { level, src, .. } = cx.tcx.lint_level_spec_at_node(
         crate::lint::MISSING_DOC_CODE_EXAMPLES,
         cx.tcx.local_def_id_to_hir_id(def_id),
     );

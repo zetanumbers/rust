@@ -175,7 +175,8 @@ impl<'tcx> UnsafetyVisitor<'_, 'tcx> {
 
     /// Whether the `unsafe_op_in_unsafe_fn` lint is `allow`ed at the current HIR node.
     fn unsafe_op_in_unsafe_fn_allowed(&self) -> bool {
-        self.tcx.lint_level_at_node(UNSAFE_OP_IN_UNSAFE_FN, self.hir_context).level == Level::Allow
+        self.tcx.lint_level_spec_at_node(UNSAFE_OP_IN_UNSAFE_FN, self.hir_context).level
+            == Level::Allow
     }
 
     /// Handle closures/coroutines/inline-consts, which is unsafecked with their parent body.
@@ -234,7 +235,7 @@ impl<'a, 'tcx> Visitor<'a, 'tcx> for UnsafetyVisitor<'a, 'tcx> {
             }
             BlockSafety::ExplicitUnsafe(hir_id) => {
                 let used = matches!(
-                    self.tcx.lint_level_at_node(UNUSED_UNSAFE, hir_id).level,
+                    self.tcx.lint_level_spec_at_node(UNUSED_UNSAFE, hir_id).level,
                     Level::Allow
                 );
                 self.in_safety_context(
