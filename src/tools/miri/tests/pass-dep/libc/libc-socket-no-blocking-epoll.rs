@@ -25,6 +25,9 @@ fn main() {
     test_recv_nonblock();
     #[cfg(not(windows_hosts))]
     test_send_nonblock();
+    test_shutdown_read_write();
+    test_shutdown_read();
+    test_shutdown_write();
 }
 
 /// Test that connecting to a server socket works when the client
@@ -339,4 +342,82 @@ fn test_send_nonblock() {
     };
 
     reader_thread.join().unwrap();
+}
+
+/// Test that the EPOLLHUP and EPOLLRDHUP readiness are set when both
+/// the read and write ends of a socket are closed.
+fn test_shutdown_read_write() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let epfd = unsafe { libc::epoll_create1(0) };
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || net::accept_ipv4(server_sockfd).unwrap());
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    epoll_ctl_add(epfd, client_sockfd, EPOLLET | EPOLLHUP | EPOLLRDHUP | EPOLLIN).unwrap();
+
+    // Close the read and write end of the socket.
+    unsafe { libc::shutdown(client_sockfd, libc::SHUT_RDWR) };
+
+    // Ensure that the "read end closed", "write end closed", and "readable" readiness are set.
+    check_epoll_wait::<8>(
+        epfd,
+        &[Ev { events: EPOLLRDHUP | EPOLLHUP | EPOLLIN, data: client_sockfd }],
+        -1,
+    );
+
+    server_thread.join().unwrap();
+}
+
+/// Test that the EPOLLRDHUP readiness is set when the read
+/// end of a socket is closed.
+fn test_shutdown_read() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let epfd = unsafe { libc::epoll_create1(0) };
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || net::accept_ipv4(server_sockfd).unwrap());
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    epoll_ctl_add(epfd, client_sockfd, EPOLLET | EPOLLHUP | EPOLLRDHUP).unwrap();
+
+    // Close the read end of the socket.
+    unsafe { libc::shutdown(client_sockfd, libc::SHUT_RD) };
+
+    // Ensure that the "read end closed" readiness is set.
+    check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLRDHUP, data: client_sockfd }], -1);
+
+    server_thread.join().unwrap();
+}
+
+/// Test that the EPOLLRDHUP readiness is set when the write
+/// end of the peer socket is closed.
+fn test_shutdown_write() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let epfd = unsafe { libc::epoll_create1(0) };
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || {
+        let (peerfd, _) = net::accept_ipv4(server_sockfd).unwrap();
+        // Close the write end of the peer socket.
+        unsafe { libc::shutdown(peerfd, libc::SHUT_WR) };
+    });
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    epoll_ctl_add(epfd, client_sockfd, EPOLLET | EPOLLHUP | EPOLLRDHUP).unwrap();
+
+    // Ensure that the "read end closed" readiness is set when
+    // the write end of the peer is closed.
+    check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLRDHUP, data: client_sockfd }], -1);
+
+    server_thread.join().unwrap();
 }
