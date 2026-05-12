@@ -90,8 +90,6 @@ macro_rules! declare_passes {
 
         static PASS_NAMES: LazyLock<FxIndexSet<&str>> = LazyLock::new(|| {
             let mut set = FxIndexSet::default();
-            // Fake marker pass
-            set.insert("PreCodegen");
             $(
                 $(
                     set.extend(pass_names!($mod_name : $pass_name $( { $($ident),* } )? ));
@@ -144,7 +142,6 @@ declare_passes! {
     };
     mod deref_separator : Derefer;
     mod dest_prop : DestinationPropagation;
-    pub mod dump_mir : Marker;
     mod early_otherwise_branch : EarlyOtherwiseBranch;
     mod erase_deref_temps : EraseDerefTemps;
     mod elaborate_box_derefs : ElaborateBoxDerefs;
@@ -770,8 +767,6 @@ pub(crate) fn run_optimization_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'
             // Cleanup for human readability, off by default.
             &prettify::ReorderBasicBlocks,
             &prettify::ReorderLocals,
-            // Dump the end result for testing and debugging purposes.
-            &dump_mir::Marker("PreCodegen"),
         ],
         Some(MirPhase::Runtime(RuntimePhase::Optimized)),
         optimizations,
