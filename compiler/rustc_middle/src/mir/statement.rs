@@ -6,7 +6,7 @@ use tracing::{debug, instrument};
 
 use super::interpret::GlobalAlloc;
 use super::*;
-use crate::ty::CoroutineArgsExt;
+use crate::ty::{CoroutineArgsExt, Unnormalized};
 
 ///////////////////////////////////////////////////////////////////////////
 // Statements
@@ -120,7 +120,7 @@ impl<'tcx> PlaceTy<'tcx> {
         self_ty: Ty<'tcx>,
         variant_idx: Option<VariantIdx>,
         f: FieldIdx,
-    ) -> Ty<'tcx> {
+    ) -> Unnormalized<'tcx, Ty<'tcx>> {
         if let Some(variant_index) = variant_idx {
             match *self_ty.kind() {
                 ty::Adt(adt_def, args) if adt_def.is_enum() => {
@@ -132,9 +132,9 @@ impl<'tcx> PlaceTy<'tcx> {
                         bug!("variant {variant_index:?} of coroutine out of range: {self_ty:?}");
                     };
 
-                    variant.nth(f.index()).unwrap_or_else(|| {
+                    Unnormalized::new_wip(variant.nth(f.index()).unwrap_or_else(|| {
                         bug!("field {f:?} out of range of variant: {self_ty:?} {variant_idx:?}")
-                    })
+                    }))
                 }
                 _ => bug!("can't downcast non-adt non-coroutine type: {self_ty:?}"),
             }
@@ -143,29 +143,32 @@ impl<'tcx> PlaceTy<'tcx> {
                 ty::Adt(adt_def, args) if !adt_def.is_enum() => {
                     adt_def.non_enum_variant().fields[f].ty(tcx, args)
                 }
-                ty::Closure(_, args) => args
-                    .as_closure()
-                    .upvar_tys()
-                    .get(f.index())
-                    .copied()
-                    .unwrap_or_else(|| bug!("field {f:?} out of range: {self_ty:?}")),
-                ty::CoroutineClosure(_, args) => args
-                    .as_coroutine_closure()
-                    .upvar_tys()
-                    .get(f.index())
-                    .copied()
-                    .unwrap_or_else(|| bug!("field {f:?} out of range: {self_ty:?}")),
+                ty::Closure(_, args) => Unnormalized::dummy(
+                    args.as_closure()
+                        .upvar_tys()
+                        .get(f.index())
+                        .copied()
+                        .unwrap_or_else(|| bug!("field {f:?} out of range: {self_ty:?}")),
+                ),
+                ty::CoroutineClosure(_, args) => Unnormalized::dummy(
+                    args.as_coroutine_closure()
+                        .upvar_tys()
+                        .get(f.index())
+                        .copied()
+                        .unwrap_or_else(|| bug!("field {f:?} out of range: {self_ty:?}")),
+                ),
                 // Only prefix fields (upvars and current state) are
                 // accessible without a variant index.
-                ty::Coroutine(_, args) => {
+                ty::Coroutine(_, args) => Unnormalized::dummy(
                     args.as_coroutine().prefix_tys().get(f.index()).copied().unwrap_or_else(|| {
                         bug!("field {f:?} out of range of prefixes for {self_ty}")
-                    })
-                }
-                ty::Tuple(tys) => tys
-                    .get(f.index())
-                    .copied()
-                    .unwrap_or_else(|| bug!("field {f:?} out of range: {self_ty:?}")),
+                    }),
+                ),
+                ty::Tuple(tys) => Unnormalized::dummy(
+                    tys.get(f.index())
+                        .copied()
+                        .unwrap_or_else(|| bug!("field {f:?} out of range: {self_ty:?}")),
+                ),
                 _ => bug!("can't project out of {self_ty:?}"),
             }
         }
@@ -199,6 +202,8 @@ impl<'tcx> PlaceTy<'tcx> {
         self,
         tcx: TyCtxt<'tcx>,
         elem: &ProjectionElem<V, T>,
+        // FIXME(#155345): This should take `Unnormalized` as input and only
+        // normalize when actually required.
         mut structurally_normalize: impl FnMut(Ty<'tcx>) -> Ty<'tcx>,
         mut handle_field: impl FnMut(Ty<'tcx>, Option<VariantIdx>, FieldIdx, T) -> Ty<'tcx>,
         mut handle_opaque_cast_and_subtype: impl FnMut(T) -> Ty<'tcx>,
@@ -443,7 +448,7 @@ impl<'tcx> Place<'tcx> {
         let ty = self.ty(local_decls, tcx).ty;
         let ty::Adt(adt, args) = ty.kind() else { panic!("projecting to field of non-ADT {ty}") };
         let field = &adt.non_enum_variant().fields[idx];
-        let field_ty = field.ty(tcx, args);
+        let field_ty = field.ty(tcx, args).skip_norm_wip();
         self.project_deeper(&[ProjectionElem::Field(idx, field_ty)], tcx)
     }
 

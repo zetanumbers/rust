@@ -1314,7 +1314,7 @@ pub(crate) fn check_static_item<'tcx>(
             let tail = tcx.struct_tail_raw(
                 item_ty,
                 &ObligationCause::dummy(),
-                |ty| wfcx.deeply_normalize(span, loc, Unnormalized::new_wip(ty)),
+                |ty| wfcx.deeply_normalize(span, loc, ty),
                 || {},
             );
 

@@ -2476,19 +2476,21 @@ impl<'tcx> LateLintPass<'tcx> for InvalidValue {
             init: InitKind,
         ) -> Option<InitError> {
             let mut field_err = variant.fields.iter().find_map(|field| {
-                ty_find_init_error(cx, field.ty(cx.tcx, args), init).map(|mut err| {
-                    if !field.did.is_local() {
-                        err
-                    } else if err.span.is_none() {
-                        err.span = Some(cx.tcx.def_span(field.did));
-                        write!(&mut err.message, " (in this {descr})").unwrap();
-                        err
-                    } else {
-                        InitError::from(format!("in this {descr}"))
-                            .spanned(cx.tcx.def_span(field.did))
-                            .nested(err)
-                    }
-                })
+                ty_find_init_error(cx, field.ty(cx.tcx, args).skip_norm_wip(), init).map(
+                    |mut err| {
+                        if !field.did.is_local() {
+                            err
+                        } else if err.span.is_none() {
+                            err.span = Some(cx.tcx.def_span(field.did));
+                            write!(&mut err.message, " (in this {descr})").unwrap();
+                            err
+                        } else {
+                            InitError::from(format!("in this {descr}"))
+                                .spanned(cx.tcx.def_span(field.did))
+                                .nested(err)
+                        }
+                    },
+                )
             });
 
             // Check if this ADT has a constrained layout (like `NonNull` and friends).
