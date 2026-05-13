@@ -77,23 +77,23 @@ pub struct ShallowLintLevelMap {
 pub fn reveal_actual_level(
     sess: &Session,
     lint: LintId,
-    probe_for_lint_level: impl Fn(LintId) -> Option<(Level, Option<LintExpectationId>, LintLevelSource)>,
+    probe_for_lint_level: impl Fn(LintId) -> Option<LevelAndSource>,
 ) -> LevelAndSource {
     let level = probe_for_lint_level(lint);
 
     // If `level` is none then we actually assume the default level for this lint.
-    let (mut level, mut lint_id, mut src) = level.unwrap_or_else(|| {
-        (lint.lint.default_level(sess.edition()), None, LintLevelSource::Default)
+    let mut level = level.unwrap_or_else(|| LevelAndSource {
+        level: lint.lint.default_level(sess.edition()),
+        lint_id: None,
+        src: LintLevelSource::Default,
     });
 
     // If we're about to issue a warning, check at the last minute for any
     // directives against the `warnings` lint group. If, for example, there's an
     // `allow(warnings)` in scope then we want to respect that instead.
-    if level == Level::Warn {
-        let warnings_level = probe_for_lint_level(LintId::of(builtin::WARNINGS));
-        if let Some((configured_warning_level, configured_lint_id, configured_src)) = warnings_level
-        {
-            let respect_warnings_lint_group = match configured_warning_level {
+    if level.level == Level::Warn {
+        if let Some(configured_level) = probe_for_lint_level(LintId::of(builtin::WARNINGS)) {
+            let respect_warnings_lint_group = match configured_level.level {
                 // -Wwarnings is a no-op.
                 Level::Warn => false,
                 // Some warnings cannot be denied from the `warnings` lint group, only individually.
@@ -105,33 +105,31 @@ pub fn reveal_actual_level(
                 Level::Expect => true,
                 Level::ForceWarn => {
                     sess.dcx().span_delayed_bug(
-                        configured_src.span(),
+                        configured_level.src.span(),
                         "cannot --force-warn the `warnings` lint group",
                     );
                     false
                 }
             };
             if respect_warnings_lint_group {
-                level = configured_warning_level;
-                lint_id = configured_lint_id;
-                src = configured_src;
+                level = configured_level;
             }
         }
     }
 
     // Ensure that we never exceed the `--cap-lints` argument unless the source is a --force-warn
-    level = if let LintLevelSource::CommandLine(_, Level::ForceWarn) = src {
-        level
+    level.level = if let LintLevelSource::CommandLine(_, Level::ForceWarn) = level.src {
+        level.level
     } else {
-        cmp::min(level, sess.opts.lint_cap.unwrap_or(Level::Forbid))
+        cmp::min(level.level, sess.opts.lint_cap.unwrap_or(Level::Forbid))
     };
 
     if let Some(driver_level) = sess.driver_lint_caps.get(&lint) {
         // Ensure that we never exceed driver level.
-        level = cmp::min(*driver_level, level);
+        level.level = cmp::min(level.level, *driver_level);
     }
 
-    LevelAndSource { level, lint_id, src }
+    level
 }
 
 impl ShallowLintLevelMap {
@@ -144,11 +142,11 @@ impl ShallowLintLevelMap {
         tcx: TyCtxt<'_>,
         id: LintId,
         start: HirId,
-    ) -> Option<(Level, Option<LintExpectationId>, LintLevelSource)> {
+    ) -> Option<LevelAndSource> {
         if let Some(map) = self.specs.get(&start.local_id)
-            && let Some(&LevelAndSource { level, lint_id, src }) = map.get(&id)
+            && let Some(level) = map.get(&id)
         {
-            return Some((level, lint_id, src));
+            return Some(*level);
         }
 
         let mut owner = start.owner;
@@ -160,9 +158,9 @@ impl ShallowLintLevelMap {
                 specs = &tcx.shallow_lint_levels_on(owner).specs;
             }
             if let Some(map) = specs.get(&parent.local_id)
-                && let Some(&LevelAndSource { level, lint_id, src }) = map.get(&id)
+                && let Some(level) = map.get(&id)
             {
-                return Some((level, lint_id, src));
+                return Some(*level);
             }
         }
 

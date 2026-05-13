@@ -91,17 +91,17 @@ impl LintLevelSets {
         id: LintId,
         mut idx: LintStackIndex,
         aux: Option<&FxIndexMap<LintId, LevelAndSource>>,
-    ) -> Option<(Level, Option<LintExpectationId>, LintLevelSource)> {
+    ) -> Option<LevelAndSource> {
         if let Some(specs) = aux
-            && let Some(&LevelAndSource { level, lint_id, src }) = specs.get(&id)
+            && let Some(level) = specs.get(&id)
         {
-            return Some((level, lint_id, src));
+            return Some(*level);
         }
 
         loop {
             let LintSet { ref specs, parent } = self.list[idx];
-            if let Some(&LevelAndSource { level, lint_id, src }) = specs.get(&id) {
-                return Some((level, lint_id, src));
+            if let Some(level) = specs.get(&id) {
+                return Some(*level);
             }
             if idx == COMMAND_LINE {
                 return None;
