@@ -84,10 +84,8 @@ impl LintLevelSets {
         sess: &Session,
     ) -> LevelAndSource {
         let lint = LintId::of(lint);
-        let (level, mut src) = self.raw_lint_id_level(lint, idx, aux);
-        let (level, lint_id) = reveal_actual_level(level, &mut src, sess, lint, |id| {
-            self.raw_lint_id_level(id, idx, aux)
-        });
+        let (level, lint_id, src) =
+            reveal_actual_level(sess, lint, |id| self.raw_lint_id_level(id, idx, aux));
         LevelAndSource { level, lint_id, src }
     }
 

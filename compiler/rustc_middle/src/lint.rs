@@ -71,20 +71,18 @@ pub struct ShallowLintLevelMap {
     pub specs: SortedMap<ItemLocalId, FxIndexMap<LintId, LevelAndSource>>,
 }
 
-/// From an initial level and source, verify the effect of special annotations:
-/// `warnings` lint level and lint caps.
+/// Verify the effect of special annotations: `warnings` lint level and lint caps.
 ///
 /// The return of this function is suitable for diagnostics.
 pub fn reveal_actual_level(
-    level: Option<(Level, Option<LintExpectationId>)>,
-    src: &mut LintLevelSource,
     sess: &Session,
     lint: LintId,
-    probe_for_lint_level: impl FnOnce(
+    probe_for_lint_level: impl Fn(
         LintId,
-    )
-        -> (Option<(Level, Option<LintExpectationId>)>, LintLevelSource),
-) -> (Level, Option<LintExpectationId>) {
+    ) -> (Option<(Level, Option<LintExpectationId>)>, LintLevelSource),
+) -> (Level, Option<LintExpectationId>, LintLevelSource) {
+    let (level, mut src) = probe_for_lint_level(lint);
+
     // If `level` is none then we actually assume the default level for this lint.
     let (mut level, mut lint_id) =
         level.unwrap_or_else(|| (lint.lint.default_level(sess.edition()), None));
@@ -116,7 +114,7 @@ pub fn reveal_actual_level(
             if respect_warnings_lint_group {
                 level = configured_warning_level;
                 lint_id = configured_lint_id;
-                *src = warnings_src;
+                src = warnings_src;
             }
         }
     }
@@ -133,7 +131,7 @@ pub fn reveal_actual_level(
         level = cmp::min(*driver_level, level);
     }
 
-    (level, lint_id)
+    (level, lint_id, src)
 }
 
 impl ShallowLintLevelMap {
@@ -179,10 +177,8 @@ impl ShallowLintLevelMap {
         lint: LintId,
         cur: HirId,
     ) -> LevelAndSource {
-        let (level, mut src) = self.probe_for_lint_level(tcx, lint, cur);
-        let (level, lint_id) = reveal_actual_level(level, &mut src, tcx.sess, lint, |lint| {
-            self.probe_for_lint_level(tcx, lint, cur)
-        });
+        let (level, lint_id, src) =
+            reveal_actual_level(tcx.sess, lint, |lint| self.probe_for_lint_level(tcx, lint, cur));
         LevelAndSource { level, lint_id, src }
     }
 }
