@@ -247,6 +247,16 @@ impl<'tcx> Visitor<'tcx> for SpanMapVisitor<'tcx> {
         self.maybe_typeck_results = maybe_typeck_results;
     }
 
+    fn visit_anon_const(&mut self, ct: &'tcx hir::AnonConst) {
+        // FIXME: Typeck'ing anon consts leads to ICEs in rustc if the parent body wasn't typeck'ed
+        //        yet. See #156418. Figure out what the best and proper solution for this is. Until
+        //        then, let's prevent `typeck` from being called on anon consts by not setting
+        //        `maybe_typeck_results` to `Some(_)`.
+        let maybe_typeck_results = self.maybe_typeck_results.take();
+        self.visit_body(self.tcx.hir_body(ct.body));
+        self.maybe_typeck_results = maybe_typeck_results;
+    }
+
     fn visit_path(&mut self, path: &hir::Path<'tcx>, _id: HirId) {
         if self.handle_macro(path.span) {
             return;
@@ -318,9 +328,9 @@ impl<'tcx> Visitor<'tcx> for SpanMapVisitor<'tcx> {
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
         match expr.kind {
             ExprKind::MethodCall(segment, ..) => {
-                // Exprs *have* to exist in a body, so typeck results should always be available.
-                let typeck_results = self.maybe_typeck_results().unwrap();
-                if let Some(def_id) = typeck_results.type_dependent_def_id(expr.hir_id) {
+                if let Some(typeck_results) = self.maybe_typeck_results()
+                    && let Some(def_id) = typeck_results.type_dependent_def_id(expr.hir_id)
+                {
                     self.matches.insert(segment.ident.span.into(), self.link_for_def(def_id));
                 }
             }
