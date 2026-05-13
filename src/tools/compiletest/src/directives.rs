@@ -171,7 +171,7 @@ pub(crate) struct TestProps {
     /// None for non-UI tests, and for auxiliary crates used by UI tests.
     pub(crate) pass_fail_mode: Option<PassFailMode>,
     // Ignore `--pass` overrides from the command line for this test.
-    pub(crate) ignore_pass: bool,
+    pub(crate) no_pass_override: bool,
     // rustdoc will test the output of the `--test` option
     pub(crate) check_test_line_numbers_match: bool,
     // customized normalization rules
@@ -244,7 +244,6 @@ mod directives {
     pub(crate) const UNSET_RUSTC_ENV: &str = "unset-rustc-env";
     pub(crate) const FORBID_OUTPUT: &str = "forbid-output";
     pub(crate) const CHECK_TEST_LINE_NUMBERS_MATCH: &str = "check-test-line-numbers-match";
-    pub(crate) const IGNORE_PASS: &str = "ignore-pass";
     pub(crate) const FAILURE_STATUS: &str = "failure-status";
     pub(crate) const DONT_CHECK_FAILURE_STATUS: &str = "dont-check-failure-status";
     pub(crate) const RUN_RUSTFIX: &str = "run-rustfix";
@@ -298,7 +297,7 @@ impl TestProps {
             incremental: false,
             known_bug: false,
             pass_fail_mode: None,
-            ignore_pass: false,
+            no_pass_override: false,
             check_test_line_numbers_match: false,
             normalize_stdout: vec![],
             normalize_stderr: vec![],
@@ -332,7 +331,7 @@ impl TestProps {
 
         // copy over select properties to the aux build:
         props.incremental_dir = self.incremental_dir.clone();
-        props.ignore_pass = true;
+        props.no_pass_override = true;
         props.load_from(testfile, revision, config);
 
         props
