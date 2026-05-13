@@ -83,10 +83,7 @@ impl LintLevelSets {
         aux: Option<&FxIndexMap<LintId, LevelAndSource>>,
         sess: &Session,
     ) -> LevelAndSource {
-        let lint = LintId::of(lint);
-        let (level, lint_id, src) =
-            reveal_actual_level(sess, lint, |id| self.raw_lint_id_level(id, idx, aux));
-        LevelAndSource { level, lint_id, src }
+        reveal_actual_level(sess, LintId::of(lint), |id| self.raw_lint_id_level(id, idx, aux))
     }
 
     fn raw_lint_id_level(

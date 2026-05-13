@@ -80,7 +80,7 @@ pub fn reveal_actual_level(
     probe_for_lint_level: impl Fn(
         LintId,
     ) -> (Option<(Level, Option<LintExpectationId>)>, LintLevelSource),
-) -> (Level, Option<LintExpectationId>, LintLevelSource) {
+) -> LevelAndSource {
     let (level, mut src) = probe_for_lint_level(lint);
 
     // If `level` is none then we actually assume the default level for this lint.
@@ -131,7 +131,7 @@ pub fn reveal_actual_level(
         level = cmp::min(*driver_level, level);
     }
 
-    (level, lint_id, src)
+    LevelAndSource { level, lint_id, src }
 }
 
 impl ShallowLintLevelMap {
@@ -177,9 +177,7 @@ impl ShallowLintLevelMap {
         lint: LintId,
         cur: HirId,
     ) -> LevelAndSource {
-        let (level, lint_id, src) =
-            reveal_actual_level(tcx.sess, lint, |lint| self.probe_for_lint_level(tcx, lint, cur));
-        LevelAndSource { level, lint_id, src }
+        reveal_actual_level(tcx.sess, lint, |lint| self.probe_for_lint_level(tcx, lint, cur))
     }
 }
 
