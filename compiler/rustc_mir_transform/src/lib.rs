@@ -1,7 +1,7 @@
 // tidy-alphabetical-start
-#![feature(box_patterns)]
 #![feature(const_type_name)]
 #![feature(cow_is_borrowed)]
+#![feature(deref_patterns)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
@@ -241,7 +241,7 @@ fn remap_mir_for_const_eval_select<'tcx>(
         let terminator = bb.terminator.as_mut().expect("invalid terminator");
         match terminator.kind {
             TerminatorKind::Call {
-                func: Operand::Constant(box ConstOperand { ref const_, .. }),
+                func: Operand::Constant(ConstOperand { ref const_, .. }),
                 ref mut args,
                 destination,
                 target,
