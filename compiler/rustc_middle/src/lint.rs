@@ -56,9 +56,54 @@ impl LintLevelSource {
 /// Convenience helper for things that are frequently used together.
 #[derive(Copy, Clone, Debug, StableHash, Encodable, Decodable)]
 pub struct LevelSpec {
-    pub level: Level,
-    pub lint_id: Option<LintExpectationId>,
+    // This field *must* be private. It must be set in tandem with `lint_id`, only in
+    // `LevelSpec::new`, because only certain `level`/`lint_id` combinations are valid. See
+    // `LevelSpec::new` for those combinations.
+    //
+    // If you are thinking right now that `level` and `lint_id` should be combined into a single
+    // type that excludes the invalid combinations, that's a reasonable thought, but in practice
+    // it's painful because `level` needs to be used by itself, without `lint_id`, in many places.
+    // Making the fields private prevents invalid combinations while retaining the flexibility of
+    // two separate fields.
+    level: Level,
+
+    // This field *must* be private. See the comment on `level`.
+    lint_id: Option<LintExpectationId>,
+
     pub src: LintLevelSource,
+}
+
+impl LevelSpec {
+    // Panics if an invalid `level`/`lint_id` combination is given.
+    pub fn new(
+        level: Level,
+        lint_id: Option<LintExpectationId>,
+        src: LintLevelSource,
+    ) -> LevelSpec {
+        match (level, lint_id) {
+            (Level::Allow | Level::Warn | Level::Deny | Level::Forbid, None) => {}
+            (Level::Expect, Some(_)) => {}
+            (Level::ForceWarn, _) => {}
+            _ => panic!("invalid level/lint_id combination"),
+        }
+        LevelSpec { level, lint_id, src }
+    }
+
+    pub fn level(self) -> Level {
+        self.level
+    }
+
+    pub fn is_allow(self) -> bool {
+        self.level == Level::Allow
+    }
+
+    pub fn is_expect(self) -> bool {
+        self.level == Level::Expect
+    }
+
+    pub fn lint_id(self) -> Option<LintExpectationId> {
+        self.lint_id
+    }
 }
 
 /// Return type for the `shallow_lint_levels_on` query.
@@ -82,10 +127,8 @@ pub fn reveal_actual_level_spec(
     let level_spec = probe_for_lint_level_spec(lint);
 
     // If `level` is none then we actually assume the default level for this lint.
-    let mut level_spec = level_spec.unwrap_or_else(|| LevelSpec {
-        level: lint.lint.default_level(sess.edition()),
-        lint_id: None,
-        src: LintLevelSource::Default,
+    let mut level_spec = level_spec.unwrap_or_else(|| {
+        LevelSpec::new(lint.lint.default_level(sess.edition()), None, LintLevelSource::Default)
     });
 
     // If we're about to issue a warning, check at the last minute for any

@@ -129,7 +129,7 @@ fn lints_that_dont_need_to_run(tcx: TyCtxt<'_>, (): ()) -> UnordSet<LintId> {
             let level_spec =
                 root_map.lint_level_spec_at_node(tcx, LintId::of(lint), hir::CRATE_HIR_ID);
             // Only include lints that are allowed at crate root or by default.
-            matches!(level_spec.level, Level::Allow)
+            level_spec.is_allow()
                 || (matches!(level_spec.src, LintLevelSource::Default)
                     && lint.default_level(tcx.sess.edition()) == Level::Allow)
         })
@@ -142,7 +142,7 @@ fn lints_that_dont_need_to_run(tcx: TyCtxt<'_>, (): ()) -> UnordSet<LintId> {
         // All lints that appear with a non-allow level must be run.
         for (_, specs) in map.specs.iter() {
             for (lint, level_spec) in specs.iter() {
-                if !matches!(level_spec.level, Level::Allow) {
+                if !level_spec.is_allow() {
                     dont_need_to_run.remove(lint);
                 }
             }
@@ -520,15 +520,15 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
             };
             for &id in ids {
                 // ForceWarn and Forbid cannot be overridden
-                if let Some(LevelSpec { level: Level::ForceWarn | Level::Forbid, .. }) =
-                    self.current_specs().get(&id)
+                if let Some(level_spec) = self.current_specs().get(&id)
+                    && matches!(level_spec.level(), Level::ForceWarn | Level::Forbid)
                 {
                     continue;
                 }
 
                 if self.check_gated_lint(id, DUMMY_SP, true) {
                     let src = LintLevelSource::CommandLine(lint_flag_val, level);
-                    self.insert(id, LevelSpec { level, lint_id: None, src });
+                    self.insert(id, LevelSpec::new(level, None, src));
                 }
             }
         }
@@ -537,9 +537,14 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
     /// Attempts to insert the `id` to `LevelSpec` map entry. If unsuccessful
     /// (e.g. if a forbid was already inserted on the same scope), then emits a
     /// diagnostic with no change to `specs`.
-    fn insert_spec(&mut self, id: LintId, LevelSpec { level, lint_id, src }: LevelSpec) {
-        let LevelSpec { level: old_level, src: old_src, .. } =
-            self.provider.get_lint_level_spec(id.lint, self.sess);
+    fn insert_spec(&mut self, id: LintId, level_spec: LevelSpec) {
+        let level = level_spec.level();
+        let lint_id = level_spec.lint_id();
+        let src = level_spec.src;
+
+        let old_level_spec = self.provider.get_lint_level_spec(id.lint, self.sess);
+        let old_level = old_level_spec.level();
+        let old_src = old_level_spec.src;
 
         // Setting to a non-forbid level is an error if the lint previously had
         // a forbid level. Note that this is not necessarily true even with a
@@ -622,14 +627,14 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
         match (old_level, level) {
             // If the new level is an expectation store it in `ForceWarn`
             (Level::ForceWarn, Level::Expect) => {
-                self.insert(id, LevelSpec { level: Level::ForceWarn, lint_id, src: old_src })
+                self.insert(id, LevelSpec::new(Level::ForceWarn, lint_id, old_src))
             }
             // Keep `ForceWarn` level but drop the expectation
             (Level::ForceWarn, _) => {
-                self.insert(id, LevelSpec { level: Level::ForceWarn, lint_id: None, src: old_src })
+                self.insert(id, LevelSpec::new(Level::ForceWarn, None, old_src))
             }
             // Set the lint level as normal
-            _ => self.insert(id, LevelSpec { level, lint_id, src }),
+            _ => self.insert(id, LevelSpec::new(level, lint_id, src)),
         };
     }
 
@@ -644,7 +649,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
             if attr.is_automatically_derived_attr() {
                 self.insert(
                     LintId::of(SINGLE_USE_LIFETIMES),
-                    LevelSpec { level: Level::Allow, lint_id: None, src: LintLevelSource::Default },
+                    LevelSpec::new(Level::Allow, None, LintLevelSource::Default),
                 );
                 continue;
             }
@@ -653,7 +658,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
             if attr.is_doc_hidden() {
                 self.insert(
                     LintId::of(MISSING_DOCS),
-                    LevelSpec { level: Level::Allow, lint_id: None, src: LintLevelSource::Default },
+                    LevelSpec::new(Level::Allow, None, LintLevelSource::Default),
                 );
                 continue;
             }
@@ -866,7 +871,7 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                 let src = LintLevelSource::Node { name, span: sp, reason };
                 for &id in ids {
                     if self.check_gated_lint(id, sp, false) {
-                        self.insert_spec(id, LevelSpec { level, lint_id, src });
+                        self.insert_spec(id, LevelSpec::new(level, lint_id, src));
                     }
                 }
 
@@ -897,12 +902,13 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
         }
 
         if self.lint_added_lints && !is_crate_node {
-            for (id, &LevelSpec { level, ref src, .. }) in self.current_specs().iter() {
+            for (id, level_spec) in self.current_specs().iter() {
                 if !id.lint.crate_level_only {
                     continue;
                 }
 
-                let LintLevelSource::Node { name: lint_attr_name, span: lint_attr_span, .. } = *src
+                let LintLevelSource::Node { name: lint_attr_name, span: lint_attr_span, .. } =
+                    level_spec.src
                 else {
                     continue;
                 };
@@ -910,7 +916,10 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                 self.emit_span_lint(
                     UNUSED_ATTRIBUTES,
                     lint_attr_span.into(),
-                    IgnoredUnlessCrateSpecified { level: level.as_str(), name: lint_attr_name },
+                    IgnoredUnlessCrateSpecified {
+                        level: level_spec.level().as_str(),
+                        name: lint_attr_name,
+                    },
                 );
                 // don't set a separate error for every lint in the group
                 break;
