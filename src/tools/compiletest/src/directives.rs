@@ -618,7 +618,11 @@ impl Config {
     }
 
     fn parse_pp_exact(&self, line: &DirectiveLine<'_>) -> Option<Utf8PathBuf> {
-        if let Some(s) = self.parse_name_value_directive(line, "pp-exact") {
+        // Unusually, `//@ pp-exact` can be used with or without a colon, so to avoid a panic
+        // in the parse method we need to make sure there is a colon before calling it.
+        if line.value_after_colon().is_some()
+            && let Some(s) = self.parse_name_value_directive(line, "pp-exact")
+        {
             Some(Utf8PathBuf::from(&s))
         } else if self.parse_name_directive(line, "pp-exact") {
             line.file_path.file_name().map(Utf8PathBuf::from)
@@ -648,10 +652,17 @@ impl Config {
     }
 
     fn parse_name_directive(&self, line: &DirectiveLine<'_>, directive: &str) -> bool {
-        // FIXME(Zalathar): Ideally, this should raise an error if a name-only
-        // directive is followed by a colon, since that's the wrong syntax.
-        // But we would need to fix tests that rely on the current behaviour.
-        line.name == directive
+        if line.name != directive {
+            return false;
+        }
+
+        if line.value_after_colon().is_some() {
+            let &DirectiveLine { file_path, line_number, .. } = line;
+            panic!(
+                "{file_path}:{line_number}: directive `{directive}` must not be followed by a colon"
+            );
+        }
+        true
     }
 
     fn parse_name_value_directive(
@@ -665,10 +676,9 @@ impl Config {
             return None;
         };
 
-        // FIXME(Zalathar): This silently discards directives with a matching
-        // name but no colon. Unfortunately, some directives (e.g. "pp-exact")
-        // currently rely on _not_ panicking here.
-        let value = line.value_after_colon()?;
+        let value = line.value_after_colon().unwrap_or_else(|| {
+            panic!("{file_path}:{line_number}: directive `{directive}` must be followed by a colon and value");
+        });
         debug!("{}: {}", directive, value);
         let value = expand_variables(value.to_owned(), self);
 
