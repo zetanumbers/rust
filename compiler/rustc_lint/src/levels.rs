@@ -9,7 +9,6 @@ use rustc_hir as hir;
 use rustc_hir::HirId;
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_index::IndexVec;
-use rustc_middle::bug;
 use rustc_middle::hir::nested_filter;
 use rustc_middle::lint::{
     LevelSpec, LintExpectation, LintLevelSource, ShallowLintLevelMap, emit_lint_base,
@@ -659,25 +658,23 @@ impl<'s, P: LintLevelsProvider> LintLevelsBuilder<'s, P> {
                 continue;
             }
 
-            let (level, lint_id) = match Level::from_attr(attr.name(), || attr.id()) {
+            let (level, lint_id) = match Level::from_opt_symbol(attr.name()) {
                 None => continue,
-                // This is the only lint level with a `LintExpectationId` that can be created from
-                // an attribute.
-                Some((Level::Expect, Some(unstable_id))) if let Some(hir_id) = source_hir_id => {
-                    let LintExpectationId::Unstable { lint_index: None, attr_id: _ } = unstable_id
-                    else {
-                        bug!("stable id Level::from_attr")
+                // `Expect` is the only lint level with a `LintExpectationId` that can be created
+                // from an attribute.
+                Some(Level::Expect) => {
+                    let id = if let Some(hir_id) = source_hir_id {
+                        LintExpectationId::Stable {
+                            hir_id,
+                            attr_index: attr_index.try_into().unwrap(),
+                            lint_index: None,
+                        }
+                    } else {
+                        LintExpectationId::Unstable { attr_id: attr.id(), lint_index: None }
                     };
-
-                    let stable_id = LintExpectationId::Stable {
-                        hir_id,
-                        attr_index: attr_index.try_into().unwrap(),
-                        lint_index: None,
-                    };
-
-                    (Level::Expect, Some(stable_id))
+                    (Level::Expect, Some(id))
                 }
-                Some((level, id)) => (level, id),
+                Some(level) => (level, None),
             };
 
             let Some(mut metas) = attr.meta_item_list() else { continue };
